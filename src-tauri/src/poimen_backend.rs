@@ -298,6 +298,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent_silent_since: agent.and_then(|a| a.silent_since),
         agent_progress: agent.and_then(|a| a.progress),
         agent_kind: agent.and_then(|a| a.kind.clone()),
+        agent_tone: agent.and_then(|a| a.tone.clone()),
         agent_title: agent.and_then(|a| a.title.clone()),
         records: terminal
             .records
@@ -309,6 +310,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
                 message: r.message.clone(),
                 progress: r.progress,
                 kind: r.kind.clone(),
+                tone: r.tone.clone(),
                 title: r.title.clone(),
             })
             .collect(),
@@ -924,6 +926,7 @@ pub fn backend_event(event: &Event) -> BackendEvent {
         message_at,
         progress,
         kind,
+        tone,
         title,
         ..
     } = event
@@ -933,14 +936,15 @@ pub fn backend_event(event: &Event) -> BackendEvent {
             data["agent_message"] = json!(message);
             data["agent_message_at"] = json!(message_at);
         }
-        if let Some(progress) = progress {
-            data["agent_progress"] = json!(progress);
-        }
-        if let Some(kind) = kind {
-            data["agent_kind"] = json!(kind);
-        }
-        if let Some(title) = title {
-            data["agent_title"] = json!(title);
+        for (key, value) in [
+            ("agent_progress", json!(progress)),
+            ("agent_kind", json!(kind)),
+            ("agent_tone", json!(tone)),
+            ("agent_title", json!(title)),
+        ] {
+            if !value.is_null() {
+                data[key] = value;
+            }
         }
         return BackendEvent {
             kind: crate::backend::AGENT_STATUS_CHANGED.into(),
@@ -1024,6 +1028,7 @@ mod tests {
             message_at: Some(1),
             progress: Some(40),
             kind: None,
+            tone: None,
             title: Some("A".into()),
         });
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
@@ -1199,6 +1204,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let mut exited = terminal("t5", "s1", "build");
@@ -1230,6 +1236,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let terminals = [
@@ -1503,6 +1510,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let mut blocked = terminal("t2", "s1", "b");
@@ -1517,6 +1525,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let snapshot = snap(
@@ -1550,6 +1559,7 @@ mod tests {
                 message_at: None,
                 progress: None,
                 kind: None,
+                tone: None,
                 title: None,
                 silent_since: None,
             })
@@ -1564,49 +1574,6 @@ mod tests {
     }
 
     #[test]
-    fn error_progress_kind_and_title_reach_the_pane_and_its_event() {
-        let event = backend_event(&Event::AgentStatusChanged {
-            terminal_id: "t1".into(),
-            status: AgentStatus::Error,
-            agent: None,
-            session_id: None,
-            message: None,
-            message_at: None,
-            progress: Some(40),
-            kind: Some("auth".into()),
-            title: Some("build".into()),
-            silent_since: None,
-        });
-        assert_eq!(
-            event.data,
-            json!({"terminal_id": "t1", "agent_status": "error", "agent_progress": 40,
-                "agent_kind": "auth", "agent_title": "build"})
-        );
-        let mut t = terminal("t1", "s1", "a");
-        t.agent = Some(AgentInfo {
-            reported_at: None,
-            status_since: None,
-            silent_since: None,
-            status: AgentStatus::Error,
-            agent: None,
-            session_id: None,
-            message: None,
-            message_at: None,
-            progress: Some(40),
-            kind: Some("auth".into()),
-            title: Some("build".into()),
-        });
-        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
-        let pane = &snapshot["terminals"][0];
-        assert_eq!(pane["agent_status"], "error");
-        assert_eq!(pane["agent_progress"], 40);
-        assert_eq!(pane["agent_kind"], "auth");
-        assert_eq!(pane["agent_title"], "build");
-        assert_eq!(snapshot["spaces"][0]["agent_status"], "error");
-        assert!(snapshot["terminals"][1].get("agent_progress").is_none());
-    }
-
-    #[test]
     fn the_notification_text_reaches_the_pane_and_its_event() {
         let event = backend_event(&Event::AgentStatusChanged {
             terminal_id: "t1".into(),
@@ -1617,6 +1584,7 @@ mod tests {
             message_at: Some(1700),
             progress: None,
             kind: None,
+            tone: None,
             title: None,
             silent_since: None,
         });
@@ -1637,6 +1605,7 @@ mod tests {
             message_at: Some(1700),
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
@@ -2489,6 +2458,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         });
         let plain = terminal("t2", "s1", "zsh");
@@ -2573,7 +2543,6 @@ mod tests {
         assert!(backend.stream_input(id, "y").is_err());
         let _ = log;
     }
-
     #[test]
     fn a_server_that_goes_away_ends_the_stream_as_lost_so_the_view_attaches_again() {
         let extra = vec![
@@ -2612,4 +2581,5 @@ mod tests {
             }
         ));
     }
+    mod more;
 }

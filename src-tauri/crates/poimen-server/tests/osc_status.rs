@@ -102,12 +102,20 @@ fn next_status(rx: &Receiver<Event>) -> (AgentStatus, Option<String>) {
     }
 }
 
-fn wait_for(env: &Env, want: Option<AgentStatus>) {
+/// Polls `ok` for up to 10 s; `what` names the state that did not arrive.
+fn poll(what: impl Fn() -> String, ok: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while env.status() != want {
-        assert!(Instant::now() < deadline, "status stays {:?}", env.status());
+    while !ok() {
+        assert!(Instant::now() < deadline, "{}", what());
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn wait_for(env: &Env, want: Option<AgentStatus>) {
+    poll(
+        || format!("status stays {:?}", env.status()),
+        || env.status() == want,
+    );
 }
 
 #[test]
@@ -272,4 +280,65 @@ fn working_ends_with_the_process() {
         rx.recv_timeout(deadline.saturating_duration_since(Instant::now())),
         Ok(Event::TerminalExited { .. })
     ) {}
+}
+
+fn tone(env: &Env) -> Option<String> {
+    env.client
+        .list_terminals(None)
+        .unwrap()
+        .remove(0)
+        .agent
+        .and_then(|a| a.tone)
+}
+
+fn wait_tone(env: &Env, want: Option<&str>) {
+    poll(
+        || format!("tone stays {:?}", tone(env)),
+        || tone(env).as_deref() == want,
+    );
+}
+
+#[test]
+fn a_warning_tone_belongs_to_done_and_lives_like_done() {
+    let env = Env::new("tone");
+    let rx = events(&env.client);
+    // Another state ignores the tone; the state still counts.
+    env.print(r"\033]7501;state=working:tone=warning\007");
+    wait_for(&env, Some(AgentStatus::Working));
+    assert_eq!(tone(&env), None);
+    env.print(r"\033]7501;state=done:tone=warning\007");
+    wait_tone(&env, Some("warning"));
+    let tone_of_event = loop {
+        let left = Duration::from_secs(10);
+        match rx.recv_timeout(left).expect("status event did not arrive") {
+            Event::AgentStatusChanged {
+                status: AgentStatus::Done,
+                tone,
+                ..
+            } => break tone,
+            _ => continue,
+        }
+    };
+    assert_eq!(tone_of_event.as_deref(), Some("warning"));
+    // A new prompt (OSC 133 A) keeps a done status and its tone.
+    // A child record reported after the prompt shows the prompt was handled first.
+    env.print(r"\033]133;A\007\033]7501;state=working:id=run/a\007");
+    wait_records(&env, 1);
+    assert_eq!(env.status(), Some(AgentStatus::Done));
+    assert_eq!(tone(&env).as_deref(), Some("warning"));
+    env.print(r"\033]7501;state=clear:id=run/a\007");
+    // A later report without the tone clears it.
+    env.print(r"\033]7501;state=done\007");
+    wait_tone(&env, None);
+    assert_eq!(env.status(), Some(AgentStatus::Done));
+    // RIS ends it.
+    env.print(r"\033]7501;state=done:tone=warning\007");
+    wait_tone(&env, Some("warning"));
+    env.print(r"\033c");
+    wait_for(&env, None);
+    // state=clear ends it too.
+    env.print(r"\033]7501;state=done:tone=warning\007");
+    wait_tone(&env, Some("warning"));
+    env.print(r"\033]7501;state=clear\007");
+    wait_for(&env, None);
 }

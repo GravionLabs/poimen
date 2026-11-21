@@ -750,6 +750,7 @@ fn terminal_json(t: &poimen_client::protocol::Terminal) -> Value {
         json!({
             "kind": a.agent,
             "status": a.status,
+            "tone": a.tone,
             "message": a.message,
         })
     });

@@ -20,7 +20,7 @@ import { Machines } from "../core/machines";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
-import { olderHost, olderHostNote, splitId, type PaneRow } from "../core/snapshot";
+import { olderHost, olderHostNote, paneWarning, splitId, type PaneRow } from "../core/snapshot";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -287,11 +287,16 @@ export class SpaceCard {
   });
   protected readonly stateTip = computed(() => {
     const status = this.data().status;
-    return `Status: ${stateLabel(status) ?? status}`;
+    return `Status: ${stateLabel(status, { tone: this.warning() ? "warning" : undefined }) ?? status}`;
   });
+  /** The space's status is `done` and a pane finished with a warning (#1152). */
+  protected readonly warning = computed(
+    () =>
+      this.data().status === "done" && this.rows().some((r) => paneWarning(this.row(r).row.pane)),
+  );
   /** The state word is shown only where the dot is not enough. */
-  protected wordy(status: string): boolean {
-    return status === "blocked" || status === "error";
+  protected wordy(status: string, warning = false): boolean {
+    return status === "blocked" || status === "error" || warning;
   }
   protected readonly detailsHidden = computed(() => this.ui.hiddenDetails().includes(this.id()));
   /** Line 2 of the card, sorted into its parts; `null` when it has nothing to show. */

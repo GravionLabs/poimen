@@ -2,10 +2,16 @@ import { Injectable, computed, signal } from "@angular/core";
 import {
   agentKind,
   needsAttention,
+  paneWarning,
   type AgentStatus,
   type SpaceNode,
   type Terminal,
 } from "./snapshot";
+
+/** The ids of the panes that are done with a warning (#1152). */
+export function warningIds(panes: ReadonlyMap<string, Terminal>): Set<string> {
+  return new Set([...panes].filter(([, pane]) => paneWarning(pane)).map(([id]) => id));
+}
 
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
@@ -27,6 +33,7 @@ export interface StatusChange {
 @Injectable({ providedIn: "root" })
 export class Attention {
   private previous: ReadonlyMap<string, AgentStatus> | null = null;
+  private previousWarnings: ReadonlySet<string> = new Set();
   private previousViewed: ReadonlySet<string> = new Set();
   /** Panes the user marked unread; they stay marked while viewed (#725). */
   private readonly manual = new Set<string>();
@@ -60,6 +67,7 @@ export class Attention {
     statuses: ReadonlyMap<string, AgentStatus>,
     viewed: ReadonlySet<string>,
     now: number = Date.now(),
+    warnings: ReadonlySet<string> = new Set(),
   ): StatusChange[] {
     const times = new Map(this._changedAt());
     for (const [id, status] of statuses) {
@@ -73,13 +81,17 @@ export class Attention {
     const unread = new Set(this.unread());
     for (const [id, status] of statuses) {
       const before = this.previous?.get(id);
+      // `done` with a warning (#1152) rings like a block.
+      const warn = status === "done" && warnings.has(id);
+      const wasWarn = this.previousWarnings.has(id);
+      const urgent = needsAttention(status) || warn;
       if (
         before !== undefined &&
-        status !== before &&
+        (status !== before || (warn && !wasWarn)) &&
         (needsAttention(status) || status === "done")
       )
         changes.push({ paneId: id, status: status as StatusChange["status"] });
-      if (this.manual.has(id) && (status === "working" || needsAttention(status))) {
+      if (this.manual.has(id) && (status === "working" || urgent)) {
         this.manual.delete(id);
         unread.delete(id);
       }
@@ -91,11 +103,11 @@ export class Attention {
           this.manual.delete(id);
           unread.delete(id);
         }
-      } else if (status !== before) {
-        if (needsAttention(status)) attention.add(id);
+      } else if (status !== before || warn !== wasWarn) {
+        if (urgent) attention.add(id);
         else if (status === "done" && before !== undefined) unread.add(id);
       }
-      if (!needsAttention(status)) attention.delete(id);
+      if (!urgent) attention.delete(id);
     }
     for (const id of [...attention, ...unread]) {
       if (!statuses.has(id)) {
@@ -106,6 +118,7 @@ export class Attention {
     }
     this.previousViewed = new Set(viewed);
     this.previous = new Map(statuses);
+    this.previousWarnings = new Set([...warnings].filter((id) => statuses.get(id) === "done"));
     if (changes.length) this.lastChanges.set(changes);
     if (!same(attention, this.attention())) this.attention.set(attention);
     if (!same(unread, this.unread())) this.unread.set(unread);

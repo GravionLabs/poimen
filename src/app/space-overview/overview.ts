@@ -1,4 +1,4 @@
-import { agentKind, type AgentStatus, type SpaceNode } from "../core/snapshot";
+import { agentKind, paneWarning, type AgentStatus, type SpaceNode } from "../core/snapshot";
 
 /** One pane of a space as the overview lists it. */
 export interface OverviewRow {
@@ -10,6 +10,8 @@ export interface OverviewRow {
   label: string;
   /** Session status of the pane (what the backend reports). */
   status: AgentStatus;
+  /** `done` with the tone `warning` (#1152). */
+  warning: boolean;
   /** Epoch ms of the latest agent notification; `undefined` when none was reported. */
   activityAt?: number;
 }
@@ -24,6 +26,7 @@ export function overviewRows(space: SpaceNode): OverviewRow[] {
       agent,
       label: row.name,
       status: row.pane.agent_status,
+      warning: paneWarning(row.pane),
       activityAt: row.pane.agent_message_at,
     };
   });

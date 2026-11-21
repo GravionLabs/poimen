@@ -555,6 +555,7 @@ export class SpacesStore {
               {
                 progress: event.data!.agent_progress,
                 kind: event.data!.agent_kind,
+                tone: event.data!.agent_tone,
                 title: event.data!.agent_title,
               },
             ),

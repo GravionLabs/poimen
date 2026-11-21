@@ -33,6 +33,7 @@ describe("overviewRows", () => {
         agent: undefined,
         label: "shell",
         status: "idle",
+        warning: false,
         activityAt: undefined,
       },
       {
@@ -41,6 +42,7 @@ describe("overviewRows", () => {
         agent: "claude",
         label: "claude",
         status: "working",
+        warning: false,
         activityAt: 5,
       },
     ]);

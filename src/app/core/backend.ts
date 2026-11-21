@@ -16,6 +16,7 @@ export interface BackendEvent {
     agent_message_at?: number;
     agent_progress?: number;
     agent_kind?: string;
+    agent_tone?: string;
     agent_title?: string;
     reason?: string;
     awake?: boolean;

@@ -42,6 +42,8 @@ pub struct Change {
 #[derive(Debug, Default)]
 pub struct Attention {
     previous: Option<HashMap<String, AgentStatus>>,
+    /// Terminals that were `done` with a warning (#1152) at the last fold.
+    previous_warning: HashSet<String>,
     /// Terminals that turned blocked while not viewed.
     attention: HashSet<String>,
     /// Terminals that finished while not viewed.
@@ -78,12 +80,49 @@ impl Attention {
         statuses: &HashMap<String, AgentStatus>,
         viewed: &HashSet<String>,
     ) -> Vec<Change> {
+        self.observe_with_warnings(statuses, &HashSet::new(), viewed)
+    }
+
+    /// Folds the agents of `terminals` in (a terminal without an agent, or `gone`, is left out).
+    pub fn observe_terminals(
+        &mut self,
+        terminals: &[poimen_protocol::Terminal],
+        viewed: &HashSet<String>,
+    ) -> Vec<Change> {
+        let agents = || {
+            terminals
+                .iter()
+                .filter_map(|t| Some((t, t.agent.as_ref()?)))
+        };
+        let statuses = agents()
+            .filter(|(_, a)| a.status != AgentStatus::Gone)
+            .map(|(t, a)| (t.id.clone(), a.status))
+            .collect();
+        let warnings = agents()
+            .filter(|(_, a)| a.status == AgentStatus::Done && a.tone.as_deref() == Some("warning"))
+            .map(|(t, _)| t.id.clone())
+            .collect();
+        self.observe_with_warnings(&statuses, &warnings, viewed)
+    }
+
+    /// As [`Self::observe`]; `warnings` are the terminals that are `done` with the tone
+    /// `warning` (#1152): like `blocked` and `error` they need attention.
+    pub fn observe_with_warnings(
+        &mut self,
+        statuses: &HashMap<String, AgentStatus>,
+        warnings: &HashSet<String>,
+        viewed: &HashSet<String>,
+    ) -> Vec<Change> {
         let mut changes = Vec::new();
         let mut ids: Vec<&String> = statuses.keys().collect();
         ids.sort();
         for id in ids {
             let status = statuses[id];
             let before = self.previous.as_ref().and_then(|p| p.get(id)).copied();
+            let warn = status == AgentStatus::Done && warnings.contains(id);
+            let was_warn = self.previous_warning.contains(id);
+            let urgent = matches!(status, AgentStatus::Blocked | AgentStatus::Error) || warn;
+            let changed = before != Some(status) || was_warn != warn;
             let kind = match status {
                 AgentStatus::Blocked => Some(Kind::Blocked),
                 AgentStatus::Error => Some(Kind::Error),
@@ -91,7 +130,7 @@ impl Attention {
                 _ => None,
             };
             if let (Some(before), Some(kind)) = (before, kind)
-                && before != status
+                && (before != status || (warn && !was_warn))
             {
                 changes.push(Change {
                     terminal_id: id.clone(),
@@ -101,20 +140,25 @@ impl Attention {
             if viewed.contains(id) {
                 self.attention.remove(id);
                 self.unread.remove(id);
-            } else if before != Some(status) {
-                if matches!(status, AgentStatus::Blocked | AgentStatus::Error) {
+            } else if changed {
+                if urgent {
                     self.attention.insert(id.clone());
                 } else if status == AgentStatus::Done && before.is_some() {
                     self.unread.insert(id.clone());
                 }
             }
-            if !matches!(status, AgentStatus::Blocked | AgentStatus::Error) {
+            if !urgent {
                 self.attention.remove(id);
             }
         }
         self.attention.retain(|id| statuses.contains_key(id));
         self.unread.retain(|id| statuses.contains_key(id));
         self.previous = Some(statuses.clone());
+        self.previous_warning = warnings
+            .iter()
+            .filter(|id| statuses.get(*id) == Some(&AgentStatus::Done))
+            .cloned()
+            .collect();
         changes
     }
 }
@@ -184,6 +228,25 @@ mod tests {
             terminal_id: id.into(),
             kind,
         }
+    }
+
+    #[test]
+    fn done_with_a_warning_rings_like_blocked_until_viewed() {
+        let mut a = Attention::default();
+        a.observe(&st(&[("a", Working)]), &set(&[]));
+        let changes = a.observe_with_warnings(&st(&[("a", Done)]), &set(&["a"]), &set(&[]));
+        assert_eq!(changes, vec![change("a", Kind::Done)]);
+        assert!(a.has_attention("a"));
+        assert!(!a.is_unread("a"));
+        // Seen: the ring goes.
+        a.observe_with_warnings(&st(&[("a", Done)]), &set(&["a"]), &set(&["a"]));
+        assert!(!a.has_attention("a"));
+        // Without the warning, done is only unread.
+        let mut b = Attention::default();
+        b.observe(&st(&[("a", Working)]), &set(&[]));
+        b.observe(&st(&[("a", Done)]), &set(&[]));
+        assert!(!b.has_attention("a"));
+        assert!(b.is_unread("a"));
     }
 
     #[test]

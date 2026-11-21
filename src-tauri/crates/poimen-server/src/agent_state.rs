@@ -15,6 +15,7 @@ pub(crate) fn agent_event(terminal_id: &str, agent: Option<&AgentInfo>) -> Event
         message_at: agent.and_then(|a| a.message_at),
         progress: agent.and_then(|a| a.progress),
         kind: agent.and_then(|a| a.kind.clone()),
+        tone: agent.and_then(|a| a.tone.clone()),
         title: agent.and_then(|a| a.title.clone()),
         silent_since: agent.and_then(|a| a.silent_since),
     }

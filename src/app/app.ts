@@ -35,12 +35,12 @@ import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
-import { Attention, canMarkUnread } from "./core/attention";
+import { Attention, canMarkUnread, warningIds } from "./core/attention";
 import { Presence } from "./core/presence";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
-import { withSilent } from "./core/agent-priority";
+import { tabMarks } from "./core/agent-priority";
 import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
@@ -329,7 +329,7 @@ export class App {
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
             note: this.hostNote(pane),
-            title: withSilent(base, pane?.agent_silent_since, this.clock()),
+            title: tabMarks(base, pane, this.clock()),
           };
         }),
       ]),
@@ -388,7 +388,7 @@ export class App {
       const viewed = this.viewedPanes();
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
-        const observed = this.attention.observe(statuses, viewed);
+        const observed = this.attention.observe(statuses, viewed, Date.now(), warningIds(panes));
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
         this.center.observeSilent(
