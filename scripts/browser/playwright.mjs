@@ -35,22 +35,29 @@ export async function ensureBrowser() {
   });
 }
 
-/** Starts `ng serve <target>` unless it already answers; resolves with the URL and a stop function. */
+/** Ends `pnpm` and the `ng` it started (the process group; `taskkill` on Windows). */
+function killTree(child) {
+  if (!child.pid) return;
+  if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
+  else process.kill(-child.pid, "SIGTERM");
+}
+
+/** Starts `ng run <target>` unless it already answers; resolves with the URL and a stop function. */
 export async function ensureServer(target) {
   const url = `http://localhost:${target.port}/`;
   if (await reachable(url)) return { url, stop: async () => {} };
   const child = spawn("pnpm", ["exec", "ng", "run", target.name, "--port", String(target.port)], {
     stdio: ["ignore", "ignore", "inherit"],
-    detached: false,
+    detached: process.platform !== "win32",
   });
   let exited = false;
   child.on("exit", () => (exited = true));
   for (let i = 0; i < 600; i++) {
-    if (await reachable(url)) return { url, stop: async () => void child.kill() };
+    if (await reachable(url)) return { url, stop: async () => killTree(child) };
     if (exited) throw new Error(`ng run ${target.name} exited`);
     await new Promise((r) => setTimeout(r, 200));
   }
-  child.kill();
+  killTree(child);
   throw new Error(`ng run ${target.name} did not answer on ${url}`);
 }
 
