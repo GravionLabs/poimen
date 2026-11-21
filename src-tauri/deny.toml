@@ -1,0 +1,48 @@
+# cargo-deny configuration (#1021). CI runs `cargo deny --locked check` in `src-tauri/` when the rust area changed.
+# Every exception (an advisory `ignore` or a `[[licenses.exceptions]]` entry) needs a `reason` that contains
+# `expires YYYY-MM-DD` (cargo-deny rejects other keys). The `deny-exceptions` ratchet fails without one and after the date.
+
+[graph]
+# The targets poimen ships for.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+  # { id = "RUSTSEC-0000-0000", reason = "why it does not apply, what removes it; expires 2026-12-31" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+# The licenses in the dependency graph on 2026-11-21 (`cargo deny list`).
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

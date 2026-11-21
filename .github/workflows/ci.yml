@@ -98,6 +98,20 @@ jobs:
           working-directory: src-tauri
           packages: "poimen-protocol poimen-client poimen-server poimen-core poimen-console poimen-pty-host"
 
+  # Advisories, licenses and sources of the Rust crates (src-tauri/deny.toml, #1021).
+  cargo-deny:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    name: cargo-deny (advisories, licenses, sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check
+          arguments: --locked --config src-tauri/deny.toml
+
   # The app crate needs the Tauri Linux libraries and the built frontend (the Tauri macros embed frontendDist). The
   # frontend build here only satisfies those macros. This job also runs for changes to the root package.json (read by
   # the version test) and to the frontend fixtures the Rust tests read (src/app/deliver/fixtures/).
@@ -193,12 +207,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked -p poimen-server --test previous_release
 
-  # The one check to require: green when ratchets, frontend, rust-server, rust, windows and previous-release passed or were skipped because their
+  # The one check to require: green when ratchets, frontend, rust-server, cargo-deny, rust, windows and previous-release passed or were skipped because their
   # area did not change; red when any of them (or `changes`) failed or was cancelled.
   ci:
     name: ci
     if: always()
-    needs: [changes, ratchets, frontend, rust-server, rust, windows, previous-release]
+    needs: [changes, ratchets, frontend, rust-server, cargo-deny, rust, windows, previous-release]
     runs-on: ubuntu-24.04
     steps:
       - env:

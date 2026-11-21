@@ -106,6 +106,40 @@ export function agentsMdSize(root) {
   return new Map(size > AGENTS_MD_LIMIT ? [["AGENTS.md bytes (limit 12288)", size]] : []);
 }
 
+// Every exception in src-tauri/deny.toml (an advisory `ignore` entry or a `[[licenses.exceptions]]` entry) needs a
+// `reason` and an `expires YYYY-MM-DD` in it, and the date must not be past. cargo-deny rejects unknown keys, so the
+// date lives in the reason text.
+export function denyExceptionProblems(text, today = new Date().toISOString().slice(0, 10)) {
+  const map = new Map();
+  const lines = text.split("\n");
+  let inList = false;
+  let inException = false;
+  const check = (line, n) => {
+    const reason = /reason\s*=\s*"([^"]*)"/.exec(line)?.[1] ?? "";
+    const date = /expires (\d{4}-\d{2}-\d{2})/.exec(reason)?.[1];
+    const key = `deny.toml line ${n}`;
+    if (reason.trim() === "") map.set(`${key} has no reason`, 1);
+    else if (!date) map.set(`${key} has no "expires YYYY-MM-DD" in its reason`, 1);
+    else if (date < today) map.set(`${key} expired ${date}`, 1);
+  };
+  lines.forEach((raw, i) => {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (/^ignore\s*=\s*\[/.test(line)) inList = !line.includes("]");
+    else if (inList && line.startsWith("]")) inList = false;
+    else if (inList && line !== "") check(line, i + 1);
+    if (/^\[\[licenses\.exceptions\]\]/.test(line)) inException = true;
+    else if (line.startsWith("[")) inException = false;
+    else if (inException && /^(crate|name)\s*=/.test(line))
+      check(lines.slice(i, i + 6).join(" "), i + 1);
+  });
+  return map;
+}
+
+export function denyExceptions(root) {
+  const file = "src-tauri/deny.toml";
+  return fs.existsSync(path.join(root, file)) ? denyExceptionProblems(read(root, file)) : new Map();
+}
+
 export const RATCHETS = [
   { name: "max-lines", measure: maxLines, fix: "split the file; do not raise the baseline" },
   {
@@ -119,5 +153,11 @@ export const RATCHETS = [
     measure: agentsMdSize,
     fixed: true,
     fix: "move text to docs/agents/<area>.md",
+  },
+  {
+    name: "deny-exceptions",
+    measure: denyExceptions,
+    fixed: true,
+    fix: 'give the exception in src-tauri/deny.toml a reason with "expires YYYY-MM-DD" in the future, or remove it',
   },
 ];
