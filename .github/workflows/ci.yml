@@ -30,6 +30,7 @@ jobs:
     outputs:
       frontend: ${{ steps.diff.outputs.frontend }}
       rust: ${{ steps.diff.outputs.rust }}
+      compat: ${{ steps.diff.outputs.compat }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -40,18 +41,21 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
-            printf '%s\n' frontend=true rust=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' frontend=true rust=true compat=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|\.oxlintrc\.json|\.oxfmtrc\.json|scripts/lint/.*|vitest\.[^/]*|src/.*|\.github/workflows/ci\.yml)$'
           rust='^(rust-toolchain\.toml|package\.json|src-tauri/.*|src/app/deliver/fixtures/.*|\.github/workflows/ci\.yml)$'
+          compat='^(src-tauri/(Cargo\.(toml|lock)|crates/(poimen-protocol|poimen-pty-host|poimen-server|poimen-client)/.*)|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'
           git diff --name-only "$BASE_SHA" HEAD > changed.txt
           cat changed.txt
           f=false
           r=false
+          c=false
           grep -Eq "$frontend" changed.txt && f=true
           grep -Eq "$rust" changed.txt && r=true
-          printf '%s\n' "frontend=$f" "rust=$r" >> "$GITHUB_OUTPUT"
+          grep -Eq "$compat" changed.txt && c=true
+          printf '%s\n' "frontend=$f" "rust=$r" "compat=$c" >> "$GITHUB_OUTPUT"
 
   frontend:
     needs: changes
@@ -165,12 +169,45 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -p poimen-app --locked -- -D warnings
 
-  # The one check to require: green when ratchets, frontend, rust-server, rust and windows passed or were skipped because their
+  # The last stable release against this tree, both ways (#969, ADR 0009): the server of this tree adopts a
+  # poimen-pty-host built from the latest stable tag, and the client of this tree pings and attaches to that tag's
+  # poimen-server (src-tauri/crates/poimen-server/tests/previous_release.rs). Runs when the protocol, the host, the
+  # server or the client changed.
+  previous-release:
+    needs: changes
+    if: needs.changes.outputs.compat == 'true'
+    name: previous-release (adopt host, talk to server)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Check out and build the latest stable tag
+        run: |
+          tag=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -Ev -- '-' | head -n 1)
+          if [ -z "$tag" ]; then echo "no stable tag found"; exit 1; fi
+          echo "latest stable tag: $tag"
+          git worktree add "$RUNNER_TEMP/previous" "$tag"
+          (cd "$RUNNER_TEMP/previous/src-tauri" && cargo build --locked -p poimen-server -p poimen-pty-host)
+          {
+            echo "POIMEN_PREVIOUS_TAG=$tag"
+            echo "POIMEN_PREVIOUS_RELEASE_DIR=$RUNNER_TEMP/previous/src-tauri/target/debug"
+            echo "POIMEN_REQUIRE_PREVIOUS=1"
+          } >> "$GITHUB_ENV"
+      - name: This tree against it
+        working-directory: src-tauri
+        run: cargo test --locked -p poimen-server --test previous_release
+
+  # The one check to require: green when ratchets, frontend, rust-server, rust, windows and previous-release passed or were skipped because their
   # area did not change; red when any of them (or `changes`) failed or was cancelled.
   ci:
     name: ci
     if: always()
-    needs: [changes, ratchets, frontend, rust-server, rust, windows]
+    needs: [changes, ratchets, frontend, rust-server, rust, windows, previous-release]
     runs-on: ubuntu-24.04
     steps:
       - env:
