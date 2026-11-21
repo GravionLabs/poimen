@@ -7,6 +7,7 @@ export interface SidebarMenuAction {
     | "split-right"
     | "split-down"
     | "start-agent"
+    | "resume-session"
     | "rename"
     | "restart"
     | "mark-unread"
@@ -51,7 +52,14 @@ export function sidebarMenuItems(
   markable = false,
   /** Whether a local space is pinned (#710); `null` offers no pin entry (pane, remote space). */
   pinned: boolean | null = null,
+  /** Why "Resume session..." is disabled (a remote machine, #986); `null` when it is offered. */
+  resumeBlocked: string | null = null,
 ): SidebarMenuGroup[] {
+  const resume = {
+    action: "resume-session" as const,
+    label: "Resume session...",
+    ...(resumeBlocked ? { disabled: resumeBlocked } : {}),
+  };
   const builtin: SidebarMenuGroup = {
     id: "builtin",
     label: null,
@@ -59,6 +67,7 @@ export function sidebarMenuItems(
       kind === "workspace"
         ? [
             { action: "new-terminal", label: "New pane" },
+            resume,
             ...(repo
               ? [
                   { action: "show-changes" as const, label: "Show changes" },
@@ -82,6 +91,7 @@ export function sidebarMenuItems(
             { action: "split-right", label: "Split right" },
             { action: "split-down", label: "Split down" },
             { action: "start-agent", label: "Start agent..." },
+            resume,
             { action: "rename", label: "Rename..." },
             ...(outdatedHost
               ? [{ action: "restart" as const, label: "Restart terminal on the new host..." }]

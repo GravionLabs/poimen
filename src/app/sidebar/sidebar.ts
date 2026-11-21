@@ -33,6 +33,7 @@ import { SettingsStore } from "../core/settings";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 import { Machines } from "../core/machines";
+import { resumeUnavailable } from "../core/session-resume";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
 import { SpaceCard } from "./space-card";
 import { WORKSPACE_PREFIX, nestTabs, spaceNodes, type SpaceData } from "./space-nodes";
@@ -121,7 +122,15 @@ export class Sidebar {
     const local =
       kind === "workspace" && this.store.snapshot().spaces.some((s) => s.space_id === id);
     const pinned = local ? this.isPinned(id) : null;
-    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable, pinned);
+    return sidebarMenuItems(
+      kind,
+      repo,
+      older,
+      this.machines.blockedReason(id),
+      markable,
+      pinned,
+      resumeUnavailable(id),
+    );
   }
 
   /** Whether the space row shows the pin mark (#710). */
