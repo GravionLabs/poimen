@@ -9,7 +9,7 @@
     iconOnly
     class="sort-toggle"
     aria-label="Sort spaces"
-    title="Sort spaces"
+    hx-tooltip="Sort spaces"
     aria-haspopup="menu"
     [attr.aria-pressed]="sortMenuAt() !== null"
     (click)="openSortMenu($event)"
@@ -37,7 +37,7 @@
     iconOnly
     class="add"
     aria-label="New space"
-    title="New space from a directory"
+    hx-tooltip="New space from a directory"
     (click)="spaceActions.ask()"
   >
     <svg

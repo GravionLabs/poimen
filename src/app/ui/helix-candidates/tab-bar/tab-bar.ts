@@ -1,4 +1,5 @@
 import { NgTemplateOutlet } from "@angular/common";
+import { HxTooltip } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -81,7 +82,7 @@ export function arrowTarget(key: string, index: number, count: number): number |
 /** Tabs side by side in one row with close buttons and drag-to-reorder; projects trailing actions. */
 @Component({
   selector: "app-tab-bar",
-  imports: [NgTemplateOutlet, ContextMenu, Icon],
+  imports: [NgTemplateOutlet, ContextMenu, Icon, HxTooltip],
   templateUrl: "./tab-bar.html",
   styleUrl: "./tab-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

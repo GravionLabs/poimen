@@ -147,20 +147,31 @@ function matches(event: KeyLike, chord: Chord): boolean {
 
 /** Shortcut text for a menu or tooltip: `⌘⇧W` on macOS, `Ctrl+Shift+W` elsewhere. */
 export function formatShortcut(accelerator: string, mac: boolean): string {
+  return shortcutKeys(accelerator, mac).join(mac ? "" : "+");
+}
+
+/** The keys of an accelerator one by one (modifiers first), for key caps; empty when it does not parse. */
+export function shortcutKeys(accelerator: string, mac: boolean): string[] {
   const chord = parseChord(accelerator, mac);
-  if (!chord) return "";
+  if (!chord) return [];
   const key = chord.key.startsWith("arrow") ? chord.key.slice(5) : chord.key;
   const label = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1);
   if (mac) {
-    return `${chord.ctrl ? "⌃" : ""}${chord.alt ? "⌥" : ""}${chord.shift ? "⇧" : ""}${chord.meta ? "⌘" : ""}${label}`;
+    return [
+      chord.ctrl && "⌃",
+      chord.alt && "⌥",
+      chord.shift && "⇧",
+      chord.meta && "⌘",
+      label,
+    ].filter((k): k is string => k !== false);
   }
-  const mods = [
+  return [
     chord.meta && "Super",
     chord.ctrl && "Ctrl",
     chord.alt && "Alt",
     chord.shift && "Shift",
-  ].filter(Boolean);
-  return [...mods, label].join("+");
+    label,
+  ].filter((k): k is string => k !== false);
 }
 
 /** Actions a focused terminal yields although they have no Cmd (the program has no use for them). */

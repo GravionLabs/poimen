@@ -13,7 +13,7 @@ import {
   output,
   signal,
 } from "@angular/core";
-import { HxButton, HxInput, HxMessage } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxMessage, HxTooltip } from "@gravionlabs/helix-ui";
 import { cardKeyboard } from "./card-keys";
 import { cardMenuGroups, runCardEntry, sortGroups, spaceDirOf } from "./card-menu";
 import {
@@ -74,7 +74,7 @@ export function isDoubleClick(
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
 @Component({
   selector: "app-sidebar",
-  imports: [ContextMenu, HxButton, HxMessage, HxInput, MachinesSection, SpaceCard],
+  imports: [ContextMenu, HxButton, HxTooltip, HxMessage, HxInput, MachinesSection, SpaceCard],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

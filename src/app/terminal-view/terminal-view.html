@@ -62,7 +62,7 @@
     <button
       type="button"
       class="search-toggle"
-      title="Match case"
+      hx-tooltip="Match case"
       aria-label="Match case"
       [attr.aria-pressed]="searchCase()"
       (click)="toggleCase()"
@@ -72,7 +72,7 @@
     <button
       type="button"
       class="search-toggle"
-      title="Regular expression"
+      hx-tooltip="Regular expression"
       aria-label="Regular expression"
       [attr.aria-pressed]="searchRegex()"
       (click)="toggleRegex()"
@@ -81,16 +81,29 @@
     </button>
     <button
       type="button"
-      title="Previous match (Shift+Enter)"
+      hx-tooltip="Previous match"
+      [hxTooltipShortcut]="['Shift', 'Enter']"
       aria-label="Previous match"
       (click)="find(false)"
     >
       &uarr;
     </button>
-    <button type="button" title="Next match (Enter)" aria-label="Next match" (click)="find(true)">
+    <button
+      type="button"
+      hx-tooltip="Next match"
+      [hxTooltipShortcut]="['Enter']"
+      aria-label="Next match"
+      (click)="find(true)"
+    >
       &darr;
     </button>
-    <button type="button" title="Close (Escape)" aria-label="Close search" (click)="closeSearch()">
+    <button
+      type="button"
+      hx-tooltip="Close"
+      [hxTooltipShortcut]="['Escape']"
+      aria-label="Close search"
+      (click)="closeSearch()"
+    >
       <app-icon name="close" />
     </button>
   </div>

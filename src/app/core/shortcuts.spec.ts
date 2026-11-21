@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SHORTCUTS,
   formatShortcut,
+  shortcutKeys,
   matchShortcut,
   parseChord,
   parseShortcuts,
@@ -120,5 +121,18 @@ describe("jump", () => {
     expect(matchShortcut(key("k", { metaKey: true }), DEFAULT_SHORTCUTS, mac)).toBeNull();
     expect(matchShortcut(key("k", { ctrlKey: true }), DEFAULT_SHORTCUTS, other)).toBe("jump");
     expect(DEFAULT_SHORTCUTS.toggleOutput).toBe("CmdOrCtrl+J");
+  });
+});
+
+describe("shortcutKeys", () => {
+  it("splits an accelerator into key caps, modifiers first", () => {
+    expect(shortcutKeys("CmdOrCtrl+Shift+P", true)).toEqual(["⇧", "⌘", "P"]);
+    expect(shortcutKeys("CmdOrCtrl+Shift+P", false)).toEqual(["Ctrl", "Shift", "P"]);
+    expect(shortcutKeys("CmdOrCtrl+Alt+Right", false)).toEqual(["Ctrl", "Alt", "Right"]);
+  });
+
+  it("joins to the formatted text and is empty for an unbound action", () => {
+    expect(shortcutKeys("CmdOrCtrl+B", false).join("+")).toBe(formatShortcut("CmdOrCtrl+B", false));
+    expect(shortcutKeys("", false)).toEqual([]);
   });
 });
