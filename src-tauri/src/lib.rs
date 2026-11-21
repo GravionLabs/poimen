@@ -25,6 +25,7 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
+mod pull_request;
 mod remote_runs;
 mod remote_transcripts;
 mod schemes;
@@ -503,25 +504,6 @@ async fn github_pr_ci_log(
     let root = github_pulls::expand_home(&root, home_dir().as_deref());
     tauri::async_runtime::spawn_blocking(move || {
         github_pulls::run_ci_log(&client, &root, number, &worktree, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| github::GhError::Other {
-        message: e.to_string(),
-    })?
-}
-
-/// Adds and removes reviewers, labels and assignees of a pull request.
-#[tauri::command]
-async fn github_pr_edit(
-    client: State<'_, GithubClient>,
-    root: String,
-    number: u64,
-    edit: github_pulls::PrEdit,
-) -> Result<(), github::GhError> {
-    let client = client.inner().clone();
-    let root = github_pulls::expand_home(&root, home_dir().as_deref());
-    tauri::async_runtime::spawn_blocking(move || {
-        github_pulls::run_edit(&client, &root, number, &edit)
     })
     .await
     .map_err(|e| github::GhError::Other {
@@ -2893,7 +2875,7 @@ pub fn run() {
             github_pr_merge,
             github_pr_rerun,
             github_pr_ci_log,
-            github_pr_edit,
+            pull_request::github_pr_edit,
             github_labels,
             branch_pulls,
             github_issues,
@@ -2934,6 +2916,9 @@ pub fn run() {
             changes_git::changes_push,
             commit_message::changes_generate_message,
             commit_message::changes_generate_cancel,
+            pull_request::changes_pr_state,
+            pull_request::changes_draft_pull_request,
+            pull_request::changes_create_pull_request,
             git_fetch,
             git_pull,
             git_fetch_all,
