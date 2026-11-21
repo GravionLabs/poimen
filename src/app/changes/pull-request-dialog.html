@@ -1,0 +1,98 @@
+@if (pr.dialog(); as d) {
+  <app-dialog-shell
+    heading="Create pull request"
+    label="Create pull request"
+    (cancelled)="pr.close()"
+  >
+    <label>
+      Base
+      <input
+        type="text"
+        class="base"
+        [value]="d.base"
+        [disabled]="d.creating"
+        (input)="pr.patch({ base: $any($event.target).value })"
+      />
+    </label>
+    <label>
+      Title
+      <input
+        type="text"
+        class="title"
+        [value]="d.title"
+        [disabled]="d.creating"
+        (input)="pr.patch({ title: $any($event.target).value })"
+      />
+    </label>
+    <label>
+      Description
+      <textarea
+        class="body field"
+        rows="10"
+        [value]="d.body"
+        [disabled]="d.creating"
+        (input)="pr.patch({ body: $any($event.target).value })"
+      ></textarea>
+    </label>
+    <label>
+      <input
+        type="checkbox"
+        class="draft"
+        [checked]="d.draft"
+        [disabled]="d.creating"
+        (change)="pr.patch({ draft: $any($event.target).checked })"
+      />
+      Draft
+    </label>
+    @if (d.error) {
+      <p class="error" role="alert">{{ d.error }}</p>
+    }
+    <div class="dialog-buttons">
+      @if (pr.harness()) {
+        @if (d.drafting) {
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            class="draft-agent"
+            (click)="pr.cancelDraft()"
+          >
+            Drafting… Cancel
+          </button>
+        } @else {
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="draft-agent"
+            [disabled]="d.creating"
+            (click)="pr.draftWithAgent()"
+          >
+            Draft with agent
+          </button>
+        }
+      }
+      <span class="spacer"></span>
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        (click)="pr.close()"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        hx-button
+        class="create"
+        [disabled]="d.creating || d.drafting || !d.title.trim() || !d.base.trim()"
+        (click)="pr.create()"
+      >
+        {{ d.creating ? "Creating…" : "Create" }}
+      </button>
+    </div>
+  </app-dialog-shell>
+}
