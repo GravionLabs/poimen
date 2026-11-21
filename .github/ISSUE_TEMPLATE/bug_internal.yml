@@ -1,0 +1,59 @@
+name: Bug (internal)
+description: A bug the team found itself, written like a PBI (symptom, repro, criteria, tier and size)
+title: "[Bug] fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For bugs found while working on poimen. A user report belongs in "Bug report". A form cannot set a milestone: assign it with `github-milestone assign M<nnn> #<nr>` after creating the issue.
+  - type: textarea
+    id: overview
+    attributes:
+      label: Overview
+      description: The symptom, where it shows, and the cause when it is known.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      description: Steps, or the failing test to write first.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Testable, one per line.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Technical Notes
+      description: Files and symbols, where the tests go, what is out of scope.
+    validations:
+      required: true
+  - type: textarea
+    id: footer
+    attributes:
+      label: Tier, size and Definition of Done
+      description: "Set the tier (fast, standard, strong or interactive) with a reason, and the size (S or M). Keep the rest as it is."
+      value: |
+        Tier: standard — <reason>
+
+        Size: S
+
+        ## Definition of Done
+
+        - Implementation merged with tests
+        - Docs updated where applicable
+    validations:
+      required: true
