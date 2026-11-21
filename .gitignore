@@ -37,3 +37,6 @@ src-tauri/binaries/
 /.agents/deliver-loop/
 /.agents/deliver-loop*.log
 /.claude/worktrees/
+
+# component fixture and app screenshots (pnpm fixtures:shot)
+/tmp/

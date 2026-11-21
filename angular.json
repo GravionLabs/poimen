@@ -31,8 +31,16 @@
           "configurations": {
             "production": {
               "budgets": [
-                { "type": "initial", "maximumWarning": "1.6MB", "maximumError": "2.2MB" },
-                { "type": "anyComponentStyle", "maximumWarning": "8kB", "maximumError": "16kB" }
+                {
+                  "type": "initial",
+                  "maximumWarning": "1.6MB",
+                  "maximumError": "2.2MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "8kB",
+                  "maximumError": "16kB"
+                }
               ],
               "outputHashing": "all"
             },
@@ -50,10 +58,46 @@
             "port": 1420
           },
           "configurations": {
-            "production": { "buildTarget": "poimen:build:production" },
-            "development": { "buildTarget": "poimen:build:development" }
+            "production": {
+              "buildTarget": "poimen:build:production"
+            },
+            "development": {
+              "buildTarget": "poimen:build:development"
+            }
           },
           "defaultConfiguration": "development"
+        },
+        "fixtures-build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "src/fixtures/main.ts",
+            "tsConfig": "tsconfig.app.json",
+            "externalDependencies": ["@tauri-apps/plugin-updater", "@tauri-apps/plugin-process"],
+            "styles": [
+              "node_modules/@xterm/xterm/css/xterm.css",
+              "node_modules/@gravionlabs/helix-ui/tokens.css",
+              "node_modules/@gravionlabs/helix-ui/styles.css",
+              "node_modules/@gravionlabs/helix-desktop/styles.css",
+              "node_modules/@foblex/flow/styles/default.scss",
+              "src/styles.css"
+            ],
+            "index": "src/fixtures/index.html"
+          },
+          "configurations": {
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "fixtures": {
+          "builder": "@angular/build:dev-server",
+          "options": {
+            "port": 1421,
+            "buildTarget": "poimen:fixtures-build:development"
+          }
         }
       }
     }

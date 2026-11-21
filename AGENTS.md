@@ -22,6 +22,7 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - `frontend.md`: app shell, tab layout, terminal search, sidebar order.
 - `release-and-site.md`: the updater and `site/`.
 - `ci-and-releases.md`: workflows, Renovate, security settings, macOS signing.
+- `tests.md`: before you add or review a test; the revert question.
 
 ## Rules
 
@@ -61,6 +62,8 @@ pnpm check && pnpm lint && pnpm format:check && pnpm test && pnpm build
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 pnpm ratchets
 ```
+
+Before a push: `pnpm check:changed [base]` runs only what the changed paths need (`scripts/changed-paths.json`, as in CI). The full run above stays before the pull request.
 
 `pnpm ratchets` (`scripts/ratchets/`) runs checks with a baseline that may only shrink: files over 800 lines, real-time waits and unnumbered skips in tests, paths named in the notes that do not exist, and the size of this file. When one fails, fix the cause (split the file, wait on a condition, correct the path, move text to `docs/agents/`); never add to a baseline by hand. When you fixed entries, `pnpm ratchets --prune` lowers the baselines (it never adds or raises one). Run it alone and first (it takes seconds, no build): after a change near a limit, before build and tests; a fix only a ratchet asked for needs `pnpm ratchets` and the touched tests, not the full suite again.
 

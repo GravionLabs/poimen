@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { countTestPatterns, pathsIn } from "./checks.mjs";
+import { countTestPatterns, denyExceptionProblems, pathsIn } from "./checks.mjs";
 import { compare, formatBaseline, parseBaseline, prune } from "./core.mjs";
 import { runRatchet } from "./run.mjs";
 
@@ -85,4 +85,17 @@ test("doc paths: backticked paths and link targets in repository directories onl
   const text =
     "`src/app/a.ts` `src/x/{a,b}.ts` `core/b.ts` `src/app/c.ts:12` [adr](../adr/x.md) `docs/p.md`";
   assert.deepEqual([...pathsIn(text, tops)].sort(), ["docs/p.md", "src/app/a.ts", "src/app/c.ts"]);
+});
+
+test("deny exceptions need a reason and a future expiry", () => {
+  const ok = 'ignore = [\n  { id = "RUSTSEC-1", reason = "no fix, expires 2027-01-01" },\n]\n';
+  assert.equal(denyExceptionProblems(ok, "2026-11-21").size, 0);
+  assert.equal(denyExceptionProblems(ok, "2027-01-02").size, 1);
+  const noDate = 'ignore = [\n  { id = "RUSTSEC-1", reason = "no fix" },\n]\n';
+  assert.equal(denyExceptionProblems(noDate, "2026-11-21").size, 1);
+  const noReason = 'ignore = [\n  "RUSTSEC-1",\n]\n';
+  assert.equal(denyExceptionProblems(noReason, "2026-11-21").size, 1);
+  const lic = '[[licenses.exceptions]]\ncrate = "x"\nallow = ["GPL-3.0"]\n';
+  assert.equal(denyExceptionProblems(lic, "2026-11-21").size, 1);
+  assert.equal(denyExceptionProblems('ignore = [\n  # { id = "x" },\n]\n').size, 0);
 });
