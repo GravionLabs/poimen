@@ -1,4 +1,5 @@
-use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, transcripts};
+use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, tasks, templates};
+use poimen_core::{transcripts, trust};
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -35,9 +36,7 @@ mod settings;
 mod settings_transfer;
 mod spaces;
 mod task_start;
-use poimen_core::{tasks, templates};
 mod terminal_colors;
-use poimen_core::trust;
 mod updater;
 mod worktree;
 
@@ -2876,6 +2875,7 @@ pub fn run() {
             github_pr_rerun,
             github_pr_ci_log,
             pull_request::github_pr_edit,
+            pull_request::github_check_log,
             github_labels,
             branch_pulls,
             github_issues,

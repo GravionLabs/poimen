@@ -13,6 +13,7 @@ import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
 import { ChipPicker } from "../chip-picker/chip-picker";
 import { renderMarkdown } from "../markdown";
+import { checkLogKey, hasCheckLog } from "../check-log";
 import {
   GithubPulls,
   MERGE_METHOD_LABELS,
@@ -68,13 +69,33 @@ export class PullDetailPane {
   protected readonly canRerun = canRerun;
   protected readonly canEdit = canEditPeople;
   protected readonly text = signal("");
+  protected readonly hasCheckLog = hasCheckLog;
+  /** URLs of the checks whose log is expanded. */
+  protected readonly openLogs = signal<ReadonlySet<string>>(new Set());
 
   constructor() {
     // A draft belongs to one pull request: switching rows drops it.
     effect(() => {
       this.pulls.detailKey();
       this.text.set("");
+      this.openLogs.set(new Set());
     });
+  }
+
+  protected logOf(url: string) {
+    const sha = this.pulls.detail()?.headSha ?? "";
+    return this.pulls.checkLogs().get(checkLogKey(sha, url)) ?? null;
+  }
+
+  protected toggleLog(url: string): void {
+    const next = new Set(this.openLogs());
+    if (next.delete(url)) {
+      this.openLogs.set(next);
+      return;
+    }
+    next.add(url);
+    this.openLogs.set(next);
+    void this.pulls.loadCheckLog(url);
   }
 
   protected choose(action: PrAction): void {

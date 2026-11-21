@@ -289,6 +289,34 @@
                 } @else {
                   <span>{{ c.name }}</span>
                 }
+                @if (hasCheckLog(c) && c.url) {
+                  <button
+                    type="button"
+                    hx-button
+                    variant="text"
+                    severity="secondary"
+                    size="small"
+                    data-testid="check-log-toggle"
+                    [attr.aria-expanded]="openLogs().has(c.url)"
+                    (click)="toggleLog(c.url)"
+                  >
+                    {{ openLogs().has(c.url) ? "Hide log" : "Show log" }}
+                  </button>
+                  @if (openLogs().has(c.url)) {
+                    @let log = logOf(c.url);
+                    @if (log?.status === "ready") {
+                      <pre class="check-log" data-testid="check-log">{{ log.text }}</pre>
+                    } @else if (log?.status === "error") {
+                      <p class="error check-log-note" data-testid="check-log-error">
+                        {{ log.message }}
+                      </p>
+                    } @else {
+                      <p class="hint check-log-note" data-testid="check-log-loading">
+                        Loading log…
+                      </p>
+                    }
+                  }
+                }
               </li>
             }
           </ul>
