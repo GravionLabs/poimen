@@ -152,7 +152,7 @@
       "jsPlugins": ["./scripts/lint/oxlint-plugin-poimen.mjs"]
     },
     {
-      "files": ["**/*.spec.ts"],
+      "files": ["**/*.spec.ts", "**/*.fixtures.ts"],
       "rules": {
         "poimen/no-inline-template": "off"
       },
