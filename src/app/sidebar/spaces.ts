@@ -1,4 +1,6 @@
 import {
+  isWarning,
+  paneWarning,
   shortPath,
   stateText,
   validProgress,
@@ -256,6 +258,8 @@ export interface Segment {
   kind: "dot" | "name" | "state" | "text";
   text: string;
   status: AgentStatus;
+  /** `done` with the tone `warning` (#1152): the dot is drawn as a warning and has a text alternative. */
+  warning?: boolean;
   bold: boolean;
   dim: boolean;
   /** Preceded by another text value on the line: shown after a " · ". */
@@ -287,6 +291,9 @@ export function renderRow(
     : space
       ? aggregateStatus(space)
       : "unknown";
+  const warning = pane
+    ? paneWarning(pane.pane)
+    : space !== undefined && status === "done" && space.rows.some((r) => paneWarning(r.pane));
   const name = pane ? pane.name : (space?.workspace.label ?? "");
   const branchText = (branch: string, worktree: boolean) => (worktree ? "wt " : "") + branch;
   const value = (token: string): string | undefined => {
@@ -298,9 +305,13 @@ export function renderRow(
         return stateLabel(
           status,
           pane
-            ? { kind: pane.pane.agent_kind, progress: pane.pane.agent_progress }
+            ? {
+                kind: pane.pane.agent_kind,
+                progress: pane.pane.agent_progress,
+                tone: pane.pane.agent_tone,
+              }
             : space
-              ? spaceDetails(space, status)
+              ? { ...spaceDetails(space, status), tone: warning ? "warning" : undefined }
               : undefined,
         );
       case "agent":
@@ -342,7 +353,7 @@ export function renderRow(
     .map((spec) => {
       const out: Line = [];
       for (const { token, bold, dim } of spec) {
-        const base = { status, bold: bold === true, dim: dim === true };
+        const base = { status, warning, bold: bold === true, dim: dim === true };
         if (token === "state_icon") {
           out.push({ ...base, kind: "dot", text: "", sep: false });
           continue;
@@ -405,6 +416,8 @@ export interface RecordRow {
   /** Nesting level: the number of `/` in the id. */
   depth: number;
   status: AgentStatus;
+  /** `done` with the tone `warning` (#1152). */
+  warning: boolean;
   /** The record's title, else the last segment of its id. */
   name: string;
   state: string | undefined;
@@ -421,8 +434,9 @@ export function recordRows(pane: Terminal): RecordRow[] {
         id: r.id,
         depth: r.id.split("/").length - 1,
         status: r.status,
+        warning: isWarning(r.status, r.tone),
         name,
-        state: stateLabel(r.status, { kind: r.kind, progress: r.progress }),
+        state: stateLabel(r.status, { kind: r.kind, progress: r.progress, tone: r.tone }),
         message: r.message && same(r.message) !== same(name) ? r.message : undefined,
       };
     });

@@ -5,12 +5,18 @@
         @if (edit?.kind === "space") {
           <span
             class="dot status-{{ seg.status }}"
+            [class.warning]="seg.warning"
             role="img"
             [attr.aria-label]="stateTip()"
             [title]="stateTip()"
           ></span>
         } @else {
-          <span class="dot status-{{ seg.status }}"></span>
+          <span
+            class="dot status-{{ seg.status }}"
+            [class.warning]="seg.warning"
+            [attr.role]="seg.warning ? 'img' : null"
+            [attr.aria-label]="seg.warning ? 'Done with a warning' : null"
+          ></span>
         }
       }
       @case ("name") {
@@ -66,9 +72,10 @@
         }
       }
       @case ("state") {
-        @if (edit?.kind !== "space" || wordy(seg.status)) {
+        @if (edit?.kind !== "space" || wordy(seg.status, seg.warning)) {
           <span
             class="state state-{{ seg.status }}"
+            [class.warning]="seg.warning"
             [class.bold]="seg.bold"
             [class.dim]="seg.dim"
             >{{ seg.text }}</span
@@ -174,7 +181,12 @@
           }
           @for (r of rv.rows; track r.id) {
             <span class="record" [style.padding-left.px]="r.depth * 10" [title]="r.id">
-              <span class="dot status-{{ r.status }}"></span>
+              <span
+                class="dot status-{{ r.status }}"
+                [class.warning]="r.warning"
+                [attr.role]="r.warning ? 'img' : null"
+                [attr.aria-label]="r.warning ? 'Done with a warning' : null"
+              ></span>
               <span class="name">{{ r.name }}</span>
               @if (r.state; as state) {
                 <span class="state state-{{ r.status }}">{{ state }}</span>
@@ -266,6 +278,7 @@
       @if (!firstHasDot()) {
         <span
           class="dot status-{{ data().status }}"
+          [class.warning]="warning()"
           role="img"
           [attr.aria-label]="stateTip()"
           [title]="stateTip()"

@@ -71,7 +71,8 @@
             <td class="label">{{ row.label }}</td>
             <td class="kind">{{ row.kind === "agent" ? "Agent " + row.agent : "Terminal" }}</td>
             <td class="status">
-              <span class="dot status-{{ row.status }}"></span>{{ row.status }}
+              <span class="dot status-{{ row.status }}" [class.warning]="row.warning"></span
+              >{{ row.warning ? "done: warning" : row.status }}
             </td>
             <td class="activity">{{ activity(row.activityAt) }}</td>
             <td class="actions">

@@ -275,6 +275,7 @@ impl TerminalEntry {
                     progress: report.progress,
                     // The kind of a block only means something while blocked.
                     kind: report.kind.filter(|_| status == AgentStatus::Blocked),
+                    tone: report.tone.filter(|_| status == AgentStatus::Done),
                     title: report
                         .title
                         .as_deref()
@@ -2300,6 +2301,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         message_at,
         progress: None,
         kind: None,
+        tone: None,
         title: None,
         reported_at: Some(now_ms),
         status_since,
@@ -2321,18 +2323,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         entry.hook_agent = next;
     } else if !unchanged {
         entry.info.agent = next;
-        shared.publish(Event::AgentStatusChanged {
-            terminal_id: p.terminal_id,
-            status: p.status,
-            agent: p.agent,
-            session_id: p.session_id,
-            message,
-            message_at,
-            progress: None,
-            kind: None,
-            title: None,
-            silent_since: None,
-        });
+        shared.publish(agent_event(&p.terminal_id, entry.info.agent.as_ref()));
     } else {
         // Only `reported_at` moves: no event, and the list is written at most every 10 s.
         entry.info.agent = next;

@@ -85,6 +85,7 @@ impl Records {
             message_at,
             progress: report.progress,
             kind: report.kind.filter(|_| status == AgentStatus::Blocked),
+            tone: report.tone.filter(|_| status == AgentStatus::Done),
             title: report
                 .title
                 .as_deref()
@@ -235,6 +236,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         };
         let apps: Vec<_> = r
@@ -274,6 +276,7 @@ mod tests {
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
         };
         let mut list: Vec<_> = (0..MAX_CHILD_RECORDS + 5)

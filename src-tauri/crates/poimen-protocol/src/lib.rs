@@ -636,6 +636,9 @@ pub struct AgentInfo {
     /// Why the agent is blocked: `permission`, `question` or `auth` (OSC 7501 `kind`, #682).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// `warning` for a `done` that wants a look (OSC 7501 `tone`, #1152); only with `done`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
     /// The program's own title (OSC 7501 `title`, #682), plain text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -671,6 +674,8 @@ pub struct ChildRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 }
 
@@ -695,6 +700,8 @@ pub fn valid_record_id(id: &str) -> bool {
 
 /// Kinds of a block an OSC 7501 report may name.
 pub const BLOCK_KINDS: [&str; 3] = ["permission", "question", "auth"];
+/// The values of the OSC 7501 key `tone` (#1152), kept only with `state=done`.
+pub const TONES: [&str; 1] = ["warning"];
 
 /// Bidirectional overrides and isolates, zero-width and other invisible formatting characters:
 /// text from a report must not reorder or hide what the user reads (#682).
@@ -1636,6 +1643,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        tone: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         /// Set while the server marks the agent silent (#898).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1902,6 +1911,7 @@ mod tests {
                 message_at: None,
                 progress: None,
                 kind: None,
+                tone: None,
                 title: None,
                 silent_since: None,
             }
@@ -1952,6 +1962,7 @@ mod tests {
             message_at: None,
             progress: Some(40),
             kind: Some("permission".into()),
+            tone: None,
             title: Some("build".into()),
         };
         let value = serde_json::to_value(&info).unwrap();
@@ -2783,81 +2794,5 @@ mod tests {
 }
 
 #[cfg(all(test, unix))]
-mod private_dir_tests {
-    use super::*;
-    use std::os::unix::fs::{PermissionsExt, symlink};
-
-    fn fresh(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-pd-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn mode(p: &std::path::Path) -> u32 {
-        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
-    }
-
-    #[test]
-    fn a_0700_dir_of_ours_passes() {
-        let dir = fresh("ok");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        check_private_dir(&dir, false).unwrap();
-    }
-
-    #[test]
-    fn a_0777_dir_is_fixed_with_fix_and_refused_without() {
-        let dir = fresh("loose");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
-        let err = check_private_dir(&dir, false).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-        assert_eq!(mode(&dir), 0o777);
-        check_private_dir(&dir, true).unwrap();
-        assert_eq!(mode(&dir), 0o700);
-    }
-
-    #[test]
-    fn a_symlink_to_a_dir_is_refused_even_with_fix() {
-        let target = fresh("target");
-        let link = std::env::temp_dir().join(format!("poimen-pd-{}-link", std::process::id()));
-        let _ = std::fs::remove_file(&link);
-        symlink(&target, &link).unwrap();
-        let err = check_private_dir(&link, true).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-        std::fs::remove_file(&link).unwrap();
-    }
-
-    #[test]
-    fn a_dir_of_another_user_is_refused() {
-        // `/` is owned by root; skipped when the tests run as root.
-        if current_uid().unwrap() == 0 {
-            return;
-        }
-        let err = check_private_dir(std::path::Path::new("/"), true).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-    }
-
-    #[test]
-    fn a_tab_parent_is_optional_on_the_wire() {
-        let tab: Tab = serde_json::from_value(serde_json::json!({
-            "tab_id": "tab3", "space_id": "s1", "name": "logs",
-            "root": {"kind": "terminal", "terminal_id": "t3"},
-            "active_terminal": "t3", "parent": "tab2"
-        }))
-        .unwrap();
-        assert_eq!(tab.parent.as_deref(), Some("tab2"));
-        let top: Tab = serde_json::from_value(serde_json::json!({
-            "tab_id": "tab2", "space_id": "s1", "name": "claude",
-            "root": {"kind": "terminal", "terminal_id": "t2"}
-        }))
-        .unwrap();
-        assert_eq!(top.parent, None);
-        assert!(serde_json::to_value(&top).unwrap().get("parent").is_none());
-    }
-
-    #[test]
-    fn a_missing_dir_is_not_found() {
-        let err = check_private_dir(&fresh("m").join("nope"), false).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-}
+#[path = "private_dir_tests.rs"]
+mod private_dir_tests;

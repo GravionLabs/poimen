@@ -4,7 +4,7 @@ import { fuzzyMatch, fuzzyRank } from "./fuzzy";
 import { Machines } from "./machines";
 import {
   agentKind,
-  needsAttention,
+  paneNeedsAttention,
   paneDir,
   paneTitle,
   withMachine,
@@ -197,8 +197,8 @@ export class JumpPalette {
     const terminals = this.store.all().terminals;
     const unread = this.attention.unread();
     return [
-      ...terminals.filter((t) => needsAttention(t.agent_status)),
-      ...terminals.filter((t) => !needsAttention(t.agent_status) && unread.has(t.terminal_id)),
+      ...terminals.filter(paneNeedsAttention),
+      ...terminals.filter((t) => !paneNeedsAttention(t) && unread.has(t.terminal_id)),
     ].map((t) => this.paneEntry(t));
   });
 

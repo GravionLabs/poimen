@@ -38,6 +38,7 @@ export interface MachineEvent {
     agent_status?: AgentStatus;
     agent_progress?: number;
     agent_kind?: string;
+    agent_tone?: string;
     agent_title?: string;
   } | null;
 }
@@ -105,6 +106,7 @@ export class RemoteSpaces {
               applyStatus(snapshot, pane, status, undefined, {
                 progress: data.agent_progress,
                 kind: data.agent_kind,
+                tone: data.agent_tone,
                 title: data.agent_title,
               }),
             )
