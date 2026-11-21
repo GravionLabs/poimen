@@ -221,6 +221,7 @@ export class GithubMilestones {
       const verb = c.kind === "create" ? "Create" : c.kind === "edit" ? "Edit" : "Close";
       this.spaces.notify(
         `${verb} milestone ${c.title}: ${typeof e === "string" ? e : errorText(e)}`,
+        "error",
       );
       return false;
     } finally {

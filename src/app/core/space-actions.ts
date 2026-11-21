@@ -8,6 +8,7 @@ import {
   reorderIds,
   type Snapshot,
 } from "./snapshot";
+import { injectMessages, TOAST_ERROR_MS, TOAST_MS } from "./toast";
 import { SettingsStore, type SidebarSort } from "./settings";
 import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
@@ -119,6 +120,7 @@ export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): stri
 @Injectable({ providedIn: "root" })
 export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
+  private readonly messages = injectMessages();
   private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore, { optional: true });
@@ -168,9 +170,18 @@ export class SpaceActions {
     this._trust.set({ cwd: request.root, label: "", command: null, request, resume, without });
   }
 
-  /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
-  notify(message: string): void {
-    this._warning.set(message);
+  /** Shows `message` as a toast: the result of an action the user did not watch, or why it failed. */
+  notify(message: string, severity: "info" | "success" | "error" = "info"): void {
+    this.messages.add({
+      severity,
+      summary: message,
+      life: severity === "error" ? TOAST_ERROR_MS : TOAST_MS,
+    });
+  }
+
+  /** An error toast: why an action failed. */
+  fail(message: string): void {
+    this.notify(message, "error");
   }
 
   /** An existing space was focused instead of a new one: select it and say so. */

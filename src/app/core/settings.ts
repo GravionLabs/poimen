@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { injectMessages, TOAST_ERROR_MS } from "./toast";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { layoutConfig, parseNamedLayouts, type NamedLayout } from "./named-layouts";
@@ -521,6 +522,7 @@ export function parseSettings(raw: unknown): Settings {
 @Injectable({ providedIn: "root" })
 export class SettingsStore {
   private readonly bridge = inject(TauriBridge);
+  private readonly messages = injectMessages();
   private readonly _settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly settings = this._settings.asReadonly();
   private readonly _writeError = signal<string | null>(null);
@@ -544,7 +546,7 @@ export class SettingsStore {
       await this.bridge.invoke("set_theme", { theme });
     } catch (e) {
       this._settings.set(previous);
-      console.warn(`poimen settings: cannot save theme: ${e}`);
+      this.failed("the theme", e);
     }
   }
 
@@ -556,7 +558,7 @@ export class SettingsStore {
       await this.bridge.invoke("set_color_schema", { schema: colorSchema });
     } catch (e) {
       this._settings.set(previous);
-      console.warn(`poimen settings: cannot save colorSchema: ${e}`);
+      this.failed("the color scheme", e);
     }
   }
 
@@ -569,8 +571,7 @@ export class SettingsStore {
       this._writeError.set(null);
     } catch (e) {
       this._settings.set(previous);
-      this._writeError.set(`Cannot save the sidebar layout: ${e}`);
-      console.warn(`poimen settings: cannot save sidebar.layout: ${e}`);
+      this.failed("the sidebar layout", e);
     }
   }
 
@@ -583,8 +584,7 @@ export class SettingsStore {
       this._writeError.set(null);
     } catch (e) {
       this._settings.set(previous);
-      this._writeError.set(`Cannot save the sidebar sort: ${e}`);
-      console.warn(`poimen settings: cannot save sidebar.sort: ${e}`);
+      this.failed("the sidebar sort", e);
     }
   }
 
@@ -597,8 +597,7 @@ export class SettingsStore {
       this._writeError.set(null);
     } catch (e) {
       this._settings.set(previous);
-      this._writeError.set(`Cannot save the agents order: ${e}`);
-      console.warn(`poimen settings: cannot save sidebar.agents: ${e}`);
+      this.failed("the agents order", e);
     }
   }
 
@@ -692,7 +691,19 @@ export class SettingsStore {
 
   private reject(message: string): false {
     this._writeError.set(message);
+    this.toastError(message);
     return false;
+  }
+
+  /** A write that failed: the inline error of the editors and an error toast with the reason. */
+  private failed(what: string, reason: unknown): void {
+    const message = `Cannot save ${what}: ${reason}`;
+    this._writeError.set(message);
+    this.toastError(message);
+  }
+
+  private toastError(message: string): void {
+    this.messages.add({ severity: "error", summary: message, life: TOAST_ERROR_MS });
   }
 
   /** Writes `spaces.layout` (validated again by the backend); `false` when the write failed. */
@@ -748,8 +759,7 @@ export class SettingsStore {
       return true;
     } catch (e) {
       this._settings.set(previous);
-      this._writeError.set(`Cannot save ${what}: ${e}`);
-      console.warn(`poimen settings: cannot save ${what}: ${e}`);
+      this.failed(what, e);
       return false;
     }
   }

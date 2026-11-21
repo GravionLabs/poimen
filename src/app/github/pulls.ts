@@ -528,7 +528,7 @@ export class GithubPulls {
       });
       await this.spaces.create(wt.path, `#${row.number}`);
     } catch (err) {
-      this.spaces.notify(`Pull request #${row.number}: ${String(err)}`);
+      this.spaces.fail(`Pull request #${row.number}: ${String(err)}`);
     }
     const result = this._result();
     if (result) await this.loadWorktrees(result);
@@ -702,7 +702,7 @@ export class GithubPulls {
       await fn();
     } catch (err) {
       const e = ghErrorOf(err);
-      this.spaces.notify(`${label} #${row.number}: ${typeof e === "string" ? e : errorText(e)}`);
+      this.spaces.fail(`${label} #${row.number}: ${typeof e === "string" ? e : errorText(e)}`);
       return false;
     } finally {
       this._actionBusy.set(false);
