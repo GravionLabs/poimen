@@ -34,6 +34,19 @@
     [value]="layout()"
     (valueChange)="setLayout($any($event))"
   />
+  @if (pullRequest.canCreate()) {
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      class="create-pr"
+      (click)="pullRequest.open()"
+    >
+      Create pull request...
+    </button>
+  }
   <button
     type="button"
     hx-button
@@ -372,3 +385,5 @@
     </div>
   </app-dialog-shell>
 }
+
+<app-pull-request-dialog />

@@ -17,7 +17,7 @@ use crate::changes::validate;
 use crate::git::run_bytes;
 
 /// Longest the harness may take.
-const TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(120);
 /// Bytes of diff sent as is; more is shortened (Windows caps a command line near 32 000).
 pub(crate) const DIFF_LIMIT: usize = if cfg!(windows) { 20_000 } else { 60_000 };
 /// Bytes of one hunk kept when the diff is shortened.
@@ -41,7 +41,7 @@ pub fn cancel(id: &str) -> bool {
     }
 }
 
-fn cut(text: &str, max: usize) -> &str {
+pub(crate) fn cut(text: &str, max: usize) -> &str {
     let mut end = text.len().min(max);
     while !text.is_char_boundary(end) {
         end -= 1;
@@ -164,7 +164,7 @@ fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8
     })
 }
 
-fn run(
+pub(crate) fn run(
     argv: &[String],
     dir: &str,
     cancelled: &AtomicBool,
@@ -230,12 +230,17 @@ pub fn generate(
     id: &str,
     home: Option<&Path>,
 ) -> Result<String, String> {
+    tracked(id, |flag| draft(dir, harness, flag, home))
+}
+
+/// Runs `work` with a cancel flag that `cancel(id)` sets; the id is free again afterwards.
+pub(crate) fn tracked<T>(id: &str, work: impl FnOnce(&AtomicBool) -> T) -> T {
     let flag = Arc::new(AtomicBool::new(false));
     running()
         .lock()
         .unwrap()
         .insert(id.to_owned(), flag.clone());
-    let result = draft(dir, harness, &flag, home);
+    let result = work(&flag);
     running().lock().unwrap().remove(id);
     result
 }
