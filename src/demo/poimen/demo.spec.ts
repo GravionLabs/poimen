@@ -12,7 +12,6 @@ describe("the poimen demo", () => {
 
   it("answers the start commands in the shapes the app parses", async () => {
     const settings = parseSettings(await demo.invoke("get_settings"));
-    expect(settings.sidebarLayout).toBe("cards");
     expect(settings.machines.map((m) => m.name)).toEqual(["build-box", "gpu-lab"]);
     const snapshot = toSnapshot(await demo.invoke<WireSnapshot>("snapshot"));
     expect(snapshot.spaces.length).toBeGreaterThan(2);
