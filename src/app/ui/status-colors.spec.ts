@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { bundled, colorDistance, contrast, deriveTokens } from "../core/color-scheme";
 
 /** Status colors come from the `--status-*` tokens, never a hex value (#859). */
 function files(dir: string): string[] {
@@ -31,5 +32,17 @@ describe("status colors", () => {
         });
     }
     expect(bad).toEqual([]);
+  });
+
+  it("gives the unread mark its own color, 3:1 on the surface, in every bundled scheme (#1031)", () => {
+    for (const scheme of bundled.values()) {
+      const t = deriveTokens(scheme);
+      const unread = t["--status-unread"];
+      expect(contrast(unread, scheme.background), scheme.name).toBeGreaterThanOrEqual(3);
+      for (const state of ["working", "blocked", "done", "error"]) {
+        const color = state === "error" ? scheme.ansi[1] : t[`--status-${state}`];
+        expect(colorDistance(unread, color), `${scheme.name} vs ${state}`).toBeGreaterThan(40);
+      }
+    }
   });
 });

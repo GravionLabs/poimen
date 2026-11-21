@@ -406,6 +406,12 @@ export class SpaceCard {
     return this.attn.attention().has(row.pane.terminal_id);
   }
 
+  /** The name of an unread terminal, or of a space with an unread terminal, is semibold (#1031). */
+  protected nameUnread(edit: { kind: "space" | "pane"; id: string } | undefined): boolean {
+    if (!edit) return false;
+    return edit.kind === "space" ? this.unread() > 0 : this.attn.unread().has(edit.id);
+  }
+
   protected isUnread(row: PaneRow): boolean {
     return this.attn.unread().has(row.pane.terminal_id);
   }

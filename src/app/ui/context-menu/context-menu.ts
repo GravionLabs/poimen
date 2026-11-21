@@ -135,7 +135,7 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
     }
 
     .unread {
-      background: var(--status-done);
+      background: var(--status-unread);
     }
   `,
 })

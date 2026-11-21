@@ -58,6 +58,10 @@
   color: var(--h-text-muted-color);
 }
 
+.label.unread-label {
+  font-weight: 600;
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,5 +175,5 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--status-done);
+  background: var(--status-unread);
 }
