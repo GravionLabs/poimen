@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { Attention } from "./attention";
-import { fuzzyRank } from "./fuzzy";
+import { fuzzyMatch, fuzzyRank } from "./fuzzy";
 import { Machines } from "./machines";
 import {
   agentKind,
@@ -33,16 +33,85 @@ export interface JumpEntry {
   pane?: Terminal;
   /** Directory of the pane or space, for branch and pull request lookups. */
   dir?: string;
+  /** Git branch of `dir`, when known. */
+  branch: string | null;
+  /** When the status of `pane` last changed (epoch ms), when known. */
+  changedAt?: number;
   spaceId: string;
   machine?: string;
   /** Why the entry cannot be chosen (its machine is not connected); null when it can. */
   disabled: string | null;
 }
 
+/** Why a row matched when the match is not in its name: the field and its text with the match. */
+export interface MatchContext {
+  field: "branch" | "directory" | "pull request";
+  text: string;
+  positions: readonly number[];
+}
+
 /** A line of the list: a group heading or a selectable entry. */
 export type JumpRow =
   | { type: "heading"; key: string; label: string }
-  | { type: "item"; key: string; entry: JumpEntry; index: number; positions: readonly number[] };
+  | {
+      type: "item";
+      key: string;
+      entry: JumpEntry;
+      index: number;
+      positions: readonly number[];
+      /** Time since the last status change in short form ("3m"), absent when unknown. */
+      age: string | null;
+      context: MatchContext | null;
+    };
+
+/** "now", "3m", "2h", "4d" for the time from `at` to `now`. */
+export function shortAge(at: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - at) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * The field behind a match that is not in the name: the branch, the directory or the pull
+ * request number (`#12`) that `query` matches, with the matched positions. Null when nothing
+ * outside the name matches on its own.
+ */
+export function matchContext(
+  entry: JumpEntry,
+  pr: number | null,
+  query: string,
+): MatchContext | null {
+  const fields: [MatchContext["field"], string | null][] = [
+    ["branch", entry.branch],
+    ["directory", entry.dir ?? null],
+    ["pull request", pr !== null ? `#${pr}` : null],
+  ];
+  const number = /^#(\d+)$/.exec(query)?.[1];
+  for (const [field, text] of fields) {
+    if (text === null) continue;
+    if (number !== undefined) {
+      // A number matches as a whole number in the branch, or the pull request itself.
+      const at =
+        field === "branch"
+          ? new RegExp(`(?<![0-9])${number}(?![0-9])`).exec(text)?.index
+          : field === "pull request" && text === query
+            ? 0
+            : undefined;
+      if (at === undefined) continue;
+      const length = field === "pull request" ? text.length : number.length;
+      return {
+        field,
+        text,
+        positions: Array.from({ length }, (_, i) => at + i),
+      };
+    }
+    const m = fuzzyMatch(query, text);
+    if (m) return { field, text, positions: m.positions };
+  }
+  return null;
+}
 
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -66,7 +135,10 @@ export class JumpPalette {
   readonly isOpen = this._open.asReadonly();
   readonly query = this._query.asReadonly();
 
-  private info(dir: string | undefined): { branch: string | null; pr: number | null } {
+  private info(dir: string | undefined): {
+    branch: string | null;
+    pr: number | null;
+  } {
     if (!dir) return { branch: null, pr: null };
     return {
       branch: this.store.repos().get(dir)?.branch ?? null,
@@ -85,6 +157,8 @@ export class JumpPalette {
 
   private paneEntry(pane: Terminal): JumpEntry {
     return {
+      branch: this.info(paneDir(pane)).branch,
+      changedAt: this.attention.changedAt().get(pane.terminal_id),
       key: `pane:${pane.terminal_id}`,
       kind: "pane",
       icon: "terminal",
@@ -103,6 +177,8 @@ export class JumpPalette {
     const pane = terminals.find((t) => agentKind(t) !== undefined);
     const dir = space.cwd ?? (terminals[0] ? paneDir(terminals[0]) : undefined);
     return {
+      branch: this.info(dir).branch,
+      changedAt: pane ? this.attention.changedAt().get(pane.terminal_id) : undefined,
       key: `space:${space.space_id}`,
       kind: "space",
       icon: "space",
@@ -150,8 +226,22 @@ export class JumpPalette {
   readonly rows = computed<JumpRow[]>(() => {
     const rows: JumpRow[] = [];
     let index = 0;
-    const push = (entry: JumpEntry, positions: readonly number[]): void => {
-      rows.push({ type: "item", key: entry.key, entry, index: index++, positions });
+    const now = Date.now();
+    const push = (
+      entry: JumpEntry,
+      positions: readonly number[],
+      context: MatchContext | null = null,
+    ): void => {
+      const age = entry.changedAt === undefined ? null : shortAge(entry.changedAt, now);
+      rows.push({
+        type: "item",
+        key: entry.key,
+        entry,
+        index: index++,
+        positions,
+        age,
+        context,
+      });
     };
     const query = this._query().trim();
     if (query === "") {
@@ -178,7 +268,7 @@ export class JumpPalette {
           (branch !== null && word.test(branch)) ||
           pr === Number(number)
         )
-          push(entry, []);
+          push(entry, [], word.test(entry.title) ? null : matchContext(entry, pr, query));
       }
       return rows;
     }
@@ -186,12 +276,21 @@ export class JumpPalette {
       this.everything(),
       query,
       (e) => `${e.title} ${e.detail}`,
-    ))
+    )) {
+      const inName = positions.filter((p) => p < item.title.length);
       push(
         item,
-        positions.filter((p) => p < item.title.length),
+        inName,
+        inName.length > 0 ? null : matchContext(item, this.info(item.dir).pr, query),
       );
+    }
     return rows;
+  });
+
+  /** The result count for a screen reader, e.g. "3 results". */
+  readonly announcement = computed(() => {
+    const n = this.entries().length;
+    return n === 0 ? "No results" : n === 1 ? "1 result" : `${n} results`;
   });
 
   /** The selectable entries in display order. */
