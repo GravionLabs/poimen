@@ -142,53 +142,123 @@
   <p class="empty">No changes against {{ changes.list()?.base }}.</p>
 } @else if (changes.list()) {
   <div class="body">
-    <ul
+    <div
       class="files"
       role="listbox"
       aria-label="Changed files"
+      aria-multiselectable="true"
       tabindex="0"
       [attr.aria-activedescendant]="changes.selected() ? 'file-' + changes.selected() : null"
       (keydown)="onListKey($event)"
     >
-      @for (file of changes.files(); track file.path) {
-        <li
-          role="option"
-          class="file"
-          [id]="'file-' + file.path"
-          [class.selected]="file.path === changes.selected()"
-          [attr.aria-selected]="file.path === changes.selected()"
-          [title]="title(file)"
-          tabindex="-1"
-          (click)="changes.select(file.path)"
-          (contextmenu)="openFileMenu($event, file.path)"
-          (keydown.enter)="changes.select(file.path)"
-        >
-          @if (changes.scope() === "uncommitted") {
-            <input
-              type="checkbox"
+      @if (changes.scope() === "uncommitted") {
+        @for (section of sections(); track section.id) {
+          <div class="section" role="group" [attr.aria-label]="section.title">
+            <div class="section-head" [attr.data-section]="section.id">
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                class="toggle"
+                [attr.aria-expanded]="!changes.collapsed().has(section.id)"
+                (click)="changes.toggleSection(section.id)"
+              >
+                {{ changes.collapsed().has(section.id) ? "▸" : "▾" }} {{ section.title }}
+              </button>
+              <span class="tag count">{{ section.files.length }}</span>
+              <span class="spacer"></span>
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                class="all"
+                [disabled]="changes.busy()"
+                (click)="changes.setStagedMany(section.files, section.id !== 'staged')"
+              >
+                {{ section.id === "staged" ? "Unstage all" : "Stage all" }}
+              </button>
+            </div>
+            @if (!changes.collapsed().has(section.id)) {
+              @for (file of section.files; track file.path) {
+                <ng-container *ngTemplateOutlet="row; context: { $implicit: file }" />
+              }
+            }
+          </div>
+        }
+      } @else {
+        @for (file of changes.files(); track file.path) {
+          <ng-container *ngTemplateOutlet="row; context: { $implicit: file }" />
+        }
+      }
+    </div>
+    <ng-template #row let-file>
+      <div
+        role="option"
+        class="file"
+        [id]="'file-' + file.path"
+        [attr.data-path]="file.path"
+        [class.selected]="file.path === changes.selected()"
+        [class.picked]="changes.picked().has(file.path)"
+        [attr.aria-selected]="file.path === changes.selected() || changes.picked().has(file.path)"
+        [title]="title(file)"
+        tabindex="-1"
+        (click)="clickRow($event, file)"
+        (contextmenu)="openFileMenu($event, file.path)"
+        (keydown.enter)="changes.select(file.path)"
+      >
+        <span class="status s-{{ file.status }}" [attr.aria-label]="file.status">{{
+          statusLetter(file.status)
+        }}</span>
+        <span class="path"
+          ><span class="name">{{ split(file.path).name }}</span>
+          @if (split(file.path).dir) {
+            <span class="dir">{{ split(file.path).dir }}</span>
+          }
+        </span>
+        @if (changes.scope() === "uncommitted") {
+          <span class="actions">
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
               class="stage"
-              [checked]="file.staged"
               [disabled]="changes.busy()"
               [attr.aria-label]="(file.staged ? 'Unstage ' : 'Stage ') + file.path"
-              (click)="$event.stopPropagation()"
-              (change)="changes.setStaged(file, !file.staged)"
-            />
-          }
-          <span class="status s-{{ file.status }}" [attr.aria-label]="file.status">{{
-            statusLetter(file.status)
-          }}</span>
-          <span class="path">{{ file.path }}</span>
-          @if (file.binary) {
-            <span class="stat">binary</span>
-          } @else {
-            <span class="stat"
-              ><span class="add">+{{ file.additions }}</span>
-              <span class="del">−{{ file.deletions }}</span></span
+              (click)="$event.stopPropagation(); stage(file)"
             >
-          }
-        </li>
-      }
-    </ul>
+              {{ file.staged ? "Unstage" : "Stage" }}
+            </button>
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="danger"
+              size="small"
+              class="discard"
+              [disabled]="changes.busy()"
+              [attr.aria-label]="'Discard ' + file.path"
+              (click)="$event.stopPropagation(); askDiscard(file)"
+            >
+              Discard
+            </button>
+          </span>
+        }
+        @if (file.binary) {
+          <span class="stat">binary</span>
+        } @else {
+          <span class="stat"
+            ><span class="add">+{{ file.additions }}</span>
+            <span class="del">−{{ file.deletions }}</span></span
+          >
+        }
+      </div>
+    </ng-template>
     <section class="diff" aria-label="Diff">
       @if (changes.contentError(); as error) {
         <p class="problem" role="alert">{{ error }}</p>
@@ -235,4 +305,50 @@
     (picked)="openFile(at.path)"
     (closed)="menuAt.set(null)"
   />
+}
+@if (discarding(); as files) {
+  <app-dialog-shell
+    heading="Discard changes"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="discarding.set(null)"
+  >
+    <p class="hint">
+      @if (files.length === 1) {
+        Discard the changes to <strong>{{ files[0].path }}</strong
+        >?
+      } @else {
+        Discard the changes to these {{ files.length }} files?
+      }
+      This cannot be undone.
+    </p>
+    @if (files.length > 1) {
+      <ul class="discard-list">
+        @for (file of files; track file.path) {
+          <li>{{ file.path }}</li>
+        }
+      </ul>
+    }
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        (click)="discarding.set(null)"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        hx-button
+        severity="danger"
+        class="confirm-discard"
+        (click)="confirmDiscard()"
+      >
+        Discard
+      </button>
+    </div>
+  </app-dialog-shell>
 }

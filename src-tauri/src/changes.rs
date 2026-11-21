@@ -20,17 +20,18 @@ pub enum Scope {
     Uncommitted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Added,
+    #[default]
     Modified,
     Deleted,
     Renamed,
     Untracked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ChangedFile {
     pub path: String,
     /// The path before a rename.
@@ -41,6 +42,7 @@ pub struct ChangedFile {
     pub binary: bool,
     /// The index holds a change for the file (`git diff --cached`).
     pub staged: bool,
+    pub conflicted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -80,7 +82,7 @@ fn resolve(dir: &str, scope: Scope) -> (String, String) {
     }
 }
 
-fn text(b: &[u8]) -> String {
+pub(crate) fn text(b: &[u8]) -> String {
     String::from_utf8_lossy(b).into_owned()
 }
 
@@ -170,6 +172,13 @@ fn count_lines(b: &[u8]) -> u32 {
     u32::try_from(newlines + partial).unwrap_or(u32::MAX)
 }
 
+fn nul_list(out: &[u8]) -> Vec<String> {
+    out.split(|b| *b == 0)
+        .filter(|t| !t.is_empty())
+        .map(text)
+        .collect()
+}
+
 fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
     let (base, from) = resolve(dir, scope);
     let name_status = run_bytes(dir, &["diff", "--name-status", "-z", "-M", &from, "--"])?;
@@ -188,13 +197,12 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
                 additions,
                 deletions,
                 binary,
-                staged: false,
+                ..Default::default()
             }
         })
         .collect();
     let untracked = run_bytes(dir, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-    for path in untracked.split(|b| *b == 0).filter(|t| !t.is_empty()) {
-        let path = text(path);
+    for path in nul_list(&untracked) {
         let content = read_worktree_file(dir, &path)
             .ok()
             .flatten()
@@ -203,21 +211,21 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
         files.push(ChangedFile {
             additions: if binary { 0 } else { count_lines(&content) },
             path,
-            old_path: None,
             status: Status::Untracked,
-            deletions: 0,
             binary,
-            staged: false,
+            ..Default::default()
         });
     }
-    let cached = run_bytes(dir, &["diff", "--cached", "--name-only", "-z"]).unwrap_or_default();
-    let staged: std::collections::HashSet<String> = cached
-        .split(|b| *b == 0)
-        .filter(|t| !t.is_empty())
-        .map(text)
-        .collect();
+    let names = |args: &[&str]| -> std::collections::HashSet<String> {
+        nul_list(&run_bytes(dir, args).unwrap_or_default())
+            .into_iter()
+            .collect()
+    };
+    let staged = names(&["diff", "--cached", "--name-only", "-z"]);
+    let conflicted = names(&["diff", "--name-only", "--diff-filter=U", "-z"]);
     for f in &mut files {
         f.staged = staged.contains(&f.path);
+        f.conflicted = conflicted.contains(&f.path);
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(ChangeList {
@@ -287,116 +295,7 @@ pub fn file(
     file_in(&validate(dir, home)?, scope, path)
 }
 
-/// Largest comments file the app writes.
-const MAX_COMMENTS: usize = 1024 * 1024;
-const EXCLUDE_LINE: &str = ".agents/state/";
-
-/// A directory component that is a real directory (created when missing), never a symlink.
-fn plain_dir(path: &Path) -> Result<(), String> {
-    match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_dir() => Ok(()),
-        Ok(_) => Err(format!("{} is not a plain directory", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir(path).map_err(|e| format!("{}: {e}", path.display()))
-        }
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    }
-}
-
-/// Adds `.agents/state/` to the repository's `info/exclude` (once).
-fn exclude_state(top: &str) -> Result<(), String> {
-    let out = run_bytes(top, &["rev-parse", "--git-path", "info/exclude"])?;
-    let rel = text(&out).trim().to_string();
-    if rel.is_empty() {
-        return Err("git reported no info/exclude path".into());
-    }
-    let path = Path::new(top).join(rel);
-    let current = std::fs::read_to_string(&path).unwrap_or_default();
-    if current.lines().any(|l| l.trim() == EXCLUDE_LINE) {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let mut next = current;
-    if !next.is_empty() && !next.ends_with('\n') {
-        next.push('\n');
-    }
-    next.push_str(EXCLUDE_LINE);
-    next.push('\n');
-    std::fs::write(&path, next).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Writes `content` to a new `comments-<unix seconds>.md` in `<top>/.agents/state/` and returns
-/// its absolute path. Refuses symlinked `.agents` / `state` directories and never overwrites.
-fn write_comments_in(top: &str, content: &str) -> Result<String, String> {
-    if content.len() > MAX_COMMENTS {
-        return Err("the comments are too large".into());
-    }
-    let agents = Path::new(top).join(".agents");
-    plain_dir(&agents)?;
-    let state = agents.join("state");
-    plain_dir(&state)?;
-    exclude_state(top)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    for n in 0..100 {
-        let name = if n == 0 {
-            format!("comments-{stamp}.md")
-        } else {
-            format!("comments-{stamp}-{n}.md")
-        };
-        let file = state.join(&name);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file)
-        {
-            Ok(mut f) => {
-                use std::io::Write;
-                f.write_all(content.as_bytes())
-                    .map_err(|e| format!("{}: {e}", file.display()))?;
-                return Ok(file.to_string_lossy().into_owned());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("{}: {e}", file.display())),
-        }
-    }
-    Err("could not find a free comments file name".into())
-}
-
-pub fn write_comments(dir: &str, content: &str, home: Option<&Path>) -> Result<String, String> {
-    write_comments_in(&validate(dir, home)?, content)
-}
-
-/// Writes `content` to `<top>/.agents/state/ci-failed-<nr>.log` (replacing an earlier one),
-/// creating the directories and excluding `.agents/state/` once; returns the absolute path.
-fn write_ci_log_in(top: &str, nr: u64, content: &str) -> Result<String, String> {
-    let agents = Path::new(top).join(".agents");
-    plain_dir(&agents)?;
-    let state = agents.join("state");
-    plain_dir(&state)?;
-    exclude_state(top)?;
-    let file = state.join(format!("ci-failed-{nr}.log"));
-    // A symlink left at that name is removed, never followed.
-    match std::fs::remove_file(&file) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {e}", file.display())),
-    }
-    std::fs::write(&file, content).map_err(|e| format!("{}: {e}", file.display()))?;
-    Ok(file.to_string_lossy().into_owned())
-}
-
-pub fn write_ci_log(
-    dir: &str,
-    nr: u64,
-    content: &str,
-    home: Option<&Path>,
-) -> Result<String, String> {
-    write_ci_log_in(&validate(dir, home)?, nr, content)
-}
+pub use crate::changes_files::{write_ci_log, write_comments};
 
 /// Largest findings file the app reads.
 const MAX_FINDINGS: u64 = 1024 * 1024;
@@ -554,6 +453,7 @@ pub fn findings(dir: &str, home: Option<&Path>) -> Result<FindingsResult, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::changes_files::{MAX_COMMENTS, write_ci_log_in, write_comments_in};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 

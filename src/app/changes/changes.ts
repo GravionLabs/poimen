@@ -5,6 +5,7 @@ import { parseHarnesses } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
 import { paneDir } from "../core/snapshot";
 import { TauriBridge } from "../core/tauri";
+import { rangeBetween, sectionsOf, type SectionId } from "./change-sections";
 
 /** What is compared: the working tree against the merge base with the base branch, or `HEAD`. */
 export type ChangesScope = "base" | "uncommitted";
@@ -37,6 +38,8 @@ export interface ChangedFile {
   binary: boolean;
   /** The index holds a change for the file. */
   staged: boolean;
+  /** The file has an unresolved merge conflict. */
+  conflicted: boolean;
 }
 
 /** The answer of `changes_list`: `base` is the ref used, `from` the commit the old content comes from. */
@@ -67,6 +70,11 @@ export function statusLetter(status: ChangeStatus): string {
     default:
       return "M";
   }
+}
+
+/** The paths an action on the files touches: both paths of a rename. */
+function pathsOf(files: readonly ChangedFile[]): string[] {
+  return [...new Set(files.flatMap((f) => (f.old_path ? [f.old_path, f.path] : [f.path])))];
 }
 
 /** Totals over a file list. */
@@ -114,6 +122,12 @@ export class Changes {
   readonly busy = signal(false);
   /** The output or error of the last stage, commit or push. */
   readonly actionResult = signal<{ ok: boolean; text: string } | null>(null);
+
+  /** The sections of the uncommitted scope that are collapsed. */
+  readonly collapsed = signal<ReadonlySet<SectionId>>(new Set());
+  /** The files picked with Shift-click (empty: only the opened file counts). */
+  readonly picked = signal<ReadonlySet<string>>(new Set());
+  private anchor: string | null = null;
 
   readonly files = computed(() => this.list()?.files ?? []);
   readonly totals = computed(() => totals(this.files()));
@@ -243,6 +257,8 @@ export class Changes {
       if (run !== this.listRun) return;
       this.list.set(list);
       this.error.set(null);
+      const present = new Set(list.files.map((f) => f.path));
+      this.picked.set(new Set([...this.picked()].filter((p) => present.has(p))));
       const wanted = this.tabs.takeChangesFocus(dir);
       const keep = list.files.some((f) => f.path === this.selected());
       const pick = wanted && list.files.some((f) => f.path === wanted) ? wanted : undefined;
@@ -282,12 +298,69 @@ export class Changes {
   }
 
   /** Stages or unstages a file (both paths of a rename), then reads the list again. */
-  async setStaged(file: ChangedFile, staged: boolean): Promise<void> {
-    const paths = file.old_path ? [file.old_path, file.path] : [file.path];
+  setStaged(file: ChangedFile, staged: boolean): Promise<void> {
+    return this.setStagedMany([file], staged);
+  }
+
+  /** Stages or unstages files (both paths of a renamed one) in one call, then reads the list again. */
+  async setStagedMany(files: readonly ChangedFile[], staged: boolean): Promise<void> {
+    const paths = pathsOf(files);
+    if (!paths.length) return;
     await this.act(async () => {
-      await this.bridge.invoke("changes_stage", { dir: this.dir(), paths, stage: staged });
+      await this.bridge.invoke("changes_stage", {
+        dir: this.dir(),
+        paths,
+        stage: staged,
+      });
       return null;
     });
+  }
+
+  /** Throws away the changes of the files (the view asked first), then reads the list again. */
+  async discard(files: readonly ChangedFile[]): Promise<void> {
+    const paths = pathsOf(files);
+    if (!paths.length) return;
+    await this.act(async () => {
+      await this.bridge.invoke("changes_discard", { dir: this.dir(), paths });
+      return null;
+    });
+  }
+
+  /** The files an action on `file` applies to: the picked ones when it is one of them, else it alone. */
+  targets(file: ChangedFile): ChangedFile[] {
+    const picked = this.picked();
+    if (picked.size > 1 && picked.has(file.path)) {
+      return this.listed().filter((f) => picked.has(f.path));
+    }
+    return [file];
+  }
+
+  /** The files in the order the list shows them (sections in the uncommitted scope). */
+  listed(): ChangedFile[] {
+    return this.scope() === "uncommitted"
+      ? sectionsOf(this.files()).flatMap((s) => s.files)
+      : this.files();
+  }
+
+  /** Click on a row: Shift extends the pick from the last clicked row, a plain click resets it. */
+  pick(path: string, shift: boolean): void {
+    if (shift && this.anchor) {
+      const order = this.listed().map((f) => f.path);
+      this.picked.set(new Set(rangeBetween(order, this.anchor, path)));
+    } else {
+      this.anchor = path;
+      this.picked.set(new Set());
+    }
+  }
+
+  clearPicked(): void {
+    this.picked.set(new Set());
+  }
+
+  toggleSection(id: SectionId): void {
+    const next = new Set(this.collapsed());
+    if (!next.delete(id)) next.add(id);
+    this.collapsed.set(next);
   }
 
   /** Commits the staged files with the message; the message is cleared on success. */
@@ -307,7 +380,9 @@ export class Changes {
   async push(): Promise<void> {
     if (this.busy()) return;
     await this.act(async () => {
-      const out = await this.bridge.invoke<string>("changes_push", { dir: this.dir() });
+      const out = await this.bridge.invoke<string>("changes_push", {
+        dir: this.dir(),
+      });
       return out || "Pushed.";
     });
   }
@@ -329,7 +404,7 @@ export class Changes {
 
   /** Moves the selection by `delta` files (clamped). */
   move(delta: number): Promise<void> {
-    const files = this.files();
+    const files = this.listed();
     if (!files.length) return Promise.resolve();
     const at = files.findIndex((f) => f.path === this.selected());
     const next = Math.min(files.length - 1, Math.max(0, (at < 0 ? 0 : at) + delta));
