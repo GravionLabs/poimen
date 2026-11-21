@@ -6,8 +6,6 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Terminal, SpaceNode } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
-import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { SpaceActions } from "../core/space-actions";
 import { PaneActions } from "../core/pane-actions";
 import { Sidebar } from "./sidebar";
@@ -56,10 +54,6 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
   });
-  TestBed.overrideComponent(Sidebar, {
-    remove: { imports: [SplitPane] },
-    add: { imports: [SplitPaneStub] },
-  });
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
   const pinned: string[] = [];
@@ -106,7 +100,7 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
   };
 }
 
-describe("Sidebar tree: inline terminal rename (#1035)", () => {
+describe("Sidebar cards: inline terminal rename (#1035)", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
@@ -116,7 +110,7 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
   const edit = async (s: Awaited<ReturnType<typeof setup>>) => {
     nameOf(s, "claude").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     await s.settle();
-    return s.root.querySelector<HTMLInputElement>("input.pane-edit")!;
+    return s.root.querySelector<HTMLInputElement>("input.edit")!;
   };
   const press = async (
     s: Awaited<ReturnType<typeof setup>>,
@@ -136,7 +130,7 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
     input.value = "builder";
     await press(s, input, { key: "Enter" });
     expect(rename).toHaveBeenCalledWith("w1:p1", "builder");
-    expect(s.root.querySelector("input.pane-edit")).toBeNull();
+    expect(s.root.querySelector("input.edit")).toBeNull();
     expect(s.selected).toEqual([]);
   });
 
@@ -150,7 +144,7 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
     s.paneActions.cancelRename();
     s.paneActions.askRename("w1:p1");
     await s.settle();
-    expect(s.root.querySelector("input.pane-edit")).not.toBeNull();
+    expect(s.root.querySelector("input.edit")).not.toBeNull();
   });
 
   it("does not start F2 on a space row", async () => {
@@ -165,11 +159,11 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
     let input = await edit(s);
     input.value = "x";
     await press(s, input, { key: "Escape" });
-    expect(s.root.querySelector("input.pane-edit")).toBeNull();
+    expect(s.root.querySelector("input.edit")).toBeNull();
     input = await edit(s);
     input.dispatchEvent(new FocusEvent("blur"));
     await s.settle();
-    expect(s.root.querySelector("input.pane-edit")).toBeNull();
+    expect(s.root.querySelector("input.edit")).toBeNull();
     expect(rename).not.toHaveBeenCalled();
   });
 
@@ -191,7 +185,7 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
     await press(s, input, { key: "Enter", isComposing: true });
     await press(s, input, { key: "Enter", keyCode: 229 });
     expect(rename).not.toHaveBeenCalled();
-    expect(s.root.querySelector("input.pane-edit")).not.toBeNull();
+    expect(s.root.querySelector("input.edit")).not.toBeNull();
   });
 
   it("disables the field while sending and keeps text and error on failure", async () => {
@@ -208,14 +202,9 @@ describe("Sidebar tree: inline terminal rename (#1035)", () => {
     expect(input.disabled).toBe(true);
     release();
     await s.settle();
-    const after = s.root.querySelector<HTMLInputElement>("input.pane-edit")!;
+    const after = s.root.querySelector<HTMLInputElement>("input.edit")!;
     expect(after.disabled).toBe(false);
     expect(after.value).toBe("kept");
-    expect(s.root.querySelector(".pane-edit-error")?.textContent).toContain("no luck");
-  });
-
-  it("keeps the row box: the field has the line height and no extra padding", () => {
-    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
-    expect(css).toMatch(/\.pane-edit\s*\{[^}]*height:\s*16px/);
+    expect(s.root.querySelector(".edit-error")?.textContent).toContain("no luck");
   });
 });

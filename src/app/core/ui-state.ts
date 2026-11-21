@@ -1,5 +1,4 @@
 import { Injectable, InjectionToken, inject, signal, type WritableSignal } from "@angular/core";
-import { AGENT_SECTIONS, type AgentSection } from "./agent-priority";
 import { idLists, withMark } from "./card-marks";
 import { parseLineComments, type CommentSet } from "./line-comments-state";
 
@@ -9,8 +8,6 @@ export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const ZOOM_LIMIT = 20;
 export const DEFAULT_VIEW = "spaces";
 export const UI_STATE_KEY = "poimen.ui-state";
-/** Smallest share of a section of the split sidebar layout, so its title stays visible. */
-export const SPLIT_MIN_SHARE = 0.15;
 export const PANEL_MIN_HEIGHT = 80;
 export const PANEL_MAX_HEIGHT = 900;
 export const PANEL_DEFAULT_HEIGHT = 260;
@@ -21,7 +18,6 @@ export const DEFAULT_PANEL_TAB = "output";
 export const RECENT_SPACES_LIMIT = 200;
 /** How many run command palette entries are remembered as "Recent". */
 export const RECENT_COMMANDS_LIMIT = 5;
-export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
 export interface UiStorage {
@@ -58,12 +54,6 @@ export interface LayoutState {
   activeView: string;
   /** Paths of the explorer folders that are expanded. */
   expandedDirs: string[];
-  /** The workspace selected in the split sidebar layout; absent until one is picked. */
-  splitWorkspace?: string;
-  /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
-  splitSizes?: [number, number];
-  /** Folded sections of the Agents list in `priority` order (`needs`, `done`, `working`, `idle`). */
-  agentSectionsFolded?: string[];
   /** Legacy: plugin panes poimen opened; read once so their tabs can be dropped, never written. */
   pluginPanes?: Record<string, string>;
   /** The bottom panel below the editor area: shown, its height and its selected tab. */
@@ -153,18 +143,6 @@ export function clampPanelHeight(height: number): number {
   return Math.min(PANEL_MAX_HEIGHT, Math.max(PANEL_MIN_HEIGHT, Math.round(height)));
 }
 
-/** Two shares that sum to 1, each at least {@link SPLIT_MIN_SHARE}; anything else is `null`. */
-export function clampSplitSizes(sizes: unknown): [number, number] | null {
-  if (!Array.isArray(sizes) || sizes.length !== 2) return null;
-  const [a, b] = sizes as unknown[];
-  if (typeof a !== "number" || typeof b !== "number") return null;
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0 || a + b <= 0) return null;
-  const share = Math.min(1 - SPLIT_MIN_SHARE, Math.max(SPLIT_MIN_SHARE, a / (a + b)));
-  // Rounded to 0.1 % so the stored state stays readable (no 0.15000000000000002).
-  const first = Math.round(share * 1000) / 1000;
-  return [first, Math.round((1 - first) * 1000) / 1000];
-}
-
 export function clampSidebarWidth(width: number): number {
   if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -207,9 +185,6 @@ export function parseLayout(raw: string | null): LayoutState {
       editor,
       activeView,
       expandedDirs,
-      splitWorkspace,
-      splitSizes,
-      agentSectionsFolded,
       pluginPanes,
       panelOpen,
       panelHeight,
@@ -298,17 +273,6 @@ export function parseLayout(raw: string | null): LayoutState {
     if (Array.isArray(expandedDirs)) {
       state.expandedDirs = expandedDirs.filter((d): d is string => typeof d === "string");
     }
-    if (typeof splitWorkspace === "string" && splitWorkspace) {
-      state.splitWorkspace = splitWorkspace;
-    }
-    const sizes = clampSplitSizes(splitSizes);
-    if (sizes) state.splitSizes = sizes;
-    if (Array.isArray(agentSectionsFolded)) {
-      const ids = AGENT_SECTIONS.map((s) => s.id as string).filter((id) =>
-        agentSectionsFolded.includes(id),
-      );
-      if (ids.length) state.agentSectionsFolded = ids;
-    }
     if (typeof pluginPanes === "object" && pluginPanes !== null && !Array.isArray(pluginPanes)) {
       state.pluginPanes = Object.fromEntries(
         Object.entries(pluginPanes).filter(
@@ -359,16 +323,6 @@ export class UiState {
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
   readonly activeView = signal(this.initial.activeView);
   readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
-  /** The workspace selected in the split sidebar layout (UI state, not a setting). */
-  readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
-  /** Folded sections of the priority Agents list (#722). */
-  readonly agentSectionsFolded = signal<ReadonlySet<AgentSection>>(
-    new Set((this.initial.agentSectionsFolded ?? []) as AgentSection[]),
-  );
-  /** Shares of the Spaces and Agents sections of the split sidebar layout. */
-  readonly splitSizes = signal<readonly [number, number]>(
-    this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
-  );
   /** Ids of the panes the removed plugin integration opened as tabs; `EditorTabs` drops them on restore. */
   readonly legacyPluginPaneIds: ReadonlySet<string> = new Set(
     Object.keys(this.initial.pluginPanes ?? {}),
@@ -707,27 +661,6 @@ export class UiState {
     this.save();
   }
 
-  setSplitWorkspace(id: string): void {
-    this.splitWorkspace.set(id);
-    this.save();
-  }
-
-  /** Folds or opens one section of the priority Agents list. */
-  toggleAgentSection(id: AgentSection): void {
-    const next = new Set(this.agentSectionsFolded());
-    if (!next.delete(id)) next.add(id);
-    this.agentSectionsFolded.set(next);
-    this.save();
-  }
-
-  /** Resizes the sections of the split sidebar layout; malformed sizes are ignored. */
-  setSplitSizes(sizes: readonly number[]): void {
-    const next = clampSplitSizes(sizes);
-    if (!next) return;
-    this.splitSizes.set(next);
-    this.save();
-  }
-
   /** Persists the editor area (open tabs, groups, split sizes, focus). */
   saveEditor(editor: unknown): void {
     this.editor = editor;
@@ -785,13 +718,6 @@ export class UiState {
       editor: this.editor,
       activeView: this.activeView(),
       expandedDirs: [...this.expandedDirs()],
-      splitWorkspace: this.splitWorkspace() ?? undefined,
-      // Like splitWorkspace: stored only once it differs from the default.
-      agentSectionsFolded: this.agentSectionsFolded().size
-        ? [...this.agentSectionsFolded()]
-        : undefined,
-      splitSizes:
-        this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
       panelOpen: this.panelOpen(),
       panelHeight: this.panelHeight(),
       panelTab: this.panelTab(),

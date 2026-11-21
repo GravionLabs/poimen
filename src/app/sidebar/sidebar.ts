@@ -1,10 +1,8 @@
-import { paneRename, spaceRename } from "./rename-keys";
+import { paneRename } from "./rename-keys";
 import { PaneActions } from "../core/pane-actions";
-import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   ElementRef,
   Injector,
   afterNextRender,
@@ -15,14 +13,12 @@ import {
   output,
   signal,
 } from "@angular/core";
-import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
-import { HxTooltip, type HxTreeNode } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxMessage, HxTooltip } from "@gravionlabs/helix-ui";
 import { cardKeyboard } from "./card-keys";
 import { cardMenuGroups, runCardEntry, sortGroups, spaceDirOf } from "./card-menu";
 import {
   filterSpaces,
   olderHost,
-  olderHostNote,
   type Terminal,
   type PaneRow,
   type SpaceNode,
@@ -30,209 +26,19 @@ import {
 } from "../core/snapshot";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import type { MenuGroup } from "../ui/context-menu/menu-model";
-import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
+import { Attention, canMarkUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
-import {
-  TokenTotalsService,
-  compactTotal,
-  sumTotals,
-  totalsTip,
-  type TokenTotals,
-} from "../core/token-totals";
-import {
-  DEFAULT_SIDEBAR_ROWS,
-  RECORDS_SHOWN,
-  aggregateStatus,
-  cardRows,
-  paneMarks,
-  recordRows,
-  recordsSummary,
-  renderRow,
-  filterValues,
-  spaceContext,
-  type RecordRow,
-  type SidebarRows,
-} from "./spaces";
-import { SettingsStore, type SidebarAgents, type SidebarLayout } from "../core/settings";
-import {
-  AGENT_SECTIONS,
-  formatElapsed,
-  silentLabel,
-  orderAgents,
-  type AgentSection,
-} from "../core/agent-priority";
-import { TauriBridge } from "../core/tauri";
-import { isGithubUrl } from "../github/pulls";
+import { filterValues } from "./spaces";
+import { SettingsStore } from "../core/settings";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
-import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { Machines } from "../core/machines";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
 import { SpaceCard } from "./space-card";
 import { WORKSPACE_PREFIX, nestTabs, spaceNodes, type SpaceData } from "./space-nodes";
 
 export { nestTabs, spaceNodes, type SpaceData };
-import { SpaceEditFocus } from "./space-edit-focus";
 import { MachinesSection } from "./machines-section/machines-section";
-import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-
-/** The layout the toggle in the header switches to next. */
-const LAYOUT_CYCLE: Record<SidebarLayout, SidebarLayout> = {
-  tree: "split",
-  split: "cards",
-  cards: "tree",
-};
-
-/** The two lists of the `split` layout. */
-export interface SplitSections {
-  /** Workspaces; the selected one lists its terminal panes below it. */
-  spaces: HxTreeNode<SpaceData>[];
-  /** Every agent pane across the workspaces in herdr order, with its workspace name. */
-  agents: HxTreeNode<SpaceData>[];
-  /** The workspace whose panes are listed (the wanted one, else the first). */
-  selectedId: string | null;
-  /** `priority` mode only: the agents in their sections, in order (`agents` is the flat list). */
-  agentSections: AgentSectionView[];
-}
-
-/** One section of the Agents list in `priority` mode. */
-export interface AgentSectionView {
-  id: AgentSection;
-  title: string;
-  count: number;
-  folded: boolean;
-  /** The agents of the section; empty while it is folded. */
-  nodes: HxTreeNode<SpaceData>[];
-}
-
-/** What the Agents section needs besides the spaces: order, fold state and the status clock. */
-export interface AgentView {
-  /** `priority` sorts and sections the list; `list` keeps the space order. */
-  mode: SidebarAgents;
-  /** Section of each agent (the settled one); an agent missing here is idle. */
-  sections: ReadonlyMap<string, AgentSection>;
-  folded: ReadonlySet<AgentSection>;
-  /** When each pane's status last changed (epoch ms). */
-  changedAt: ReadonlyMap<string, number>;
-  /** The change times the order inside a section uses (settled like `sections`). */
-  orderAt: ReadonlyMap<string, number>;
-  now: number;
-}
-
-/**
- * Structure of the `split` layout (as in the herdr sidebar): a flat list of workspaces where the
- * `selectedId` one (else the first) has its terminal panes as children, and a flat list of all
- * agent panes, each rendered like in the tree plus a last line with the workspace name.
- */
-export function splitSections(
-  spaces: SpaceNode[],
-  selectedId: string | null,
-  rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
-  showBase = false,
-  view?: AgentView,
-): SplitSections {
-  const selected =
-    spaces.find((s) => s.workspace.space_id === selectedId) ?? spaces[0] ?? undefined;
-  const spaceList = spaces.map<HxTreeNode<SpaceData>>((space) => {
-    const ctx = spaceContext(space, showBase);
-    const isSelected = space === selected;
-    return {
-      key: WORKSPACE_PREFIX + space.workspace.space_id,
-      label: space.workspace.label,
-      // helix applies `expanded` once per key: all start open, only the selected one has children.
-      expanded: true,
-      leaf: !isSelected,
-      data: {
-        kind: "workspace",
-        workspace: space.workspace,
-        status: aggregateStatus(space),
-        lines: renderRow("workspace", rows.workspace, space, ctx),
-        selected: isSelected,
-        member: !!space.parent,
-      },
-      children: isSelected
-        ? nestTabs(
-            space.rows.filter((row) => !row.agent),
-            (row) => ({
-              key: row.pane.terminal_id,
-              label: row.name,
-              leaf: true,
-              data: {
-                kind: "pane" as const,
-                row,
-                lines: renderRow("terminal", rows.terminal, row, ctx),
-              },
-            }),
-          )
-        : undefined,
-    };
-  });
-  const entries = spaces.flatMap((space) => {
-    const ctx = spaceContext(space, showBase);
-    return space.rows
-      .filter((row) => row.agent)
-      .map((row) => ({
-        row,
-        node: {
-          key: row.pane.terminal_id,
-          label: row.name,
-          leaf: true,
-          data: {
-            kind: "pane",
-            row,
-            since: view?.changedAt.has(row.pane.terminal_id)
-              ? formatElapsed(view.now - view.changedAt.get(row.pane.terminal_id)!)
-              : undefined,
-            lines: [
-              ...renderRow("agent", rows.agent, row, ctx),
-              [
-                {
-                  kind: "text",
-                  text: space.workspace.label,
-                  status: row.pane.agent_status,
-                  bold: false,
-                  dim: false,
-                  sep: false,
-                },
-              ],
-            ],
-          },
-        } as HxTreeNode<SpaceData>,
-      }));
-  });
-  const priority = view?.mode === "priority";
-  const ordered = priority
-    ? orderAgents(
-        entries,
-        (e) => e.row.pane.terminal_id,
-        (e) => e.row.name,
-        view.sections,
-        view.orderAt,
-        view.now,
-      )
-    : entries;
-  const agentSections = priority
-    ? AGENT_SECTIONS.map<AgentSectionView>(({ id, title }) => {
-        const members = ordered.filter(
-          (e) => (view.sections.get(e.row.pane.terminal_id) ?? "idle") === id,
-        );
-        const folded = view.folded.has(id);
-        return {
-          id,
-          title,
-          count: members.length,
-          folded,
-          nodes: folded ? [] : members.map((e) => e.node),
-        };
-      })
-    : [];
-  return {
-    spaces: spaceList,
-    agents: ordered.map((e) => e.node),
-    selectedId: selected?.workspace.space_id ?? null,
-    agentSections,
-  };
-}
 
 /**
  * The directory of the first pane of space `id` when it is a repository, else the space's own
@@ -268,25 +74,11 @@ export function isDoubleClick(
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
 @Component({
   selector: "app-sidebar",
-  imports: [
-    ContextMenu,
-    SpaceEditFocus,
-    HxButton,
-    HxTooltip,
-    HxMessage,
-    HxTree,
-    HxTreeNodeTemplate,
-    HxInput,
-    NgTemplateOutlet,
-    SplitPane,
-    MachinesSection,
-    SpaceCard,
-  ],
+  imports: [ContextMenu, HxButton, HxTooltip, HxMessage, HxInput, MachinesSection, SpaceCard],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    "[class.split]": "layout() === 'split'",
     // The order stays while the pointer is pressed, so a row does not move under it (#712).
     "(pointerdown)": "holdSort(true)",
     "(window:pointerup)": "holdSort(false)",
@@ -351,7 +143,7 @@ export class Sidebar {
       label: g.label,
       items: g.items.map((i) => ({ id: i.action, label: i.label, disabled: i.disabled })),
     }));
-    if (kind !== "workspace" || this.layout() !== "cards") return groups;
+    if (kind !== "workspace") return groups;
     return [...groups, ...cardMenuGroups(id, this.cardMenu)];
   }
 
@@ -375,7 +167,7 @@ export class Sidebar {
     // A disabled entry (offline machine) does nothing, and never reaches another backend.
     if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
-    if (at && runCardEntry(picked, at.id, this.cardMenu)) return;
+    if (at && runCardEntry(picked, at.id, this.cardMenu, this.spaceActions)) return;
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
 
@@ -384,55 +176,7 @@ export class Sidebar {
   protected readonly store = inject(SpacesStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
-  private readonly bridge = inject(TauriBridge);
-  private readonly spaceRebuild = inject(SpaceRebuild);
-  private readonly tokenTotals = inject(TokenTotalsService);
 
-  /** Total of one pane; none for a machine that is not connected or a pane without transcript. */
-  private totalOf(paneId: string): TokenTotals | undefined {
-    return this.machines.blockedReason(paneId) ? undefined : this.tokenTotals.totals().get(paneId);
-  }
-
-  /** Compact sum of the panes of a space (`1.2M`); empty when none has a total. */
-  protected spaceTokens(workspaceId: string): string {
-    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
-    const sum = space && sumTotals(space.rows.map((r) => this.totalOf(r.pane.terminal_id)));
-    return sum ? compactTotal(sum) : "";
-  }
-
-  protected spaceTokensTip(workspaceId: string): string {
-    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
-    const sum = space && sumTotals(space.rows.map((r) => this.totalOf(r.pane.terminal_id)));
-    return sum ? totalsTip(sum) : "";
-  }
-
-  /** The rebuild mark of a space that has no terminals; `undefined` for any other. */
-  protected rebuildMark(workspaceId: string): RebuildMark | undefined {
-    const mark = this.spaceRebuild.marks().get(workspaceId);
-    if (!mark) return undefined;
-    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
-    return space?.rows.length === 0 ? mark : undefined;
-  }
-
-  /** The "Rebuild" of an empty space (agents and setup start, the project file is gated). */
-  protected rebuildSpace(workspaceId: string, event: Event): void {
-    event.stopPropagation();
-    void this.spaceRebuild.rebuild(workspaceId);
-  }
-
-  protected rings(paneId: string): boolean {
-    return this.attn.attention().has(paneId);
-  }
-
-  protected isUnread(paneId: string): boolean {
-    return this.attn.unread().has(paneId);
-  }
-
-  /** Unread panes of a workspace (its row shows the sum). */
-  protected unreadOf(workspaceId: string): number {
-    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
-    return space ? workspaceUnread(space, this.attn.unread()) : 0;
-  }
   protected readonly query = signal("");
 
   /** The space being dragged; `null` when no drag runs. */
@@ -441,12 +185,12 @@ export class Sidebar {
   protected readonly dropMark = signal<{ id: string; after: boolean } | null>(null);
 
   /** Dragging reorders the complete list, so it is off while a filter hides spaces or outside `manual`. */
-  protected canDrag(workspaceId: string): boolean {
-    return this.sort() === "manual" && this.query().trim() === "" && this.editing() !== workspaceId;
+  protected canDrag(): boolean {
+    return this.sort() === "manual" && this.query().trim() === "";
   }
 
   protected dragStart(event: DragEvent, workspaceId: string): void {
-    if (!this.canDrag(workspaceId)) {
+    if (!this.canDrag()) {
       event.preventDefault();
       return;
     }
@@ -551,96 +295,23 @@ export class Sidebar {
     this.tabDrag.set(null);
     this.tabMark.set(null);
   }
-  protected readonly selection = signal<string | null>(null);
-
-  /** The chevron at the right edge of a workspace row: expands or collapses it (not a selection). */
-  protected toggle(tree: HxTree, key: string, event: Event): void {
-    event.stopPropagation();
-    tree.toggle(key);
-  }
-
-  /** Terminals whose folded child records the user opened. */
-  protected readonly openRecords = signal<ReadonlySet<string>>(new Set());
-
-  /**
-   * The child records of a pane (#684): all rows, or one summary line when there are more than a
-   * few and the user has not opened them. `undefined` without records.
-   */
-  protected recordView(
-    row: PaneRow,
-  ): { rows: RecordRow[]; summary: string | undefined; many: boolean; open: boolean } | undefined {
-    const records = row.pane.records;
-    if (!records?.length) return undefined;
-    const many = records.length > RECORDS_SHOWN;
-    const open = !many || this.openRecords().has(row.pane.terminal_id);
-    return {
-      rows: open ? recordRows(row.pane) : [],
-      summary: many && !open ? recordsSummary(records) : undefined,
-      many,
-      open,
-    };
-  }
-
-  protected toggleRecords(terminalId: string, event: Event): void {
-    event.stopPropagation();
-    this.openRecords.update((set) => {
-      const next = new Set(set);
-      if (!next.delete(terminalId)) next.add(terminalId);
-      return next;
-    });
-  }
-
-  /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
+  /** Whether the space is being closed: its menu stays shut meanwhile. */
   protected isClosing(workspaceId: string): boolean {
     return this.spaceActions.closingIds().has(workspaceId);
   }
 
-  private readonly spaceEdit = spaceRename({
-    actions: this.spaceActions,
-    closing: (id) => this.isClosing(id),
-  });
-  /** The space whose label is being edited in place; `null` when none. */
-  protected readonly editing = this.spaceEdit.editing;
-  protected readonly startEdit = this.spaceEdit.start;
-  protected readonly finishEdit = this.spaceEdit.finish;
   protected readonly paneEdit = paneRename({
     actions: this.paneActions,
     injector: this.injector,
     pane: (id) => this.store.pane(id),
   });
 
-  protected configureSpace(workspaceId: string, event: Event): void {
-    event.stopPropagation();
-    this.configOpened.emit(workspaceId);
-  }
-
-  protected closeSpace(workspaceId: string, event: Event): void {
-    event.stopPropagation();
-    this.menuAction.emit({ kind: "workspace", id: workspaceId, action: "close-space" });
-  }
-
-  /** Opens a pull request in the system browser; only github.com links, and the row stays as is. */
-  protected openPull(url: string, event: Event): void {
-    event.stopPropagation();
-    if (isGithubUrl(url)) void this.bridge.openUrl(url);
-  }
-
-  protected marks(row: PaneRow) {
-    return paneMarks(row.pane.terminal_id, this.openIds(), this.activeId());
-  }
-
   private readonly settings = inject(SettingsStore);
-  private readonly rows = computed(() =>
-    cardRows(this.settings.settings().sidebarRows, this.layout()),
-  );
+  private readonly rows = computed(() => this.settings.settings().sidebarRows);
   private readonly showBase = computed(() => this.settings.settings().sidebarShowBaseBranch);
 
   protected readonly ui = inject(UiState);
-  protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
   protected readonly writeError = this.settings.writeError;
-  /** The layout a click on the toggle switches to. */
-  protected readonly otherLayout = computed(() => LAYOUT_CYCLE[this.layout()]);
-
   protected readonly sort = computed(() => this.settings.settings().sidebarSort);
 
   /** Keeps the order of the spaces while the pointer is pressed. */
@@ -677,10 +348,6 @@ export class Sidebar {
     else void this.settings.setSidebarSort(choice);
   }
 
-  protected toggleLayout(): void {
-    void this.settings.setSidebarLayout(this.otherLayout());
-  }
-
   private readonly filtered = computed(() => {
     const rows = this.rows();
     const showBase = this.showBase();
@@ -695,14 +362,12 @@ export class Sidebar {
   protected readonly remoteNodes = computed(
     () =>
       new Map(
-        this.layout() !== "cards"
-          ? []
-          : this.machines
-              .machines()
-              .map((m) => [
-                m.name,
-                spaceNodes(this.store.remoteSpaces(m.name), this.rows(), this.showBase()),
-              ]),
+        this.machines
+          .machines()
+          .map((m) => [
+            m.name,
+            spaceNodes(this.store.remoteSpaces(m.name), this.rows(), this.showBase()),
+          ]),
       ),
   );
   protected readonly nodes = computed(() =>
@@ -723,51 +388,9 @@ export class Sidebar {
   protected readonly onCardKey = this.cardKeys.onKey;
   protected readonly onCardFocus = this.cardKeys.onFocus;
 
-  /** The clock of the elapsed times in the Agents section; ticks once a minute. */
-  private readonly now = signal(Date.now());
-  protected readonly clock = (() => {
-    const timer = setInterval(() => this.now.set(Date.now()), 60_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
-    return timer;
-  })();
-
-  protected silentMark(row: PaneRow): string | undefined {
-    return silentLabel(row.pane.agent_silent_since, this.now());
-  }
-
-  protected readonly agentsMode = computed(() => this.settings.settings().sidebarAgents);
-  protected readonly otherAgentsMode = computed(() =>
-    this.agentsMode() === "list" ? "priority" : "list",
-  );
-
-  protected readonly split = computed(() =>
-    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows(), this.showBase(), {
-      mode: this.agentsMode(),
-      sections: this.store.agentSections(),
-      folded: this.ui.agentSectionsFolded(),
-      changedAt: this.attn.changedAt(),
-      orderAt: this.store.agentChangedAt(),
-      now: this.now(),
-    }),
-  );
-
-  protected toggleAgentsMode(): void {
-    void this.settings.setSidebarAgents(this.otherAgentsMode());
-  }
-
-  protected toggleAgentSection(id: AgentSection): void {
-    this.ui.toggleAgentSection(id);
-  }
-
-  protected data(node: HxTreeNode): SpaceData {
-    return node.data as SpaceData;
-  }
-
   protected onSelect(key: string | readonly string[] | null): void {
     if (typeof key !== "string") return;
     if (key.startsWith(WORKSPACE_PREFIX)) {
-      if (this.layout() === "split") this.ui.setSplitWorkspace(key.slice(WORKSPACE_PREFIX.length));
-      this.hold(key);
       this.spaceOpened.emit(key.slice(WORKSPACE_PREFIX.length));
       return;
     }
@@ -775,7 +398,6 @@ export class Sidebar {
       .spaces()
       .flatMap((s) => s.rows)
       .find((r) => r.pane.terminal_id === key);
-    this.hold(key);
     if (!row) return;
     const now = Date.now();
     const double = isDoubleClick(this.last, key, now);
@@ -784,34 +406,7 @@ export class Sidebar {
     else this.selected.emit(row.pane);
   }
 
-  /**
-   * hx-tree skips equal values, so it reports a row once while it stays selected. Hold the key in
-   * the binding for one render (the tree sees it), then clear it: the tree is reset to null and
-   * reports the same row again. Setting null right here would be a no-op for the binding.
-   */
-  private hold(key: string): void {
-    this.selection.set(key);
-    afterNextRender(() => this.selection.set(null), { injector: this.injector });
-  }
-
   protected setQuery(event: Event): void {
     this.query.set((event.target as HTMLInputElement).value);
-  }
-
-  protected rowTitle(row: PaneRow): string {
-    const totals = this.totalOf(row.pane.terminal_id);
-    return [row.pane.terminal_id, row.dir, row.branch, totals && totalsTip(totals)]
-      .filter(Boolean)
-      .join(" · ");
-  }
-
-  /** The tooltip of the quiet mark of a terminal on an older PTY host; `null` when it is current. */
-  protected hostNote(row: PaneRow): string | null {
-    const host = olderHost(row.pane);
-    return host ? olderHostNote(host) : null;
-  }
-
-  protected glyph(row: PaneRow): string {
-    return row.agent ? row.agent.slice(0, 2) : ">_";
   }
 }

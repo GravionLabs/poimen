@@ -78,7 +78,6 @@ async function setup(status: MachineStatus, stored?: string) {
     },
   });
   const fixture = TestBed.createComponent(MachinesSection);
-  fixture.componentInstance.cardsLayout = true;
   fixture.componentInstance.nodes = new Map([["box", spaceNodes(tree)]]);
   const picked: string[] = [];
   const acts: SidebarMenuAction[] = [];
@@ -154,18 +153,6 @@ describe("MachinesSection cards (#938)", () => {
     expect(el.querySelector(".card")?.classList.contains("collapsed")).toBe(true);
     expect(TestBed.inject(UiState).collapsedCards()).toEqual(["box::s1"]);
     expect(storage.get(UI_STATE_KEY)).toContain("box::s1");
-  });
-
-  it("keeps the tree rows when the layout is not cards", async () => {
-    const { fixture, el } = await setup({
-      ...box,
-      state: "connected",
-      serverVersion: "0.17.0",
-    });
-    fixture.componentInstance.cardsLayout = false;
-    fixture.detectChanges();
-    expect(el.querySelector("app-space-card")).toBeNull();
-    expect(el.querySelector(".space-name")?.textContent).toBe("api");
   });
 
   it("keeps the fold mark of a machine that lists no space yet", async () => {

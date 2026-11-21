@@ -1,3 +1,5 @@
+import { SpaceActions } from "../../core/space-actions";
+import { copyText } from "../card-menu";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -10,7 +12,7 @@ import {
   signal,
 } from "@angular/core";
 import { HxButton, type HxTreeNode } from "@gravionlabs/helix-ui";
-import { qualifyId, rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
+import { qualifyId, type Terminal } from "../../core/snapshot";
 import { ContextMenu } from "../../ui/context-menu/context-menu";
 import { plainGroups, type MenuGroup } from "../../ui/context-menu/menu-model";
 import { SpacesStore } from "../../core/spaces-store";
@@ -57,19 +59,6 @@ export function machineNote(machine: MachineStatus): string {
 /** A machine's spaces are shown but not usable while it is not connected. */
 export const machineUsable = (machine: MachineStatus): boolean => machine.state === "connected";
 
-/** One row of a machine's space: a terminal with the name the tab shows. */
-export interface MachineRow {
-  terminal: Terminal;
-  name: string;
-}
-
-/** The rows of a space of a machine, in tab order. */
-export function machineRows(node: WorkspaceNode): MachineRow[] {
-  return node.tabs.flatMap(({ tab, panes }) =>
-    panes.map((terminal) => ({ terminal, name: rowName(terminal, tab.label) })),
-  );
-}
-
 /** The machines of the settings below the spaces of this Mac: state, spaces, terminals (#280). */
 @Component({
   selector: "app-machines-section",
@@ -86,7 +75,6 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
       padding: 6px 8px;
     }
 
-    .machine.offline .space,
     .machine.offline .note {
       opacity: 0.55;
     }
@@ -114,30 +102,6 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
       margin: 2px 0 4px;
       font-size: 0.85em;
       opacity: 0.8;
-    }
-
-    .space-name {
-      display: block;
-      padding: 2px 0;
-      font-weight: 500;
-    }
-
-    .row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      width: 100%;
-      padding: 2px 0 2px 12px;
-      border: 0;
-      background: transparent;
-      color: inherit;
-      font: inherit;
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .row:disabled {
-      cursor: default;
     }
 
     .dot {
@@ -172,16 +136,12 @@ export class MachinesSection {
   private readonly store = inject(SpacesStore);
   protected readonly machines = inject(Machines);
   protected readonly ui = inject(UiState);
+  private readonly spaceActions = inject(SpaceActions);
   private readonly editor = inject(EditorTabs);
   /** A terminal of a machine was picked. */
   readonly selected = output<Terminal>();
 
-  private readonly cardsSignal = signal(false);
   private readonly nodesSignal = signal<ReadonlyMap<string, HxTreeNode<SpaceData>[]>>(new Map());
-  /** The `cards` layout: each space of a machine is a card (#938). */
-  @Input() set cardsLayout(value: boolean) {
-    this.cardsSignal.set(value);
-  }
   /** The card nodes of `spaceNodes` per machine name, built by the sidebar from `remoteTree`. */
   @Input() set nodes(value: ReadonlyMap<string, HxTreeNode<SpaceData>[]>) {
     this.nodesSignal.set(value);
@@ -192,14 +152,13 @@ export class MachinesSection {
   @Output() readonly cardMenu = new EventEmitter<CardMenuRequest>();
   /** An action button of a card (new terminal, close space). */
   @Output() readonly cardAct = new EventEmitter<SidebarMenuAction>();
-  protected readonly cards = this.cardsSignal.asReadonly();
 
   protected cardNodes(machine: string): HxTreeNode<SpaceData>[] {
     return this.nodesSignal().get(machine) ?? [];
   }
 
   protected copy(text: string): void {
-    void Promise.resolve(navigator.clipboard?.writeText(text)).catch(() => undefined);
+    copyText(text, this.spaceActions);
   }
 
   /** A row of a card: the terminal by its qualified id, only on a connected machine. */
@@ -221,10 +180,6 @@ export class MachinesSection {
       usable: machineUsable(machine),
       blocked: this.machines.blockedReason(qualifyId(machine.name, "")),
       check: checkNote(this.machines.checks()[machine.name]),
-      spaces: this.store.remoteTree(machine.name).map((node) => ({
-        node,
-        rows: machineRows(node),
-      })),
     })),
   );
   protected readonly menuAt = signal<{ name: string; x: number; y: number } | null>(null);

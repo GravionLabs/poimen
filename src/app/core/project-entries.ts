@@ -86,7 +86,7 @@ export class ProjectEntries {
       });
     } catch (err) {
       const reason = err && typeof err === "object" && "message" in err ? err.message : err;
-      this.spaces.notify(`${label} failed: ${String(reason)}`);
+      this.spaces.fail(`${label} failed: ${String(reason)}`);
       return;
     }
     switch (outcome.kind) {

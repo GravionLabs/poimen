@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
@@ -9,6 +10,8 @@ import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 import { UI_STORAGE, UiState } from "./ui-state";
+
+let injector: Injector;
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -44,8 +47,9 @@ describe("ProjectEntries.run", () => {
     tauri.answer("snapshot", () => snap);
     tauri.answer("project_run", () => outcome);
     tauri.answer("agent_prompt", () => ({ kind: "started", status: "working" }));
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
+        testMessages(),
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
         SpacesStore,
@@ -107,7 +111,7 @@ describe("ProjectEntries.run", () => {
   it("says so when the space has no agent", async () => {
     await setup(snapshot(pane("w1:p1", "w1")), { kind: "agent", command: "/review" });
     await entries.run(command, "w1", "/work/app");
-    expect(spaces.warning()).toContain("no agent");
+    expect(lastToast(injector)).toContain("no agent");
     expect(tauri.calls("agent_prompt")).toEqual([]);
   });
 
@@ -142,6 +146,6 @@ describe("ProjectEntries.run", () => {
       throw new Error("herdr said no");
     });
     await entries.run(command, "w1", "/work/app");
-    expect(spaces.warning()).toContain("Project: test failed");
+    expect(lastToast(injector)).toContain("Project: test failed");
   });
 });

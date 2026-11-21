@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { TestBed, getTestBed } from "@angular/core/testing";
+import { lastToast } from "../../testing/toasts";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseAgentActions, type AgentAction } from "../core/settings";
-import { SpaceActions } from "../core/space-actions";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
 import {
@@ -164,7 +164,6 @@ describe("worktreeLabel", () => {
 
 describe("AgentActions", () => {
   let actions: AgentActions;
-  let spaces: SpaceActions;
 
   beforeEach(() => {
     tauri.reset();
@@ -195,7 +194,6 @@ describe("AgentActions", () => {
       },
     ]);
     actions = TestBed.inject(AgentActions);
-    spaces = TestBed.inject(SpaceActions);
   });
 
   const review = (): AgentAction => action({ id: "review", label: "Review", on: "pr" });
@@ -288,7 +286,7 @@ describe("AgentActions", () => {
       { terminalId: "p1", kind: "claude", name: "Review #7", args: ["prompt 7"] },
     ]);
     expect(summary).toEqual({ started: [7], failed: [] });
-    expect(spaces.warning()).toBe("Review: started #7");
+    expect(lastToast()).toBe("Review: started #7");
   });
 
   it("batch each starts one agent per item", async () => {
@@ -326,7 +324,7 @@ describe("AgentActions", () => {
       started: [1, 3],
       failed: [{ numbers: [2], reason: "claude did not start" }],
     });
-    expect(spaces.warning()).toBe("Review: started #1, #3; failed #2 (claude did not start)");
+    expect(lastToast()).toBe("Review: started #1, #3; failed #2 (claude did not start)");
   });
 
   it("a terminal that cannot be created is a failure of that item only", async () => {
@@ -347,7 +345,7 @@ describe("AgentActions", () => {
     });
     expect(await actions.request(review(), [pullTarget(pull(1))], false)).toBeNull();
     expect(tauri.calls("create_space")).toEqual([]);
-    expect(spaces.warning()).toBe('Review: unknown harness "x"');
+    expect(lastToast()).toBe('Review: unknown harness "x"');
   });
 
   describe("worktree runs", () => {
@@ -389,7 +387,7 @@ describe("AgentActions", () => {
         { terminalId: "root1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
       ]);
       expect(summary).toEqual({ started: [1], failed: [] });
-      expect(spaces.warning()).toBe("Work: started #1");
+      expect(lastToast()).toBe("Work: started #1");
     });
 
     it("a pull request gets the PR worktree and the label PR #<nr> <title>", async () => {
@@ -454,7 +452,7 @@ describe("AgentActions", () => {
         started: [],
         failed: [{ numbers: [1], reason: "worktree failed: path exists" }],
       });
-      expect(spaces.warning()).toBe("Work: failed #1 (worktree failed: path exists)");
+      expect(lastToast()).toBe("Work: failed #1 (worktree failed: path exists)");
     });
 
     it("an issue without a worktree task mode fails in the worktree step", async () => {
@@ -593,7 +591,7 @@ describe("AgentActions", () => {
         started: [1, 3],
         failed: [{ numbers: [2], reason: "claude did not start" }],
       });
-      expect(spaces.warning()).toBe("Review: started #1, #3; failed #2 (claude did not start)");
+      expect(lastToast()).toBe("Review: started #1, #3; failed #2 (claude did not start)");
     });
 
     it("other actions get no suffix", async () => {

@@ -15,7 +15,7 @@ import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { Icon } from "../ui/icon/icon";
 import { HxButton } from "@gravionlabs/helix-ui";
 
-/** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
+/** The question for a new pane (its type) or a pane close (confirmation), and action errors. */
 @Component({
   selector: "app-pane-dialog",
   imports: [DialogShell, HxButton, Icon],
@@ -34,7 +34,8 @@ export class PaneDialog {
   private readonly harnesses = signal<HarnessInfo[]>([]);
   protected readonly kinds = computed(() => startableKinds(this.harnesses().map((h) => h.id)));
   protected readonly note = (kind: string) => statusNote(kind);
-  private readonly typed = signal<string | null>(null);
+  /** The types of a new pane besides Terminal: the installed harnesses (#1049). */
+  protected readonly agents = computed(() => this.harnesses().filter((h) => h.available));
 
   constructor() {
     this.bridge
@@ -43,18 +44,17 @@ export class PaneDialog {
       .catch(() => this.harnesses.set([]));
   }
 
-  protected cwd(fallback: string): string {
-    return this.typed() ?? fallback;
-  }
-
-  protected type(event: Event): void {
-    this.typed.set((event.target as HTMLInputElement).value);
-  }
-
-  protected async create(fallback: string): Promise<void> {
-    const cwd = this.cwd(fallback);
-    this.typed.set(null);
-    const pane = await this.actions.confirmNew(cwd);
+  protected async create(form: HTMLFormElement): Promise<void> {
+    const type = String(new FormData(form).get("type") ?? "terminal");
+    const harness = type === "terminal" ? undefined : this.agents().find((h) => h.id === type);
+    // A harness without hooks runs its own program and arguments, not its id as the program.
+    const [program = type, ...base] = harness?.command ?? [];
+    const agent = !harness
+      ? undefined
+      : HOOK_AGENT_KINDS.includes(type) || harness.command.length === 0
+        ? { kind: type, args: [] }
+        : { kind: program, args: base };
+    const pane = await this.actions.confirmNew(agent);
     if (pane) this.created.emit(pane);
   }
 
@@ -88,7 +88,6 @@ export class PaneDialog {
   }
 
   protected cancel(): void {
-    this.typed.set(null);
     this.actions.cancel();
   }
 }

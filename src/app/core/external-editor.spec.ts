@@ -51,7 +51,10 @@ describe("ExternalEditor", () => {
     invoke.mockRejectedValue('the editor "code" was not found; set "editor" in config.json');
     const ok = await service().open("/r");
     expect(ok).toBe(false);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining('"editor" in config.json'));
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('"editor" in config.json'),
+      "error",
+    );
   });
 });
 

@@ -46,14 +46,6 @@
   </div>
   <div class="views">
     <div class="editor-area">
-      @if (notice(); as text) {
-        <div class="notice" role="status">
-          <span>{{ text }}</span>
-          <button type="button" aria-label="Dismiss" (click)="dismissNotice()">
-            <app-icon name="close" />
-          </button>
-        </div>
-      }
       @if (editor.openIds().size) {
         <ng-container
           [ngTemplateOutlet]="nodeTpl"
@@ -118,6 +110,7 @@
 <app-agent-action-dialog />
 <app-shortcuts-dialog />
 <app-recent-tabs />
+<app-toasts />
 <app-jump-palette (chosen)="jumpTo($event)" />
 <app-command-palette
   (commandChosen)="run($event)"

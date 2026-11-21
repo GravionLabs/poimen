@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSpaces, filterSpaces, type PaneRow, type Snapshot } from "../core/snapshot";
-import { nestTabs, spaceNodes, splitSections } from "./sidebar";
+import { nestTabs, spaceNodes } from "./sidebar";
 
 const pane = (id: string, tab: string, extra = {}) => ({
   terminal_id: id,
@@ -80,15 +80,5 @@ describe("child tabs in the tree", () => {
     expect(kept.rows.map((r) => r.pane.terminal_id)).toEqual(["t1", "t3"]);
     const [node] = spaceNodes([kept]);
     expect(keys(node.children!)).toEqual([["t1", ["t3"]]]);
-  });
-
-  it("lists children below their parent in the split layout (terminal panes)", () => {
-    const [space] = buildSpaces(snapshot(), new Map());
-    const { spaces } = splitSections([space], "s1");
-    // the agent pane t1 is in the Agents list, so its child tabs are top level here
-    expect(keys(spaces[0].children!)).toEqual(["t2", "t3", "t4"]);
-    const plain = { ...space, rows: space.rows.map((r) => ({ ...r, agent: undefined })) };
-    const split = splitSections([plain], "s1");
-    expect(keys(split.spaces[0].children!)).toEqual([["t1", ["t2", "t3"]], "t4"]);
   });
 });

@@ -57,6 +57,7 @@ import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { followSystemTheme } from "./core/system-theme";
 import { RecentTabs } from "./recent-tabs/recent-tabs";
+import { Toasts } from "./ui/toasts/toasts";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
@@ -135,6 +136,7 @@ const ZOOM_STEP = 1;
   imports: [
     HxActivityBar,
     RecentTabs,
+    Toasts,
     HxAppShell,
     Icon,
     Sidebar,
@@ -485,13 +487,6 @@ export class App {
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
   );
 
-  /** Set when restored tabs lost their pane, until dismissed. */
-  protected readonly notice = signal<string | null>(null);
-
-  protected dismissNotice(): void {
-    this.notice.set(null);
-  }
-
   /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
   private dropMissing(): void {
     if (this.store.connectionError() !== null) return;
@@ -500,7 +495,7 @@ export class App {
     for (const id of this.editor.openIds()) if (splitId(id).machine) alive.add(id);
     const gone = this.editor.prune(alive);
     if (gone.length === 0) return;
-    this.notice.set(
+    this.spaceActions.notify(
       gone.length === 1
         ? "1 tab was closed because its pane no longer exists."
         : `${gone.length} tabs were closed because their panes no longer exist.`,
@@ -628,10 +623,6 @@ export class App {
     } as const;
     if (id in sorts) {
       void this.prefs.setSidebarSort(sorts[id as keyof typeof sorts]);
-      return;
-    }
-    if (id === "agentsByPriority" || id === "agentsInSpaceOrder") {
-      void this.prefs.setSidebarAgents(id === "agentsByPriority" ? "priority" : "list");
       return;
     }
     if (id === "sortSpacesNow") {

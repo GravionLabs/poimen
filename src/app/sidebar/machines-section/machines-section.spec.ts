@@ -62,26 +62,18 @@ function setup(
 }
 
 describe("MachinesSection", () => {
-  it("lists a connected machine's spaces and opens a terminal on click", () => {
-    const { el, picked } = setup({ ...box, state: "connected", serverVersion: "0.17.0" });
+  it("names a connected machine; its spaces are cards (machines-section-cards.spec.ts)", () => {
+    const { el } = setup({ ...box, state: "connected", serverVersion: "0.17.0" });
     expect(el.querySelector(".machine-name")?.textContent).toBe("box");
-    expect(el.querySelector(".space-name")?.textContent).toBe("api");
-    const row = el.querySelector<HTMLButtonElement>(".row")!;
-    expect(row.disabled).toBe(false);
-    row.click();
-    expect(picked).toHaveLength(1);
+    expect(el.querySelector(".machine")?.classList.contains("offline")).toBe(false);
   });
 
-  it("greys an offline machine's last known spaces and makes them inert", () => {
-    const { el, picked, reconnect } = setup({ ...box, state: "offline", error: "ssh: timeout" });
+  it("greys an offline machine and offers its command and Reconnect", () => {
+    const { el, reconnect } = setup({ ...box, state: "offline", error: "ssh: timeout" });
     expect(el.querySelector(".machine")?.classList.contains("offline")).toBe(true);
     expect(el.querySelector(".note")?.textContent).toContain("Offline: ssh: timeout");
     expect(el.querySelector(".command")?.textContent).toBe("ssh box");
     expect(el.querySelector(".copy")).not.toBeNull();
-    const row = el.querySelector<HTMLButtonElement>(".row")!;
-    expect(row.disabled).toBe(true);
-    row.click();
-    expect(picked).toEqual([]);
     el.querySelector<HTMLButtonElement>(".reconnect")!.click();
     expect(reconnect).toHaveBeenCalledWith("box");
   });

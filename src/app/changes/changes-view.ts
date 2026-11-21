@@ -42,6 +42,7 @@ import {
 } from "./findings";
 import { FindingsPanel } from "./findings-panel";
 import { LineComments } from "./line-comments";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 const SCOPE_LABEL: Record<ChangesScope, string> = {
   base: "Base",
@@ -55,6 +56,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
 @Component({
   selector: "app-changes-view",
   imports: [
+    LoadingRows,
     DiffEditor,
     CommentsPanel,
     FindingsPanel,

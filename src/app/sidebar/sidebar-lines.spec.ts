@@ -9,8 +9,6 @@ import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STORAGE } from "../core/ui-state";
-import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 import { inlineSpaceCard } from "./space-card.mock";
@@ -70,10 +68,6 @@ async function render(
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
   });
-  TestBed.overrideComponent(Sidebar, {
-    remove: { imports: [SplitPane] },
-    add: { imports: [SplitPaneStub] },
-  });
   const fixture = TestBed.createComponent(Sidebar);
   for (let i = 0; i < 3; i++) {
     fixture.detectChanges();
@@ -82,36 +76,26 @@ async function render(
   return fixture.nativeElement as HTMLElement;
 }
 
-const lineClasses = (root: HTMLElement) =>
-  [...root.querySelectorAll(".space-main > .line")].map((l) => l.classList.contains("under-dot"));
-
-describe("Sidebar space lines", () => {
+describe("Sidebar card lines", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
 
-  it("indents the lines below a first line that starts with the status dot", async () => {
+  it("shows the header and the details line of a card by default", async () => {
     const root = await render(DEFAULT_SIDEBAR_ROWS.workspace);
-    expect(lineClasses(root)).toEqual([false, true]);
-  });
-
-  it("does not indent when the first line has no leading dot", async () => {
-    const root = await render([
-      [{ token: "name" }, { token: "state_icon" }],
-      [{ token: "branch" }],
-    ]);
-    expect(lineClasses(root)).toEqual([false, false]);
+    expect(root.querySelector("header")!.textContent).toContain("One");
+    expect(root.querySelector(".details")!.textContent).toContain("feat/x");
   });
 
   it("shows the branch token of a space off the base branch", async () => {
     const root = await render(DEFAULT_SIDEBAR_ROWS.workspace);
-    expect(root.querySelector(".space-main")!.textContent).toContain("feat/x");
+    expect(root.querySelector(".details")!.textContent).toContain("feat/x");
   });
 
   it("leaves the branch token out on the base branch unless showBaseBranch is set", async () => {
     const hidden = await render(DEFAULT_SIDEBAR_ROWS.workspace, { onBase: true });
-    expect(hidden.querySelector(".space-main")!.textContent).not.toContain("feat/x");
+    expect(hidden.textContent).not.toContain("feat/x");
     const shown = await render(DEFAULT_SIDEBAR_ROWS.workspace, { onBase: true, showBase: true });
-    expect(shown.querySelector(".space-main")!.textContent).toContain("feat/x");
+    expect(shown.textContent).toContain("feat/x");
   });
 });

@@ -258,6 +258,21 @@ button.hx-button.hx-button-icon-only {
   }
 }
 
+/* Reduced motion (#1041): the working dot is a static ring and nothing animates a transform. */
+@media (prefers-reduced-motion: reduce) {
+  .status-working {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-working) 45%, transparent);
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-property: color, background-color, border-color, opacity, box-shadow !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Content of the dialogs (app-dialog-shell): the rules the dialogs share. */
 dialog.dialog label {
   display: flex;

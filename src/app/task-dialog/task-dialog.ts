@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, effect, inject } from "
 import { LEVEL_FILTERS, TaskPicker, errorText, markers } from "./task-picker";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /**
  * Picks an open issue and a task mode. Only returns the choice (see `TaskPicker`); keys: Up/Down
@@ -9,7 +10,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
  */
 @Component({
   selector: "app-task-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [LoadingRows, DialogShell, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./task-dialog.html",
   styleUrl: "./task-dialog.css",
