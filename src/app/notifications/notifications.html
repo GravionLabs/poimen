@@ -32,6 +32,20 @@
           </span>
           <time class="time" [attr.datetime]="entry.time">{{ timeOf(entry.time) }}</time>
         </button>
+        @if (entry.checks && !entry.checks.passed) {
+          <div class="fix">
+            <button
+              type="button"
+              hx-button
+              variant="outlined"
+              severity="secondary"
+              size="small"
+              (click)="fixChecks(entry)"
+            >
+              Fix checks
+            </button>
+          </div>
+        }
       </li>
     }
   </ul>

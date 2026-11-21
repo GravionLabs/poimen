@@ -93,3 +93,7 @@
   font-weight: 400;
   opacity: 0.7;
 }
+
+.fix {
+  padding: 0 8px 6px 24px;
+}
