@@ -26,6 +26,7 @@ import {
   flowDuration,
   flowStatusText,
   flowTooltip,
+  sameStarted,
   startedTerminals,
   withStartedTerminals,
   type FlowNode,
@@ -120,7 +121,13 @@ export class FlowView {
     effect(() => {
       const started = this.started();
       const paneId = this.subagents.paneId() ?? "";
-      untracked(() => this.seen.set({ paneId, list: started }));
+      // Only a change is remembered: `started` reads `seen`, so setting an equal list again would
+      // run this effect for ever.
+      untracked(() => {
+        const seen = this.seen();
+        if (seen.paneId !== paneId || !sameStarted(seen.list, started))
+          this.seen.set({ paneId, list: started });
+      });
     });
   }
 

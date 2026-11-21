@@ -2,6 +2,8 @@
 
 The Runs item of the activity bar shows the agent runs of the repositories behind your spaces: deliver loops that work through a milestone, and any other tool that writes agent events. poimen only reads them and never writes.
 
+<Screenshot src="runs-dark.png" light="runs-light.png" alt="The Runs view: a milestone with its progress, the run working on issue 1109 and a gate that needs you" caption="The Runs view: the milestone, the running loop with its current task and what needs you (demo data)." />
+
 ## Where runs come from
 
 A run is a file `<repository>/.agents/events/<run>.jsonl` in the format of [agent-events](https://github.com/GravionLabs/agent-events). poimen follows these files without polling. Runs of a remote machine arrive through its server.

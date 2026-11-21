@@ -9,6 +9,8 @@ The sidebar lists **spaces**, one per project directory, with their terminals. E
 - **Explorer.** The second item of the activity bar browses directories. Double-click a folder or pick *Create space here* to open it as a space.
 - **Notifications.** The bell lists the last 100 status changes (blocked, done) with time and tab. A click opens the tab.
 
+<Screenshot src="sidebar-dark.png" light="sidebar-light.png" alt="The Spaces sidebar as cards: each space is a card with its panes, the agent and its status, and remote machines sit below" caption="Space cards: one collapsible card per space with its panes, agent status and directory (demo data)." />
+
 ## Creating, splitting and closing
 
 - **New space:** the **+** in the Spaces header, a folder in the Explorer, or the command palette.
@@ -24,6 +26,8 @@ A space that lost its terminals, for example after a restart that could not adop
 A pane opens as a tab above the terminal: a click opens a preview tab, a double click pins it. Tabs reorder by drag, and a tab can be split right or down into another group (`CmdOrCtrl+\`). Only the active tab of each group streams; the others keep running on the server.
 
 A pane opens **for input** when no other client controls it. If another client (for example the `poimen` console) holds the controller, the tab is read-only and says why, with an explicit **Take over** button, never automatic. The mode button in the status bar toggles input and read-only per tab. Cmd+click (macOS) or Ctrl+click opens links, and Shift bypasses a pane application's mouse mode for selecting text. Dropped files type their quoted paths, and a pasted image is saved and its path typed.
+
+<Screenshot src="tabs-dark.png" light="tabs-light.png" alt="An editor tab with a live Claude Code session next to a shell in a split" caption="A tab with two panes: a Claude Code session and a shell (demo data)." />
 
 ## Layouts and templates
 
