@@ -375,7 +375,7 @@ export class Sidebar {
     // A disabled entry (offline machine) does nothing, and never reaches another backend.
     if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
-    if (at && runCardEntry(picked, at.id, this.cardMenu)) return;
+    if (at && runCardEntry(picked, at.id, this.cardMenu, this.spaceActions)) return;
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
 

@@ -100,7 +100,7 @@ export class TaskStarter {
     plan: TaskPlan,
   ): Promise<boolean> {
     const fail = (step: TaskStep, reason: unknown): false => {
-      this.spaces.notify(remoteStepFailure(machine, step, reason));
+      this.spaces.fail(remoteStepFailure(machine, step, reason));
       return false;
     };
     let cwd: string;
@@ -216,7 +216,7 @@ export class TaskStarter {
   }
 
   private fail(step: TaskStep, reason: unknown): false {
-    this.spaces.notify(stepFailure(step, reason));
+    this.spaces.fail(stepFailure(step, reason));
     return false;
   }
 }

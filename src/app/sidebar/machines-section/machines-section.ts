@@ -1,3 +1,5 @@
+import { SpaceActions } from "../../core/space-actions";
+import { copyText } from "../card-menu";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -172,6 +174,7 @@ export class MachinesSection {
   private readonly store = inject(SpacesStore);
   protected readonly machines = inject(Machines);
   protected readonly ui = inject(UiState);
+  private readonly spaceActions = inject(SpaceActions);
   private readonly editor = inject(EditorTabs);
   /** A terminal of a machine was picked. */
   readonly selected = output<Terminal>();
@@ -199,7 +202,7 @@ export class MachinesSection {
   }
 
   protected copy(text: string): void {
-    void Promise.resolve(navigator.clipboard?.writeText(text)).catch(() => undefined);
+    copyText(text, this.spaceActions);
   }
 
   /** A row of a card: the terminal by its qualified id, only on a connected machine. */
