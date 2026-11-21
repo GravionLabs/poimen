@@ -5,6 +5,50 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.31.0] — 2026-11-21
+
+### Bug Fixes
+- **attention**: Unread semibold and text on the tree space row (#1031)
+- **status-bar**: Measure again when the content changes (#1034)
+- **sidebar**: Show the sidebar when a rename starts outside it (#1035)
+- **changes**: Ranges skip collapsed sections, keyboard focus shows row actions (#1036)
+- **demo**: Drop the removed sidebarLayout setting from the demo and its spec (#1140)
+
+
+### Documentation
+- **sidebar**: Default workspace lines and card wording
+- **site**: New screenshots from a demo backend (#1109) (#1138)
+
+
+### Features
+- **attention**: An agent that finishes while the user is away is unread (#1030) (#1124)
+- **attention**: An agent that finishes while the user is away is unread (#1030)
+- **attention**: The unread mark has its own color (#1031) (#1126)
+- **attention**: The unread mark has its own color (#1031)
+- **tabs**: Tabs shrink before the strip scrolls and the active tab stays visible (#1032) (#1127)
+- **tabs**: Icons for the tab kinds (#1033) (#1128)
+- **status-bar**: The status bar gives way in steps on a narrow window (#1034) (#1129)
+- **status-bar**: The status bar gives way in steps on a narrow window (#1034)
+- **sidebar**: Rename a terminal inline in the tree (#1035) (#1130)
+- **sidebar**: Rename a terminal inline in the tree (#1035)
+- **changes**: Sections and actions per file in the file list (#1036) (#1131)
+- **changes**: Sections and actions per file in the file list (#1036)
+- **changes**: Large diffs load on demand (#1037) (#1132)
+- **jump-palette**: Age and match context on a row (#1038) (#1133)
+- **ui**: Toasts for passing results and failed writes (#1040) (#1135)
+- **ui**: Toasts for passing results and failed writes (#1040)
+- **ui**: Toast for copy results and error severity for failures (#1040)
+- **ui**: Loading states by duration and reduced motion (#1041) (#1136)
+- **ui**: Loading states by duration and reduced motion (#1041)
+- **sidebar**: New pane in a space with a type choice instead of a path (#1049) (#1137)
+
+
+### Refactoring
+- **ui**: Drop the unused skipped step state (#1041)
+- **sidebar**: Replace the tree view with the cards view (#1111) (#1139)
+- **sidebar**: Replace the tree view with the cards view
+
+
 ## [0.30.0] — 2026-11-21
 
 ### Bug Fixes
@@ -14,6 +58,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **agents**: Test rules with a revert criterion (#1019) (#1113)
+- Update CHANGELOG.md for v0.30.0 [skip ci]
 
 
 ### Features
