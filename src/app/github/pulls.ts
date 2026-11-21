@@ -6,6 +6,7 @@ import { SpaceActions } from "../core/space-actions";
 import { UiState } from "../core/ui-state";
 import { TauriBridge } from "../core/tauri";
 import { GithubFilter } from "./github-filter";
+import { CHECK_LOG_LINES, checkLogKey, stripAnsi, tailLines, type CheckLog } from "./check-log";
 
 /** What a failed `gh` call came to (`GhError` of `github.rs`). */
 export type GhError =
@@ -33,6 +34,8 @@ export interface Pull {
   headRef: string;
   isCrossRepository: boolean;
   baseRef: string;
+  /** `MERGEABLE`, `CONFLICTING` or `UNKNOWN`; missing in an old answer. */
+  mergeable?: string;
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   reviewRequests: string[];
   checks: Checks;
@@ -401,6 +404,9 @@ export class GithubPulls {
   private readonly _detailLoading = signal(false);
   private last = 0;
   private anchor: string | null = null;
+  private readonly _checkLogs = signal<ReadonlyMap<string, CheckLog>>(new Map());
+  /** Failed check logs of the open pull request, by `checkLogKey` (head commit and check URL). */
+  readonly checkLogs = this._checkLogs.asReadonly();
 
   readonly result = this._result.asReadonly();
   readonly loading = this._loading.asReadonly();
@@ -665,6 +671,34 @@ export class GithubPulls {
     );
     if (done) this.mergeDraft.set(null);
     return done;
+  }
+
+  /**
+   * Loads the failed log of one check when it is expanded. Cached for the head commit: a log that
+   * is loaded or loading is not asked again, a failed one is tried again.
+   */
+  async loadCheckLog(url: string): Promise<void> {
+    const row = this.detailRow();
+    const d = this._detail();
+    if (!row || !d) return;
+    const key = checkLogKey(d.headSha, url);
+    const known = this._checkLogs().get(key);
+    if (known && known.status !== "error") return;
+    this.setCheckLog(key, { status: "loading" });
+    try {
+      const raw = await this.bridge.invoke<string>("github_check_log", { root: row.root, url });
+      this.setCheckLog(key, { status: "ready", text: tailLines(stripAnsi(raw), CHECK_LOG_LINES) });
+    } catch (err) {
+      const e = ghErrorOf(err);
+      this.setCheckLog(key, {
+        status: "error",
+        message: typeof e === "string" ? e : errorText(e),
+      });
+    }
+  }
+
+  private setCheckLog(key: string, log: CheckLog): void {
+    this._checkLogs.update((m) => new Map(m).set(key, log));
   }
 
   /** Re-runs the failed jobs of the failed runs of the head commit. */

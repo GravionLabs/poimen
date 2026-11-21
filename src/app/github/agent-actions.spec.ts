@@ -219,6 +219,30 @@ describe("AgentActions", () => {
     expect(usesLog(action({ on: "issue", prompt: "{log}" }))).toBe(false);
   });
 
+  it("offers resolve-conflicts for a conflicting pull request, disabled for a fork", async () => {
+    tauri.answer("get_agent_actions", () => ({
+      actions: [
+        {
+          id: "resolve-conflicts",
+          label: "Resolve conflicts",
+          on: "pr",
+          prompt: "merge {base}",
+          source: "default",
+          when: { conflicting: true },
+        },
+      ],
+    }));
+    await actions.load("/src/n");
+    const ids = (row: PullRow) =>
+      actions.offered([pullTarget(row)]).map((o) => [o.action.id, o.enabled, o.reason]);
+    expect(ids(pull(1))).toEqual([]);
+    expect(ids(pull(2, { mergeable: "MERGEABLE" }))).toEqual([]);
+    expect(ids(pull(3, { mergeable: "CONFLICTING" }))).toEqual([["resolve-conflicts", true, null]]);
+    expect(ids(pull(4, { mergeable: "CONFLICTING", isCrossRepository: true }))).toEqual([
+      ["resolve-conflicts", false, FORK_REASON],
+    ]);
+  });
+
   it("loads the actions of a repository and offers the matching ones", async () => {
     tauri.answer("get_agent_actions", () => ({
       actions: [

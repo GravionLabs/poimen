@@ -56,6 +56,37 @@ pub enum PromptOutcome {
     Failed { message: String },
 }
 
+/// The agent harnesses with availability (program found on the `PATH` of a child).
+#[tauri::command]
+pub(crate) async fn get_harnesses() -> Vec<poimen_core::harness::HarnessInfo> {
+    let harnesses = crate::get_settings().harnesses;
+    tauri::async_runtime::spawn_blocking(move || poimen_core::harness::with_availability(harnesses))
+        .await
+        .unwrap_or_default()
+}
+
+/// The earlier agent sessions of `dir` (#986) for the harnesses that can resume one (`resumeArgs`):
+/// Claude Code and Copilot CLI, newest activity first.
+#[tauri::command]
+pub(crate) async fn list_agent_sessions(
+    dir: String,
+) -> Vec<poimen_core::agent_sessions::SessionInfo> {
+    let Some(home) = crate::home_dir() else {
+        return Vec::new();
+    };
+    let agents: Vec<String> = crate::settings::load(&home)
+        .harnesses
+        .into_iter()
+        .filter(|h| !h.resume_args.is_empty())
+        .map(|h| h.id)
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        poimen_core::agent_sessions::list(&home, &dir, &agents)
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

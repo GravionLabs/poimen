@@ -138,8 +138,11 @@ fn initialize_and_tools_list() {
         [
             "list_spaces",
             "list_terminals",
+            "get_terminal",
+            "read_terminal",
             "whoami",
             "list_runs",
+            "get_events",
             "start_agent",
             "prompt_agent",
             "wait_agent",
@@ -520,4 +523,244 @@ fn the_read_tools_need_no_consent_from_another_space() {
     );
     assert!(r.get("isError").is_none());
     let _ = &f.space;
+}
+
+/// A repository with three runs: `old` finished, `mid` running with an attention that needs the
+/// user, `new` running.
+fn runs_repo(f: &Fixture) -> PathBuf {
+    let repo = f.dir.join("runs-repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    let events = repo.join(".git/.agents/events");
+    std::fs::create_dir_all(&events).unwrap();
+    let write = |run: &str, lines: Vec<Value>| {
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(events.join(format!("{run}.jsonl")), text).unwrap();
+    };
+    let pid = std::process::id();
+    let started = |run: &str, ts: &str| {
+        json!({"v": 1, "seq": 1, "ts": ts, "type": "run.started", "run": run, "pid": pid,
+            "subject": {"kind": "github.milestone", "id": run}})
+    };
+    write(
+        "old",
+        vec![
+            started("old", "2026-01-01T00:00:00Z"),
+            json!({"v": 1, "seq": 2, "ts": "2026-01-01T00:01:00Z", "type": "run.finished",
+                "run": "old", "outcome": "succeeded"}),
+        ],
+    );
+    let now = chrono_like_now();
+    write(
+        "mid",
+        vec![
+            started("mid", &now),
+            json!({"v": 1, "seq": 2, "ts": now, "type": "attention", "run": "mid",
+                "id": "a1", "reason": "question", "needsYou": true}),
+            json!({"v": 1, "seq": 3, "ts": now, "type": "progress", "run": "mid"}),
+        ],
+    );
+    write("new", vec![started("new", &now)]);
+    repo
+}
+
+/// The current time as an RFC 3339 timestamp (civil date from days since the epoch).
+fn chrono_like_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let (days, rest) = ((secs / 86400) as i64, secs % 86400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
+}
+
+fn run_names(r: &Value) -> Vec<String> {
+    r["structuredContent"]["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["run"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn list_runs_filters_bounds_and_compacts() {
+    let f = fixture("runs-filter");
+    let repo = runs_repo(&f).display().to_string();
+    let list = |args: Value| call(&f.client, None, "list_runs", args);
+
+    // needs-you: only runs with needsYou true.
+    let r = list(json!({"repository": repo, "status": "needs-you"}));
+    assert_eq!(run_names(&r), ["mid"]);
+    assert_eq!(r["structuredContent"]["runs"][0]["needsYou"], true);
+
+    let r = list(json!({"repository": repo, "status": "finished"}));
+    assert_eq!(run_names(&r), ["old"]);
+    let r = list(json!({"repository": repo, "status": "running"}));
+    assert_eq!(run_names(&r).len(), 2);
+
+    // Newest first, cut by limit; the finished run is the oldest.
+    let r = list(json!({"repository": repo}));
+    let all = run_names(&r);
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[2], "old");
+    let r = list(json!({"repository": repo, "limit": 1}));
+    assert_eq!(run_names(&r), all[..1]);
+
+    // Compact drops `finished` and `links`, keeps the rest of the state.
+    let full = list(json!({"repository": repo, "status": "finished"}));
+    assert!(full["structuredContent"]["runs"][0]["finished"].is_object());
+    let r = list(json!({"repository": repo, "status": "finished", "compact": true}));
+    let run = &r["structuredContent"]["runs"][0];
+    assert!(run.get("finished").is_none() && run.get("links").is_none());
+    for key in [
+        "v",
+        "run",
+        "status",
+        "outcome",
+        "tasks",
+        "attentions",
+        "needsYou",
+        "lastSeq",
+    ] {
+        assert!(run.get(key).is_some(), "{key} kept");
+    }
+
+    // Bad arguments are tool errors.
+    for args in [
+        json!({"repository": repo, "status": "paused"}),
+        json!({"repository": repo, "limit": 0}),
+        json!({"repository": repo, "compact": "yes"}),
+        json!({"repository": repo, "bogus": 1}),
+    ] {
+        assert_eq!(list(args.clone())["isError"], true, "{args}");
+    }
+}
+
+#[test]
+fn get_events_returns_the_events_after_a_seq() {
+    let f = fixture("events");
+    let repo = runs_repo(&f).display().to_string();
+    let get = |args: Value| call(&f.client, None, "get_events", args);
+
+    let r = get(json!({"repository": repo, "run": "mid"}));
+    let seqs: Vec<i64> = r["structuredContent"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_i64().unwrap())
+        .collect();
+    assert_eq!(seqs, [1, 2, 3]);
+    assert_eq!(r["structuredContent"]["more"], false);
+
+    let r = get(json!({"repository": repo, "run": "mid", "after": 1}));
+    assert_eq!(r["structuredContent"]["events"][0]["seq"], 2);
+    assert_eq!(
+        r["structuredContent"]["events"].as_array().unwrap().len(),
+        2
+    );
+
+    let r = get(json!({"repository": repo, "run": "mid", "type": "progress"}));
+    let events = r["structuredContent"]["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "progress");
+
+    let r = get(json!({"repository": repo, "run": "mid", "limit": 2}));
+    assert_eq!(
+        r["structuredContent"]["events"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(r["structuredContent"]["more"], true);
+
+    // Unknown run, unknown repository, a path as run, an unknown parameter: tool errors.
+    for args in [
+        json!({"repository": repo, "run": "nope"}),
+        json!({"repository": repo, "run": "../mid"}),
+        json!({"repository": f.dir.join("missing").display().to_string(), "run": "mid"}),
+        json!({"repository": repo, "run": "mid", "bogus": true}),
+        json!({"repository": repo, "run": "mid", "limit": 0}),
+        json!({"repository": repo}),
+    ] {
+        assert_eq!(get(args.clone())["isError"], true, "{args}");
+    }
+}
+
+#[test]
+fn get_terminal_shows_the_source_and_the_changes_of_a_status() {
+    let f = fixture("get-terminal");
+    let shell = f
+        .client
+        .create_terminal(&TerminalCreate {
+            space_id: f.space.clone(),
+            name: Some("deliver".into()),
+            command: Some(vec!["sh".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    report(&f.client, &shell, 1, "working", Some("hooked"));
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": shell}));
+    let t = &r["structuredContent"];
+    assert_eq!(t["agent"]["source"], "claude");
+    assert_eq!(t["agent"]["status"], "working");
+    assert!(t["agent"]["status_since"].as_u64().is_some());
+    assert!(t["agent"]["reported_at"].as_u64().is_some());
+
+    // The program's own report wins over the hook.
+    f.client
+        .input(
+            &shell,
+            "printf '\\033]7501;state=error:app=deliver:title=TG9vcA==:msg=YmxvY2tlZA==\\033\\\\'\n",
+        )
+        .unwrap();
+    let w = call(&f.client, None, "wait_agent", json!({"terminal": shell}));
+    assert_eq!(w["structuredContent"]["status"], "error");
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": shell}));
+    let t = &r["structuredContent"];
+    assert_eq!(t["agent"]["source"], "osc7501");
+    assert_eq!(t["agent"]["kind"], "deliver");
+    assert_eq!(t["agent"]["title"], "Loop");
+    assert_eq!(t["agent"]["message"], "blocked");
+    let changes = t["status_changes"].as_array().unwrap();
+    let seen: Vec<(&str, &str)> = changes
+        .iter()
+        .map(|c| (c["status"].as_str().unwrap(), c["source"].as_str().unwrap()))
+        .collect();
+    assert_eq!(seen, [("working", "claude"), ("error", "osc7501")]);
+    assert_eq!(changes[1]["message"], "blocked");
+
+    // list_terminals stays compact.
+    let r = call(&f.client, None, "list_terminals", json!({}));
+    let listed = r["structuredContent"]["terminals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == shell.as_str())
+        .unwrap()
+        .clone();
+    assert!(listed.get("status_changes").is_none());
+    assert!(listed["agent"].get("source").is_none());
+}
+
+#[test]
+fn get_terminal_of_an_unknown_terminal_is_a_tool_error() {
+    let f = fixture("get-terminal-unknown");
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": "nope"}));
+    assert_eq!(r["isError"], true);
+    let r = call(&f.client, None, "get_terminal", json!({}));
+    assert_eq!(r["isError"], true);
 }

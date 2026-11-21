@@ -11,12 +11,16 @@
 //! name the agent supplies.
 
 mod report;
+mod runs;
+mod screen;
+mod terminal;
 mod worktree;
 
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use terminal::{terminal_detail, terminal_json};
 use worktree::{WorktreeSpec, make_worktree_space};
 
 use poimen_client::Client;
@@ -25,8 +29,7 @@ use poimen_client::protocol::{
     AgentConfirm, AgentStatus, AgentWriteAction, AgentWriteNotice, Event, TerminalCreate,
     TranscriptState,
 };
-use poimen_core::agent_events::{self, MAX_EVENTS_BYTES, Reducer};
-use poimen_core::{git, harness, settings};
+use poimen_core::{harness, settings};
 use serde_json::{Value, json};
 
 /// The MCP revisions this server speaks, newest first.
@@ -163,10 +166,25 @@ fn tools() -> Value {
         },
         {
             "name": "list_terminals",
-            "description": "The poimen terminals: id, space, name, state, agent kind and status, tokens. Optionally of one space.",
+            "description": "The poimen terminals: id, space, name, state, agent kind and status, tokens. Optionally of one space. Compact: `get_terminal` has the source of a status, its times and its recent changes.",
             "inputSchema": {"type": "object", "properties": {
                 "space": {"type": "string", "description": "Space id; all spaces when absent."}
             }},
+        },
+        {
+            "name": "get_terminal",
+            "description": "One terminal in full: what list_terminals has, plus where the agent status came from (`source`: `osc7501` or the hook kind), its times, title, progress, tone, hibernation, the OSC 7501 child records and the last status changes (at most 20, newest last; only since the server started). A read tool: any space, no confirmation.",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."}
+            }, "required": ["terminal"], "additionalProperties": false},
+        },
+        {
+            "name": "read_terminal",
+            "description": "The last lines of any terminal as plain text (its screen and scrollback: a shell, a build, a deliver loop), with whether it still runs. Observes only: no input, no control. Cut to 64 KiB with a note. Terminal output can hold secrets; a read tool: any space, no confirmation (ADR 0012).",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."},
+                "lines": {"type": "integer", "minimum": 1, "maximum": 500, "description": "How many lines from the end (default 50, at most 500)."}
+            }, "required": ["terminal"], "additionalProperties": false},
         },
         {
             "name": "whoami",
@@ -175,10 +193,24 @@ fn tools() -> Value {
         },
         {
             "name": "list_runs",
-            "description": "The deliver runs (agent-events) of the repository containing a directory.",
+            "description": "The deliver runs (agent-events) of the repository containing a directory, newest first, at most `limit` (default 20).",
             "inputSchema": {"type": "object", "properties": {
-                "repository": {"type": "string", "description": "A directory inside the repository."}
-            }, "required": ["repository"]},
+                "repository": {"type": "string", "description": "A directory inside the repository."},
+                "status": {"type": "string", "enum": ["running", "finished", "needs-you"], "description": "Only runs with this status; `needs-you` is the runs with an attention that needs the user."},
+                "limit": {"type": "integer", "minimum": 1, "description": "At most this many runs (default 20, newest first)."},
+                "compact": {"type": "boolean", "description": "Leave out the `finished` and `links` lists of each run."}
+            }, "required": ["repository"], "additionalProperties": false},
+        },
+        {
+            "name": "get_events",
+            "description": "The raw agent-events of one run of a repository after a `seq`, in order. Read-only.",
+            "inputSchema": {"type": "object", "properties": {
+                "repository": {"type": "string", "description": "A directory inside the repository."},
+                "run": {"type": "string", "description": "The run id (`run` of list_runs)."},
+                "after": {"type": "integer", "minimum": 0, "description": "Only events with a greater seq (default: from the start)."},
+                "type": {"type": "string", "description": "Only events of this type, e.g. `attention.raised`."},
+                "limit": {"type": "integer", "minimum": 1, "description": "At most this many events (default 100, at most 1000)."}
+            }, "required": ["repository", "run"], "additionalProperties": false},
         },
         {
             "name": "start_agent",
@@ -260,6 +292,21 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
             let terminals = client.list_terminals(space).map_err(server_error)?;
             Ok(json!({"terminals": terminals.iter().map(terminal_json).collect::<Vec<_>>()}))
         }
+        "get_terminal" => {
+            runs::only_keys(args, &["terminal"])?;
+            let id = args
+                .get("terminal")
+                .and_then(Value::as_str)
+                .filter(|i| !i.is_empty())
+                .ok_or_else(|| Fail::Tool("terminal is required".into()))?;
+            let terminals = client.list_terminals(None).map_err(server_error)?;
+            let t = terminals
+                .iter()
+                .find(|t| t.id == id)
+                .ok_or_else(|| Fail::Tool(format!("terminal {id} is not known to the server")))?;
+            Ok(terminal_detail(t))
+        }
+        "read_terminal" => screen::read_terminal(client, args),
         "whoami" => {
             let Some(id) = terminal_id.filter(|i| !i.is_empty()) else {
                 return Ok(json!({"in_poimen": false}));
@@ -278,13 +325,15 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
             }))
         }
         "list_runs" => {
-            let dir = args
-                .get("repository")
-                .and_then(Value::as_str)
-                .filter(|d| !d.is_empty())
-                .ok_or_else(|| Fail::Tool("missing argument `repository`".into()))?;
-            let runs = runs_of(dir).map_err(Fail::Tool)?;
+            runs::only_keys(args, &["repository", "status", "limit", "compact"])?;
+            let dir = runs::repository_arg(args)?;
+            let filter = runs::RunFilter::parse(args)?;
+            let runs = runs::runs_of(dir, &filter).map_err(Fail::Tool)?;
             Ok(json!({"repository": dir, "runs": runs}))
+        }
+        "get_events" => {
+            runs::only_keys(args, &["repository", "run", "after", "type", "limit"])?;
+            runs::get_events(args)
         }
         "start_agent" => start_agent(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
@@ -727,72 +776,4 @@ fn read_agent(client: &Client, args: &Value) -> Result<Value, Fail> {
 
 fn server_error(e: poimen_client::ClientError) -> Fail {
     Fail::Tool(format!("poimen-server: {e}"))
-}
-
-fn terminal_json(t: &poimen_client::protocol::Terminal) -> Value {
-    let agent = t.agent.as_ref().map(|a| {
-        json!({
-            "kind": a.agent,
-            "status": a.status,
-            "message": a.message,
-        })
-    });
-    json!({
-        "id": t.id,
-        "space": t.space_id,
-        "name": t.name,
-        "directory": t.cwd,
-        "state": t.status,
-        "agent": agent,
-        "tokens": t.tokens,
-    })
-}
-
-/// The runs of the repository containing `dir`, from `<common-dir>/.agents/events/*.jsonl`
-/// folded by the core reducer (the same one the app uses), oldest file name first. No events
-/// directory is an empty list; a directory outside a repository is an error.
-fn runs_of(dir: &str) -> Result<Vec<Value>, String> {
-    if !Path::new(dir).is_dir() {
-        return Err(format!("`{dir}` is not a directory"));
-    }
-    let (_, common) =
-        git::roots(dir).ok_or_else(|| format!("`{dir}` is not inside a git repository"))?;
-    let events = Path::new(&common).join(agent_events::EVENTS_PATH);
-    let Ok(entries) = std::fs::read_dir(&events) else {
-        return Ok(Vec::new());
-    };
-    let mut files: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| agent_events::is_run_file(p))
-        .collect();
-    files.sort();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64());
-    let mut runs = Vec::new();
-    for path in files {
-        let regular =
-            std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= MAX_EVENTS_BYTES);
-        let Some(text) = regular
-            .then(|| std::fs::read_to_string(&path).ok())
-            .flatten()
-        else {
-            continue;
-        };
-        // Only complete lines: a half-written last line waits.
-        let complete = text.rfind('\n').map_or("", |i| &text[..=i]);
-        let mut reducer = Reducer::new();
-        for line in complete.lines().filter(|l| !l.trim().is_empty()) {
-            reducer.push_line(line);
-        }
-        if let Some(run) = reducer.snapshot(now, &agent_events::pid_alive) {
-            let mut v = serde_json::to_value(&run).map_err(|e| e.to_string())?;
-            if let Some(o) = v.as_object_mut() {
-                o.remove("events");
-            }
-            runs.push(v);
-        }
-    }
-    Ok(runs)
 }

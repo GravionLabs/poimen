@@ -120,6 +120,8 @@ pub struct ChildRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 }
 
@@ -156,6 +158,9 @@ pub struct Terminal {
     /// Why the agent is blocked: `permission`, `question` or `auth` (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_kind: Option<String>,
+    /// `warning` for a `done` that wants a look (#1152).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_tone: Option<String>,
     /// The program's own title (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_title: Option<String>,

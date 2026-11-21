@@ -481,6 +481,7 @@ export class SpacesStore {
    * failure keeps the previous values.
    */
   private async readPulls(dirs: string[]): Promise<void> {
+    this.pullDirs = dirs;
     if (dirs.length === 0) return;
     try {
       const found = await this.bridge.invoke<Record<string, BranchPull> | undefined>(
@@ -491,6 +492,13 @@ export class SpacesStore {
     } catch {
       // keep the previous values
     }
+  }
+
+  private pullDirs: string[] = [];
+
+  /** Reads the pull requests of the known directories again (#995: while checks are pending). */
+  async refreshPulls(): Promise<void> {
+    await this.readPulls(this.pullDirs);
   }
 
   /** Re-reads branch, dirty state and ahead/behind at the next snapshot read. */
@@ -547,6 +555,7 @@ export class SpacesStore {
               {
                 progress: event.data!.agent_progress,
                 kind: event.data!.agent_kind,
+                tone: event.data!.agent_tone,
                 title: event.data!.agent_title,
               },
             ),

@@ -39,7 +39,7 @@ pub mod sidebar;
 pub mod tree;
 pub mod view;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -48,7 +48,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
-    AgentStatus, AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
+    AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
     SplitDirection, TabCreate, TabSplit, TerminalStatus, decode_bytes,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
@@ -240,23 +240,14 @@ impl App {
         }
     }
 
-    fn statuses(&self) -> HashMap<String, AgentStatus> {
-        self.model
-            .terminals
-            .iter()
-            .filter_map(|t| {
-                let status = t.agent.as_ref()?.status;
-                (status != AgentStatus::Gone).then(|| (t.id.clone(), status))
-            })
-            .collect()
-    }
-
     /// Folds the server's statuses into the marks and the list. Cheap
     /// and repeatable: also run after the view changed, which is what clears a mark.
     fn observe(&mut self) {
         self.now_ms = epoch_ms();
         let viewed = self.viewed();
-        let changes = self.attention.observe(&self.statuses(), &viewed);
+        let changes = self
+            .attention
+            .observe_terminals(&self.model.terminals, &viewed);
         let model = &self.model;
         self.log.retain_terminals(|id| model.terminal(id).is_some());
         for c in &changes {

@@ -24,6 +24,7 @@ import {
   type PullDetail,
   type PullsResult,
 } from "../pulls";
+import { hasCheckLog, stripAnsi, tailLines } from "../check-log";
 import { IssueDetailPane } from "../issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail";
 import { ChipPicker } from "../chip-picker/chip-picker";
@@ -388,6 +389,59 @@ describe("merge, re-run and people", () => {
     fixture.detectChanges();
     return { fixture, el };
   }
+
+  describe("failed check log (#999)", () => {
+    const URL = "https://github.com/o/n/actions/runs/5/job/9";
+    const checks: PullDetail["checks"] = [
+      { name: "rust", state: "failing", url: URL },
+      { name: "ok", state: "passing", url: "https://github.com/o/n/actions/runs/5/job/8" },
+      { name: "ext", state: "failing", url: "https://ci.example.com/1" },
+    ];
+
+    it("strips colors and keeps the last lines", () => {
+      expect(stripAnsi("\u001b[31mred\u001b[0m plain \u001b]0;t\u0007x")).toBe("red plain x");
+      expect(tailLines("a\nb\nc\n", 2)).toBe("b\nc");
+      expect(tailLines("a\nb", 5)).toBe("a\nb");
+      expect(hasCheckLog({ name: "r", state: "failing", url: URL })).toBe(true);
+      expect(hasCheckLog({ name: "r", state: "passing", url: URL })).toBe(false);
+      expect(hasCheckLog({ name: "r", state: "failing", url: "https://ci.example.com/1" })).toBe(
+        false,
+      );
+    });
+
+    it("loads the log on expand, shows it without colors and caches it", async () => {
+      tauri.answer("github_check_log", () => "\u001b[31merror: boom\u001b[0m\n");
+      const { fixture, el } = await open({ checks });
+      expect(el.querySelectorAll("[data-testid=check-log-toggle]")).toHaveLength(1);
+      expect(tauri.calls("github_check_log")).toHaveLength(0);
+      q(el, "[data-testid=check-log-toggle]")!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(q(el, "[data-testid=check-log]")!.textContent).toBe("error: boom");
+      expect(tauri.calls("github_check_log")).toEqual([{ root: "/src/n", url: URL }]);
+      q(el, "[data-testid=check-log-toggle]")!.click();
+      fixture.detectChanges();
+      expect(q(el, "[data-testid=check-log]")).toBeNull();
+      q(el, "[data-testid=check-log-toggle]")!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(q(el, "[data-testid=check-log]")!.textContent).toBe("error: boom");
+      expect(tauri.calls("github_check_log")).toHaveLength(1);
+      // "Open on GitHub" (the check name link) stays.
+      expect(q(el, "[data-testid=check-link]")).not.toBeNull();
+    });
+
+    it("shows why a log failed", async () => {
+      tauri.answer("github_check_log", () => {
+        throw "no log";
+      });
+      const { fixture, el } = await open({ checks });
+      q(el, "[data-testid=check-log-toggle]")!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(q(el, "[data-testid=check-log-error]")).not.toBeNull();
+    });
+  });
 
   it("confirms the method and target branch, then merges with delete branch on", async () => {
     const { fixture, el } = await open();

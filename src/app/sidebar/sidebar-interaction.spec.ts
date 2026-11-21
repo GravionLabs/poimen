@@ -254,16 +254,18 @@ describe("Sidebar cards", () => {
 
     const menu = root.querySelector<HTMLElement>(".menu")!;
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     const press = (name: string) =>
       menu.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
-    items[4].focus();
+    items[5].focus();
     press("ArrowDown");
     expect(document.activeElement?.textContent?.trim()).toBe("Split right");
     press("End");
     expect(document.activeElement?.textContent?.trim()).toBe("Close pane...");
     press("Home");
     expect(document.activeElement?.textContent?.trim()).toBe("Split right");
+    press("r");
+    expect(document.activeElement?.textContent?.trim()).toBe("Resume session...");
     press("r");
     expect(document.activeElement?.textContent?.trim()).toBe("Rename...");
 

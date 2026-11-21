@@ -86,6 +86,19 @@ describe("soundChanges", () => {
 });
 
 describe("Sounds", () => {
+  it("plays a check result like a transition: its setting and the shared window (#995)", () => {
+    const off = setup({ blocked: false, done: true });
+    off.sounds.notifyResult("blocked", 10_000);
+    expect(off.oscillators).toEqual([]);
+    const on = setup({ blocked: true, done: true });
+    on.sounds.notifyResult("done", 10_000);
+    expect(on.freqs()).toEqual([523, 784]);
+    on.sounds.notifyResult("done", 10_500);
+    expect(on.freqs()).toHaveLength(2);
+    on.sounds.notifyResult("blocked", 10_600);
+    expect(on.freqs().slice(2)).toEqual([740, 587]);
+  });
+
   it("plays done when blocked is off and a mixed batch arrives", () => {
     const t = setup({ blocked: false, done: true });
     t.sounds.notify([blocked, done], 10_000);

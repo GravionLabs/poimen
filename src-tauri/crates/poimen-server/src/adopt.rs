@@ -126,6 +126,14 @@ fn adopted(
             hibernated: t.hibernated,
             started_by: t.started_by,
             report: t.report,
+            agent_source: t.agent.as_ref().map(|a| {
+                if t.osc {
+                    "osc7501".to_string()
+                } else {
+                    a.agent.clone().unwrap_or_default()
+                }
+            }),
+            status_history: Vec::new(),
         },
         host: Some(handle),
         stream,

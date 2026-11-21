@@ -1,0 +1,39 @@
+@if (resume.dialog(); as d) {
+  <app-dialog-shell heading="Resume session" label="Resume session" (cancelled)="resume.cancel()">
+    <p class="hint dir">{{ d.dir }}</p>
+    @if (d.error) {
+      <p class="error" role="alert">{{ d.error }}</p>
+    }
+    @if (d.loading) {
+      <p class="hint">Reading the sessions...</p>
+    } @else if (d.sessions.length === 0) {
+      <p class="hint">No earlier session of this directory.</p>
+    } @else {
+      <ul class="sessions">
+        @for (s of d.sessions; track s.agent + s.session) {
+          <li>
+            <button type="button" hx-button variant="text" class="session" (click)="pick(s)">
+              <span class="prompt">{{ s.firstPrompt || "(no prompt)" }}</span>
+              <span class="meta">
+                {{ agent(s.agent) }} · started {{ time(s.started) }} · last
+                {{ time(s.lastActivity) }}
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        (click)="resume.cancel()"
+      >
+        Cancel
+      </button>
+    </div>
+  </app-dialog-shell>
+}

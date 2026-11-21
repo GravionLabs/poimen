@@ -38,6 +38,7 @@ export interface PoimenCommand {
     | "sortSpacesRecent"
     | "sortSpacesNow"
     | "startTask"
+    | "resumeSession"
     | "openTerminalHere"
     | "openInEditor"
     | "cleanupTasks"
@@ -92,6 +93,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showSpaceOverview", title: "Show Space Overview" },
   { id: "startTask", title: "Start task from issue…" },
   { id: "openTerminalHere", title: "Open terminal in the selected folder" },
+  { id: "resumeSession", title: "Resume session..." },
   { id: "openInEditor", title: "Open in Editor" },
   { id: "cleanupTasks", title: "Clean up merged tasks" },
   { id: "projectTeardown", title: "Project: Run teardown" },
@@ -186,6 +188,7 @@ export class CommandPalette {
         c.id === "sortSpacesRecent" ||
         c.id === "sortSpacesNow" ||
         c.id === "startTask" ||
+        c.id === "resumeSession" ||
         c.id === "openTerminalHere" ||
         c.id === "openInEditor" ||
         c.id === "cleanupTasks" ||

@@ -42,6 +42,8 @@ import {
 } from "./findings";
 import { FindingsPanel } from "./findings-panel";
 import { LineComments } from "./line-comments";
+import { CreatePullRequest } from "./pull-request";
+import { PullRequestDialog } from "./pull-request-dialog";
 import { LoadingRows } from "../ui/loading/loading-rows";
 
 const SCOPE_LABEL: Record<ChangesScope, string> = {
@@ -64,9 +66,10 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     HxSelectButton,
     ContextMenu,
     DialogShell,
+    PullRequestDialog,
     NgTemplateOutlet,
   ],
-  providers: [Changes, LineComments, Findings],
+  providers: [Changes, LineComments, Findings, CreatePullRequest],
   templateUrl: "./changes-view.html",
   styles: `
     :host {
@@ -285,6 +288,7 @@ export class ChangesView {
   protected readonly changes = inject(Changes);
   protected readonly lineComments = inject(LineComments);
   protected readonly findings = inject(Findings);
+  protected readonly pullRequest = inject(CreatePullRequest);
   private readonly ui = inject(UiState);
   private readonly externalEditor = inject(ExternalEditor);
   /** The line the last click on a line number of the diff picked, and its file (#1002). */
@@ -366,6 +370,10 @@ export class ChangesView {
     effect(() => {
       this.findings.follow(this.path());
       if (this.changes.list()) untracked(() => void this.findings.refresh());
+    });
+    // The branch may have been pushed or got a pull request: read the state with every list.
+    effect(() => {
+      if (this.changes.list()) untracked(() => void this.pullRequest.load());
     });
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => {

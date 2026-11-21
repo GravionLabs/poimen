@@ -521,6 +521,7 @@ fn agent_reports_update_the_terminal_emit_an_event_and_stale_ones_are_dropped() 
             message_at: None,
             progress: None,
             kind: None,
+            tone: None,
             title: None,
             silent_since: None,
         }

@@ -86,8 +86,9 @@ pub fn row_at(app: &App, sidebar: Rect, y: u16) -> Option<String> {
     None
 }
 
-fn status_color(status: Option<AgentStatus>) -> Color {
+fn status_color(status: Option<AgentStatus>, warning: bool) -> Color {
     match status {
+        Some(AgentStatus::Done) if warning => Color::Yellow,
         Some(AgentStatus::Working) => Color::Yellow,
         Some(AgentStatus::Blocked | AgentStatus::Error) => Color::Red,
         Some(AgentStatus::Done) => Color::Green,
@@ -121,7 +122,7 @@ fn row_lines(row: &Row) -> Vec<Line<'static>> {
                 }
                 let mut style = match s.kind {
                     SegmentKind::Dot | SegmentKind::State => {
-                        Style::default().fg(status_color(row.status))
+                        Style::default().fg(status_color(row.status, row.warning))
                     }
                     SegmentKind::Name if row.kind == RowKind::Space => {
                         Style::default().add_modifier(Modifier::BOLD)
@@ -508,6 +509,7 @@ mod tests {
             terminal_id: id.map(str::to_owned),
             depth: 0,
             status: None,
+            warning: false,
             lines: vec![
                 vec![Segment {
                     kind: SegmentKind::Name,

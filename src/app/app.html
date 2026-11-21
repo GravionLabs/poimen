@@ -99,6 +99,7 @@
 </hx-app-shell>
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
+<app-resume-dialog (created)="open($event, true)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-trust-dialog />
 <app-result-dialog />
@@ -160,7 +161,11 @@
             }
             @if (!tab.icon) {
               @let p = tabPane(tab.id);
-              <span class="dot status-{{ p?.agent_status ?? 'unknown' }}"></span>
+              <span
+                class="dot status-{{ p?.agent_status ?? 'unknown' }}"
+                [class.silent]="p?.agent_silent_since !== undefined"
+                [class.warning]="p?.agent_tone !== undefined"
+              ></span>
               @if (editor.mode(tab.id) === "control") {
                 <app-icon
                   name="terminal"

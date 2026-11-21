@@ -2,8 +2,9 @@
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
-import { beforeAll, describe, expect, it } from "vitest";
-import { NotificationCenter } from "../core/notification-center";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { NotificationCenter, type CheckResult } from "../core/notification-center";
+import { PrWatch } from "../core/pr-watch";
 import { Notifications } from "./notifications";
 
 describe("Notifications", () => {
@@ -11,8 +12,9 @@ describe("Notifications", () => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
 
-  const setup = () => {
+  const setup = (watch?: Pick<PrWatch, "fixChecks">) => {
     TestBed.resetTestingModule();
+    if (watch) TestBed.overrideProvider(PrWatch, { useValue: watch });
     TestBed.overrideComponent(Notifications, {
       set: {
         templateUrl: undefined,
@@ -69,5 +71,33 @@ describe("Notifications", () => {
     expect(runs).toEqual([{ root: "/r" }]);
     expect(chosen).toEqual([]);
     expect(center.unread()).toBe(0);
+  });
+
+  it("a failed check result offers fix-checks, a passed one does not (#995)", async () => {
+    const fixChecks = vi.fn((r: CheckResult) => Promise.resolve(void r.number));
+    const { fixture, center, el } = setup({ fixChecks });
+    const result = (passed: boolean): CheckResult => ({
+      passed,
+      number: 12,
+      title: "T",
+      url: "u",
+      sha: "a",
+      label: "space",
+      paneId: "t1",
+      dir: "/a",
+      branch: "feat/a",
+      base: "main",
+      crossRepo: false,
+    });
+    center.recordChecks([result(true)], 1);
+    await fixture.whenStable();
+    expect(el.querySelector(".fix button")).toBeNull();
+    center.recordChecks([result(false)], 2);
+    await fixture.whenStable();
+    const buttons = el.querySelectorAll<HTMLButtonElement>(".fix button");
+    expect(buttons).toHaveLength(1);
+    buttons[0].click();
+    expect(fixChecks).toHaveBeenCalledWith(expect.objectContaining({ passed: false, number: 12 }));
+    expect(center.entries()[0].read).toBe(true);
   });
 });

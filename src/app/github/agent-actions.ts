@@ -69,6 +69,8 @@ export interface ActionTarget {
   hasChildren: boolean;
   /** `failed` when the checks of the pull request failed. */
   checks: string | null;
+  /** The pull request conflicts with its base. */
+  conflicting: boolean;
   /** The head branch lives in a fork, where poimen cannot push. */
   crossRepo: boolean;
   state: string;
@@ -89,6 +91,7 @@ export function issueTarget(repo: string, root: string, issue: Issue): ActionTar
     labels: issue.labels,
     hasChildren: issue.subTotal > 0,
     checks: null,
+    conflicting: false,
     crossRepo: false,
     state: issue.state.toLowerCase(),
     review: null,
@@ -109,6 +112,7 @@ export function pullTarget(row: PullRow): ActionTarget {
     labels: [],
     hasChildren: false,
     checks: row.checks.state === "failing" ? "failed" : null,
+    conflicting: row.mergeable === "CONFLICTING",
     crossRepo: row.isCrossRepository,
     state: "open",
     review: row.reviewDecision,
@@ -130,6 +134,7 @@ export function matches(action: AgentAction, target: ActionTarget): boolean {
     anyOf(w.label, target.labels) &&
     !(w.noChildren && target.hasChildren) &&
     (w.checks === null || w.checks === target.checks) &&
+    (!w.conflicting || target.conflicting) &&
     anyOf(w.state, [target.state]) &&
     (w.review === null || w.review === target.review)
   );
@@ -141,6 +146,11 @@ export const FORK_REASON = "The pull request is from a fork; poimen cannot push 
 /** Whether the prompt takes the failed check logs (`{log}`, written before the agent starts). */
 export function usesLog(action: AgentAction): boolean {
   return action.on === "pr" && action.prompt.includes("{log}");
+}
+
+/** Whether the action writes to the head branch of the pull request, which a fork does not allow. */
+export function pushesToHead(action: AgentAction): boolean {
+  return usesLog(action) || (action.on === "pr" && action.when.conflicting);
 }
 
 /** An action offered for the targets; a disabled one carries the reason. */
@@ -301,7 +311,8 @@ export class AgentActions {
     return (this.byRoot().get(first.root) ?? [])
       .filter((a) => targets.every((t) => matches(a, t)))
       .map((action) => {
-        const reason = usesLog(action) && targets.some((t) => t.crossRepo) ? FORK_REASON : null;
+        const reason =
+          pushesToHead(action) && targets.some((t) => t.crossRepo) ? FORK_REASON : null;
         return { action, enabled: reason === null, reason };
       });
   }

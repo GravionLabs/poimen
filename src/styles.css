@@ -121,6 +121,9 @@
   /* The bar of a ringing space card: a graphic, 3:1 against the card. */
   --status-blocked-bar: var(--h-orange-600);
   --status-done: var(--h-green-500);
+  /* Done with a warning (#1152): the attention color; the dot is a diamond, so not color alone. */
+  --status-warning: var(--status-blocked);
+  --status-warning-on-active: var(--status-blocked-on-active);
   --status-unknown: var(--h-surface-300);
   /* The unread mark (#1031): not a state, so none of the state colors; derived per scheme. */
   --status-unread: var(--term-ansi-5);
@@ -250,6 +253,20 @@ button.hx-button.hx-button-icon-only {
 .status-error {
   background: var(--status-error);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-error) 30%, transparent);
+}
+
+/* Done with a warning (#1152): a diamond in the warning color instead of the green dot. */
+.status-done.warning {
+  background: var(--status-warning);
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.9);
+}
+
+/* Silent (#1149): still working, nothing reported for a while. A hollow ring, so it differs from working by shape, not by color alone. */
+.status-working.silent {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--status-working);
+  animation: none;
 }
 
 @keyframes pulse {

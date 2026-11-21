@@ -2,15 +2,36 @@
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
 import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
-import type { Checks } from "../github/pulls";
+import type { BranchPull } from "./branch-pull";
 import type { SidebarSort } from "./settings";
+import { naturalCompare } from "./natural-compare";
 import { markStarters } from "./started-by";
+
+export { naturalCompare };
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "error" | "unknown";
 
 /** The agent waits for the user or failed: it rings like a block (OSC 7501 `error`, #682). */
 export function needsAttention(status: AgentStatus): boolean {
   return status === "blocked" || status === "error";
+}
+
+/** The only tone OSC 7501 knows (#1152): a `done` that wants a look. */
+export const WARNING_TONE = "warning";
+
+/** Whether a status and tone are a finished agent with a warning; the tone means nothing for another status. */
+export function isWarning(status: AgentStatus, tone: string | undefined): boolean {
+  return status === "done" && tone === WARNING_TONE;
+}
+
+/** A pane that is `done` with a warning (OSC 7501 `tone=warning`, #1152). */
+export function paneWarning(pane: Pick<Terminal, "agent_status" | "agent_tone">): boolean {
+  return isWarning(pane.agent_status, pane.agent_tone);
+}
+
+/** The pane's agent waits for the user, failed, or finished with a warning: it needs a look. */
+export function paneNeedsAttention(pane: Pick<Terminal, "agent_status" | "agent_tone">): boolean {
+  return needsAttention(pane.agent_status) || paneWarning(pane);
 }
 
 /**
@@ -39,6 +60,7 @@ export function validProgress(value: number | undefined): number | undefined {
 export interface StateDetails {
   kind?: string;
   progress?: number;
+  tone?: string;
 }
 
 /**
@@ -51,6 +73,7 @@ export function stateText(status: AgentStatus, details: StateDetails = {}): stri
   const progress = validProgress(details.progress);
   let text: string = status;
   if (status === "blocked" && kind) text = `waiting: ${kind}`;
+  if (isWarning(status, details.tone)) text = "done: warning";
   if (progress !== undefined && status !== "done" && status !== "idle") text += ` ${progress}%`;
   return text;
 }
@@ -178,6 +201,7 @@ export interface ChildRecord {
   message?: string;
   progress?: number;
   kind?: string;
+  tone?: string;
   title?: string;
 }
 
@@ -200,6 +224,8 @@ export interface Terminal {
   /** Progress 0 to 100, why the agent is blocked (`permission`, `question`, `auth`) and the program's own title (OSC 7501, #682). */
   agent_progress?: number;
   agent_kind?: string;
+  /** `warning` for a `done` that wants a look (OSC 7501 `tone`, #1152); only with `done`. */
+  agent_tone?: string;
   agent_title?: string;
   /** The server stopped the idle agent; the next controller attach resumes it (poimen backend, #904). */
   hibernated?: boolean;
@@ -241,15 +267,7 @@ export interface RepoInfo {
   on_base?: boolean;
 }
 
-/** The pull request of a branch as `branch_pulls` returns it (`BranchPull` of `github_branches.rs`). */
-export interface BranchPull {
-  number: number;
-  title: string;
-  url: string;
-  state: "open" | "merged";
-  isDraft: boolean;
-  checks: Checks;
-}
+export type { BranchPull } from "./branch-pull";
 
 /** The backend-neutral state: spaces hold tabs hold terminals (a terminal is identified by `terminal_id`). */
 export interface Snapshot {
@@ -277,9 +295,15 @@ export function toSnapshot(wire: WireSnapshot | null | undefined): Snapshot {
 /** The terminal with the texts a program reported cleaned (`plainText`); unchanged when none is set. */
 function plainTerminal(t: Terminal): Terminal {
   if (t.records?.length) t = { ...t, records: t.records.map(plainRecord) };
-  if (t.agent_message === undefined && t.agent_title === undefined && t.agent_kind === undefined)
+  if (
+    t.agent_message === undefined &&
+    t.agent_title === undefined &&
+    t.agent_kind === undefined &&
+    t.agent_tone === undefined
+  )
     return t;
   const next = { ...t };
+  if (next.agent_tone !== undefined && !paneWarning(next)) delete next.agent_tone;
   for (const key of ["agent_message", "agent_title", "agent_kind"] as const) {
     if (next[key] === undefined) continue;
     const clean = plainText(next[key]);
@@ -298,6 +322,7 @@ function plainRecord(r: ChildRecord): ChildRecord {
     const clean = plainText(r[key]);
     if (clean) next[key] = clean;
   }
+  if (isWarning(r.status, r.tone)) next.tone = WARNING_TONE;
   return next;
 }
 
@@ -390,45 +415,6 @@ export interface WorkspaceNode {
 }
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
-
-/**
- * Compares two names like `poimen_core::order::natural_cmp` (the TUI): case ignored, runs of ASCII
- * digits as numbers (`#9` before `#12`), accents significant (code points after lowercasing).
- * `fixtures/name-order.json` of poimen-core is read by both specs.
- */
-export function naturalCompare(a: string, b: string): number {
-  let i = 0;
-  let j = 0;
-  const digit = (c: string | undefined) => c !== undefined && c >= "0" && c <= "9";
-  while (i < a.length && j < b.length) {
-    if (digit(a[i]) && digit(b[j])) {
-      let ie = i;
-      let je = j;
-      while (digit(a[ie])) ie++;
-      while (digit(b[je])) je++;
-      const x = a.slice(i, ie).replace(/^0+/, "");
-      const y = b.slice(j, je).replace(/^0+/, "");
-      if (x.length !== y.length) return x.length < y.length ? -1 : 1;
-      if (x !== y) return x < y ? -1 : 1;
-      i = ie;
-      j = je;
-      continue;
-    }
-    const x = String.fromCodePoint(a.codePointAt(i)!);
-    const y = String.fromCodePoint(b.codePointAt(j)!);
-    i += x.length;
-    j += y.length;
-    const lx = Array.from(x.toLowerCase(), (c) => c.codePointAt(0)!);
-    const ly = Array.from(y.toLowerCase(), (c) => c.codePointAt(0)!);
-    for (let k = 0; k < Math.min(lx.length, ly.length); k++) {
-      if (lx[k] !== ly[k]) return lx[k] < ly[k] ? -1 : 1;
-    }
-    if (lx.length !== ly.length) return lx.length < ly.length ? -1 : 1;
-  }
-  const ra = a.length - i;
-  const rb = b.length - j;
-  return ra === rb ? 0 : ra === 0 ? -1 : rb === 0 ? 1 : 0;
-}
 
 /** Alphabetical by label (`naturalCompare`); ties by backend number. */
 const byLabel = <T extends { label: string; number: number }>(a: T, b: T) =>
@@ -616,15 +602,15 @@ export function tabHeader(
 
 /** Panes whose agent waits for the user. */
 export function waitingCount(panes: Terminal[]): number {
-  return panes.filter((pane) => needsAttention(pane.agent_status)).length;
+  return panes.filter(paneNeedsAttention).length;
 }
 
 /** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
 export function nextWaiting(all: Terminal[], activeId: string | null): Terminal | undefined {
-  const waiting = all.filter((pane) => needsAttention(pane.agent_status));
+  const waiting = all.filter(paneNeedsAttention);
   if (!waiting.length) return undefined;
   const index = all.findIndex((pane) => pane.terminal_id === activeId);
-  const after = all.slice(index + 1).find((pane) => needsAttention(pane.agent_status));
+  const after = all.slice(index + 1).find(paneNeedsAttention);
   return after ?? waiting[0];
 }
 
@@ -638,7 +624,7 @@ export function applyStatus(
   paneId: string,
   status: AgentStatus,
   message?: { text: string; at: number },
-  details: { progress?: number; kind?: string; title?: string } = {},
+  details: { progress?: number; kind?: string; tone?: string; title?: string } = {},
 ): Snapshot {
   return {
     ...snapshot,
@@ -648,12 +634,14 @@ export function applyStatus(
       const base: Terminal = { ...pane, agent_status: status };
       delete base.agent_progress;
       delete base.agent_kind;
+      delete base.agent_tone;
       delete base.agent_title;
       const progress = validProgress(details.progress);
       const kind = plainText(details.kind);
       const title = plainText(details.title);
       if (progress !== undefined) base.agent_progress = progress;
       if (kind) base.agent_kind = kind;
+      if (isWarning(status, details.tone)) base.agent_tone = WARNING_TONE;
       if (title) base.agent_title = title;
       if (message) {
         const text = plainText(message.text);
@@ -706,6 +694,7 @@ export function statusText(pane: Terminal): string | undefined {
   const state = stateText(pane.agent_status, {
     kind: pane.agent_kind,
     progress: pane.agent_progress,
+    tone: pane.agent_tone,
   });
   const step = pane.tokens?.["deliver_step"]?.trim() || undefined;
   return [state, step].filter(Boolean).join(" · ") || undefined;

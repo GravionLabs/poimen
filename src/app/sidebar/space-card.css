@@ -248,6 +248,10 @@
   color: var(--status-error);
 }
 
+.state-done.warning {
+  color: var(--status-warning);
+}
+
 .badge {
   flex: none;
   min-width: 16px;
@@ -315,6 +319,10 @@
 
 .card.attention .state-done {
   color: var(--status-done-on-active);
+}
+
+.card.attention .state-done.warning {
+  color: var(--status-warning-on-active);
 }
 
 .card.attention .state-error {

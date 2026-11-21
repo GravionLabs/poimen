@@ -1,4 +1,5 @@
-use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, transcripts};
+use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, tasks, templates};
+use poimen_core::{transcripts, trust};
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -25,6 +26,7 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
+mod pull_request;
 mod remote_runs;
 mod remote_transcripts;
 mod schemes;
@@ -34,9 +36,7 @@ mod settings;
 mod settings_transfer;
 mod spaces;
 mod task_start;
-use poimen_core::{tasks, templates};
 mod terminal_colors;
-use poimen_core::trust;
 mod updater;
 mod worktree;
 
@@ -503,25 +503,6 @@ async fn github_pr_ci_log(
     let root = github_pulls::expand_home(&root, home_dir().as_deref());
     tauri::async_runtime::spawn_blocking(move || {
         github_pulls::run_ci_log(&client, &root, number, &worktree, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| github::GhError::Other {
-        message: e.to_string(),
-    })?
-}
-
-/// Adds and removes reviewers, labels and assignees of a pull request.
-#[tauri::command]
-async fn github_pr_edit(
-    client: State<'_, GithubClient>,
-    root: String,
-    number: u64,
-    edit: github_pulls::PrEdit,
-) -> Result<(), github::GhError> {
-    let client = client.inner().clone();
-    let root = github_pulls::expand_home(&root, home_dir().as_deref());
-    tauri::async_runtime::spawn_blocking(move || {
-        github_pulls::run_edit(&client, &root, number, &edit)
     })
     .await
     .map_err(|e| github::GhError::Other {
@@ -1815,15 +1796,6 @@ fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
 }
 
-/// The agent harnesses with availability (program found on the `PATH` of a child).
-#[tauri::command]
-async fn get_harnesses() -> Vec<harness::HarnessInfo> {
-    let harnesses = get_settings().harnesses;
-    tauri::async_runtime::spawn_blocking(move || harness::with_availability(harnesses))
-        .await
-        .unwrap_or_default()
-}
-
 /// Creates or reuses the git worktree and branch of `issue` for the task mode `mode` of the
 /// repository of `repo_dir` (see `worktree::ensure`).
 #[tauri::command]
@@ -2902,7 +2874,8 @@ pub fn run() {
             github_pr_merge,
             github_pr_rerun,
             github_pr_ci_log,
-            github_pr_edit,
+            pull_request::github_pr_edit,
+            pull_request::github_check_log,
             github_labels,
             branch_pulls,
             github_issues,
@@ -2927,7 +2900,8 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             get_settings,
-            get_harnesses,
+            agent_session::get_harnesses,
+            agent_session::list_agent_sessions,
             get_agent_actions,
             agent_action_plan,
             get_task_modes,
@@ -2942,6 +2916,9 @@ pub fn run() {
             changes_git::changes_push,
             commit_message::changes_generate_message,
             commit_message::changes_generate_cancel,
+            pull_request::changes_pr_state,
+            pull_request::changes_draft_pull_request,
+            pull_request::changes_create_pull_request,
             git_fetch,
             git_pull,
             git_fetch_all,
