@@ -47,6 +47,9 @@
     </span>
   </ng-template>
 </hx-tree>
+@if (listing() > 0 && nodes().length === 0) {
+  <app-loading-rows [active]="true" label="Loading folders" testId="explorer-loading" [rows]="6" />
+}
 @if (query().trim() && nodes().length === 0) {
   <div class="empty" role="status">No matching folders</div>
 }

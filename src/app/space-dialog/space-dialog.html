@@ -76,7 +76,7 @@
           class="confirm"
           [disabled]="actions.busy() || !path().trim()"
         >
-          Create
+          {{ slow() ? "Creating…" : "Create" }}
         </button>
       </div>
     </form>

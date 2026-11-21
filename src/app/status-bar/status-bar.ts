@@ -26,6 +26,7 @@ import {
 } from "../core/backend";
 import type { LimitsItem } from "../core/claude-limits";
 import { densityFlags, nextLevel, shortRuns, type DensityLevel } from "./status-density";
+import { TaskProgress } from "../task-progress/task-progress";
 
 /** Room per item beyond its measured width (the gap between items) and the bar's own padding. */
 const ITEM_GAP = 2;
@@ -68,7 +69,7 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
-  imports: [HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
+  imports: [TaskProgress, HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

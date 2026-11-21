@@ -24,6 +24,7 @@ import { UiState } from "../core/ui-state";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { plainGroups, type MenuEntry, type MenuGroup } from "../ui/context-menu/menu-model";
 import { GitSync } from "./git-sync";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /** A directory as the backend lists it (`list_child_dirs`). */
 export interface DirEntry {
@@ -100,7 +101,7 @@ export function spaceDirs(
 /** Directory tree of the configured roots, directories only, loaded when a folder expands. */
 @Component({
   selector: "app-explorer",
-  imports: [ContextMenu, HxTree, HxTreeNodeTemplate],
+  imports: [LoadingRows, ContextMenu, HxTree, HxTreeNodeTemplate],
   templateUrl: "./explorer.html",
   styleUrl: "./explorer.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -119,6 +120,8 @@ export class Explorer {
   private readonly sync = inject(GitSync);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
+  /** Directory listings in flight; with an empty tree they show skeleton rows (#1041). */
+  protected readonly listing = signal(0);
 
   private readonly roots = computed(() => this.settings.settings().explorerRoots);
   private readonly hidden = computed(() => this.settings.settings().explorerShowHidden);
@@ -306,10 +309,13 @@ export class Explorer {
     if (this.requested.has(path)) return;
     this.requested.add(path);
     let dirs: DirEntry[];
+    this.listing.update((n) => n + 1);
     try {
       dirs = await this.bridge.invoke<DirEntry[]>("list_child_dirs", { path, hidden });
     } catch {
       dirs = [];
+    } finally {
+      this.listing.update((n) => n - 1);
     }
     if (hidden !== this.hidden()) return;
     this.children.update((m) => new Map(m).set(path, dirs));

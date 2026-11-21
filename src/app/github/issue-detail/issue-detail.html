@@ -489,7 +489,12 @@
         }
       </section>
     } @else {
-      <p class="hint" data-testid="detail-loading">Loading...</p>
+      <app-loading-rows
+        [active]="true"
+        label="Loading the issue"
+        testId="detail-loading"
+        [rows]="6"
+      />
     }
   </aside>
 }

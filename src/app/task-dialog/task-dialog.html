@@ -60,7 +60,7 @@
         <p class="error" role="alert">{{ errorText(error) }} You can still type an issue number.</p>
       }
       @if (picker.loading()) {
-        <p class="hint">Loading issues...</p>
+        <app-loading-rows [active]="true" label="Loading issues" testId="task-loading" [rows]="5" />
       }
       <ul class="issues" role="listbox" aria-label="Open issues">
         @for (issue of picker.visible(); track issue.number; let i = $index) {
