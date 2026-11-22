@@ -113,7 +113,7 @@ fn the_per_terminal_cap_drops_the_oldest_records() {
         .iter()
         .map(|r| match r {
             Record::Output(b) => std::str::from_utf8(&b[..4]).unwrap().parse().unwrap(),
-            Record::Resize { .. } => panic!("resize"),
+            _ => panic!("not an output"),
         })
         .collect();
     assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1));
@@ -237,5 +237,120 @@ fn appends_after_a_torn_tail_of_an_earlier_run_stay_readable() {
     h.output("t1", b"three");
     h.flush();
     assert_eq!(read(&path), vec![out("one"), out("three")]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn checkpoint(seq: u64, grid: &str) -> Checkpoint {
+    Checkpoint {
+        seq,
+        cols: 80,
+        rows: 24,
+        grid: grid.as_bytes().to_vec(),
+    }
+}
+
+#[test]
+fn a_checkpoint_and_the_seq_of_the_output_round_trip() {
+    let dir = temp("checkpoint");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output_at("t1", b"abc", 7);
+    h.checkpoint("t1", &checkpoint(7, "grid"));
+    h.output_at("t1", b"def", 0);
+    h.flush();
+    assert_eq!(
+        read(&dir.join("history").join("t1")),
+        vec![
+            out("abc"),
+            Record::Seq(7),
+            Record::Checkpoint(checkpoint(7, "grid")),
+            out("def")
+        ]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_short_checkpoint_does_not_hide_the_records_after_it() {
+    let dir = temp("short-checkpoint");
+    let path = dir.join("log");
+    let mut data = MAGIC.to_vec();
+    data.extend(frame(&[KIND_CHECKPOINT, 1, 2]));
+    data.extend(frame(&[KIND_OUTPUT, b'x']));
+    std::fs::write(&path, data).unwrap();
+    let records = read(&path);
+    assert_eq!(records.len(), 2);
+    assert!(matches!(&records[0], Record::Checkpoint(c) if c.cols == 0));
+    assert_eq!(records[1], out("x"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn eviction_keeps_a_checkpoint_as_the_first_record() {
+    let dir = temp("evict-checkpoint");
+    let h = history(&dir, 4000, DEFAULT_TOTAL);
+    h.checkpoint("t1", &checkpoint(0, "empty"));
+    for n in 0..60u32 {
+        h.output_at(
+            "t1",
+            format!("{n:04}{}", "x".repeat(96)).as_bytes(),
+            u64::from(n) + 1,
+        );
+        if n % 20 == 19 {
+            h.checkpoint("t1", &checkpoint(u64::from(n) + 1, "grid"));
+        }
+    }
+    h.flush();
+    let records = read(&dir.join("history").join("t1"));
+    assert!(
+        matches!(records.first(), Some(Record::Checkpoint(_))),
+        "{records:?}"
+    );
+    let size = std::fs::metadata(dir.join("history").join("t1"))
+        .unwrap()
+        .len();
+    assert!(size <= 4000, "{size}");
+    // What follows the first checkpoint is not cut: the output after it is consecutive.
+    let numbers: Vec<u32> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Output(b) => Some(std::str::from_utf8(&b[..4]).unwrap().parse().unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1));
+    assert_eq!(numbers.last(), Some(&59));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn eviction_with_the_only_checkpoint_far_back_keeps_it_and_does_not_rewrite_on_every_write() {
+    let dir = temp("evict-stuck");
+    let h = history(&dir, 1000, DEFAULT_TOTAL);
+    h.checkpoint("t1", &checkpoint(0, &"g".repeat(1500)));
+    for n in 0..10u32 {
+        h.output_at("t1", format!("{n:04}").as_bytes(), u64::from(n) + 1);
+    }
+    h.flush();
+    let records = read(&dir.join("history").join("t1"));
+    assert!(matches!(records.first(), Some(Record::Checkpoint(_))));
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| matches!(r, Record::Output(_)))
+            .count(),
+        10
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_reset_removes_the_log_and_the_next_record_starts_a_new_one() {
+    let dir = temp("reset");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"old");
+    h.reset("t1");
+    h.output("t1", b"new");
+    h.flush();
+    assert_eq!(read(&dir.join("history").join("t1")), vec![out("new")]);
     let _ = std::fs::remove_dir_all(dir);
 }

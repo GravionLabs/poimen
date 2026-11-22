@@ -13,7 +13,7 @@
 //! and once its queue has room again it gets the current size and a snapshot of the grid as one
 //! output record, a resync that replaces everything it missed.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::Duration;
@@ -24,10 +24,13 @@ use poimen_protocol::{
 use serde_json::json;
 
 use crate::emulator::{Colors, Emulator, Signal};
-use crate::history::History;
+use crate::history::{Checkpoint, History};
 use crate::pty::{MAX_BATCH, PtyWriter};
 use crate::{WRITE_TIMEOUT, send, write_line};
 use poimen_client::transport::Conn;
+
+/// Output bytes between two checkpoints of the history log (#1194).
+pub(crate) const CHECKPOINT_INTERVAL: usize = 1024 * 1024;
 
 /// Records a client may have queued before it counts as too slow.
 pub(crate) const CLIENT_QUEUE: usize = 128;
@@ -80,6 +83,10 @@ struct State {
     controller: Option<u64>,
     /// `Some(code)` once the process has exited.
     exited: Option<Option<u32>>,
+    /// The host `seq` of the last output record the grid has seen (0: unknown).
+    host_seq: u64,
+    /// Output bytes since the last checkpoint of the history log.
+    since_checkpoint: usize,
 }
 
 pub(crate) struct TermStream {
@@ -95,6 +102,8 @@ pub(crate) struct TermStream {
     signals: OnceLock<SignalSink>,
     /// Where the live output and the resizes are logged to disk (#973).
     history: OnceLock<Arc<History>>,
+    /// Output bytes between two checkpoints of the history log.
+    checkpoint_every: AtomicUsize,
 }
 
 /// Receives the signals of one output batch, in order.
@@ -132,13 +141,70 @@ impl TermStream {
                 next_client: 1,
                 controller: None,
                 exited: None,
+                host_seq: 0,
+                since_checkpoint: 0,
             }),
             publish,
             colors,
             writer: Mutex::new(None),
             signals: OnceLock::new(),
             history: OnceLock::new(),
+            checkpoint_every: AtomicUsize::new(CHECKPOINT_INTERVAL),
         }
+    }
+
+    /// Output bytes between two checkpoints of the history log (tests).
+    #[cfg(test)]
+    pub fn set_checkpoint_every(&self, bytes: usize) {
+        self.checkpoint_every.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Starts a new history log: the old one is removed and the empty grid is its first
+    /// checkpoint, so the log always has a valid starting point.
+    pub fn start_log(&self) {
+        if let Some(history) = self.history.get() {
+            history.reset(&self.terminal_id);
+        }
+        self.checkpoint();
+    }
+
+    /// Puts a grid rebuilt from the history log in place of the empty one (#1194): `seq` is the
+    /// host record it covers. A size other than the terminal's is kept in the log.
+    pub fn restore(&self, mut emulator: Emulator, seq: u64) {
+        let mut st = self.lock();
+        let (cols, rows) = st.emulator.size();
+        if emulator.size() != (cols, rows) {
+            emulator.resize(cols, rows);
+            if let Some(history) = self.history.get() {
+                history.resize(&self.terminal_id, cols, rows);
+            }
+        }
+        st.emulator = emulator;
+        st.host_seq = seq;
+        st.since_checkpoint = 0;
+    }
+
+    /// Queues a checkpoint of the grid as it is now to the history log (#1194).
+    pub fn checkpoint(&self) {
+        let mut st = self.lock();
+        self.checkpoint_locked(&mut st);
+    }
+
+    fn checkpoint_locked(&self, st: &mut State) {
+        st.since_checkpoint = 0;
+        let Some(history) = self.history.get() else {
+            return;
+        };
+        let (cols, rows) = st.emulator.size();
+        history.checkpoint(
+            &self.terminal_id,
+            &Checkpoint {
+                seq: st.host_seq,
+                cols,
+                rows,
+                grid: st.emulator.snapshot(),
+            },
+        );
     }
 
     /// Where output and resizes are written to the history log; set once.
@@ -179,21 +245,37 @@ impl TermStream {
     /// attached; a controller's xterm.js answers them from the same bytes, and then the
     /// answers of the grid are dropped so a query never gets two replies. The hand-over is at
     /// attach and detach of the controller.
+    #[cfg(test)]
     pub fn output(&self, bytes: &[u8]) {
+        self.output_at(bytes, 0);
+    }
+
+    /// [`output`](Self::output) for the records up to host record `seq` (0: unknown).
+    pub fn output_at(&self, bytes: &[u8], seq: u64) {
         if let Some(history) = self.history.get() {
-            history.output(&self.terminal_id, bytes);
+            history.output_at(&self.terminal_id, bytes, seq);
         }
-        self.feed(bytes, true);
+        self.feed(bytes, true, seq);
     }
 
     /// Feeds output that ran before this server read the host (the replay of its ring when the
     /// server adopts it): grid and clients as [`output`](Self::output), but its queries are not
     /// answered again.
+    #[cfg(test)]
     pub fn replay(&self, bytes: &[u8]) {
-        self.feed(bytes, false);
+        self.replay_at(bytes, 0);
     }
 
-    fn feed(&self, bytes: &[u8], live: bool) {
+    /// [`replay`](Self::replay) for the records up to host record `seq` (0: unknown). The log
+    /// does not hold them yet (the host's records it has were dropped before), so they go in.
+    pub fn replay_at(&self, bytes: &[u8], seq: u64) {
+        if let Some(history) = self.history.get() {
+            history.output_at(&self.terminal_id, bytes, seq);
+        }
+        self.feed(bytes, false, seq);
+    }
+
+    fn feed(&self, bytes: &[u8], live: bool, seq: u64) {
         let mut signals = Vec::new();
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
@@ -221,6 +303,16 @@ impl TermStream {
             drop(st);
             if answer {
                 self.answer(&replies);
+            }
+        }
+        {
+            let mut st = self.lock();
+            if seq > 0 {
+                st.host_seq = seq;
+            }
+            st.since_checkpoint += bytes.len();
+            if st.since_checkpoint >= self.checkpoint_every.load(Ordering::Relaxed) {
+                self.checkpoint_locked(&mut st);
             }
         }
         // One call for the whole batch, so a replay changes the status at most once.
@@ -264,6 +356,8 @@ impl TermStream {
     /// The process ended: tell the clients and end their streams.
     pub fn exited(&self, exit_code: Option<u32>) {
         let mut st = self.lock();
+        // The final state of the grid is the log's last checkpoint (#1194).
+        self.checkpoint_locked(&mut st);
         st.exited = Some(exit_code);
         let line = line_of(&Event::TerminalExited {
             terminal_id: self.terminal_id.clone(),
@@ -295,6 +389,11 @@ impl TermStream {
     /// without a record, as if the server went away, so its client attaches to the next server.
     pub fn release(&self) {
         let mut st = self.lock();
+        // A checkpoint of the grid, so the next server rebuilds without a replay (#1194).
+        self.checkpoint_locked(&mut st);
+        if let Some(history) = self.history.get() {
+            history.flush();
+        }
         for client in st.clients.drain(..) {
             client.link.released.store(true, Ordering::SeqCst);
             // Wakes the writer; a full queue is noticed by its next poll of the flag.

@@ -79,7 +79,7 @@ const SETTINGS_REREAD: Duration = Duration::from_secs(30);
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
-use adopt::{exit_to, new_stream, output_to};
+use adopt::{exit_to, fresh_stream, output_to};
 use poimen_client::transport::{self, Conn, Entry, Listener};
 
 /// Where the server listens and keeps its spaces.
@@ -1985,7 +1985,7 @@ fn spawn_terminal(
         .filter(|n| !n.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| pty::program_name(&command[0]));
-    let stream = new_stream(shared, &id, cols, rows);
+    let stream = fresh_stream(shared, &id, cols, rows);
     let term = std::env::var("TERM").ok();
     let locale_set = host::locale_set(|name| std::env::var(name).ok());
     let spawned = host::start(

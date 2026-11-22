@@ -3,8 +3,10 @@
 //!
 //! One file per terminal, `<history dir>/<terminal id>`: the 8 bytes [`MAGIC`], then records
 //! `len: u32 LE | crc32: u32 LE | payload`, where the payload is a kind byte and its body
-//! (`1` output bytes, `2` resize as `cols: u16 LE, rows: u16 LE`) and the checksum covers the
-//! payload. Files are private (mode 0600, the directory 0700; an owner-only ACL on Windows).
+//! (`1` output bytes, `2` resize as `cols: u16 LE, rows: u16 LE`, `3` checkpoint, `4` the host
+//! `seq` the output before it reaches) and the checksum covers the payload. A checkpoint (#1194)
+//! is `seq: u64 LE, cols: u16 LE, rows: u16 LE` and the serialized grid (the bytes of
+//! `Emulator::snapshot`): the state after every record before it in the file. Files are private (mode 0600, the directory 0700; an owner-only ACL on Windows).
 //!
 //! The server only queues a record ([`History::output`], [`History::resize`]): a worker thread
 //! owns the files, so the PTY path never waits for the disk. A full queue drops the record and
@@ -31,12 +33,33 @@ const MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
 const FRAME_HEAD: usize = 8;
 const KIND_OUTPUT: u8 = 1;
 const KIND_RESIZE: u8 = 2;
+const KIND_CHECKPOINT: u8 = 3;
+const KIND_SEQ: u8 = 4;
+/// Kind byte, `seq`, `cols`, `rows` of a checkpoint payload.
+const CHECKPOINT_HEAD: usize = 13;
 
 /// One record of a log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
     Output(Vec<u8>),
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    /// The host `seq` of the last output record logged so far (#1194).
+    Seq(u64),
+    Checkpoint(Checkpoint),
+}
+
+/// The grid of a terminal at one point of its log (#1194).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkpoint {
+    /// The host `seq` of the last output record the grid has seen (0: unknown).
+    pub seq: u64,
+    pub cols: u16,
+    pub rows: u16,
+    /// The bytes that bring a fresh emulator of this size to the state.
+    pub grid: Vec<u8>,
 }
 
 /// The size caps in bytes.
@@ -56,7 +79,12 @@ impl Default for Limits {
 }
 
 enum Msg {
-    Frame { id: String, frame: Vec<u8> },
+    Frame {
+        id: String,
+        frame: Vec<u8>,
+    },
+    /// Removes the log of `id`.
+    Reset(String),
     Flush(SyncSender<()>),
 }
 
@@ -64,6 +92,7 @@ enum Msg {
 pub struct History {
     tx: Option<SyncSender<Msg>>,
     log: PathBuf,
+    dir: PathBuf,
     overflowed: AtomicBool,
 }
 
@@ -72,13 +101,14 @@ impl History {
     /// the worker reports to.
     pub fn start(dir: PathBuf, limits: Limits, log: PathBuf) -> Self {
         let (tx, rx) = sync_channel::<Msg>(QUEUE);
-        let mut worker = Worker::new(dir, limits, log.clone());
+        let mut worker = Worker::new(dir.clone(), limits, log.clone());
         let spawned = std::thread::Builder::new()
             .name("history".into())
             .spawn(move || {
                 for msg in rx {
                     match msg {
                         Msg::Frame { id, frame } => worker.append(&id, &frame),
+                        Msg::Reset(id) => worker.reset(&id),
                         Msg::Flush(done) => {
                             let _ = done.send(());
                         }
@@ -92,8 +122,14 @@ impl History {
         Self {
             tx: Some(tx),
             log,
+            dir,
             overflowed: AtomicBool::new(false),
         }
+    }
+
+    /// The file of the log of `terminal`.
+    pub(crate) fn path(&self, terminal: &str) -> PathBuf {
+        self.dir.join(terminal)
     }
 
     /// Writes nothing.
@@ -101,6 +137,7 @@ impl History {
         Self {
             tx: None,
             log: PathBuf::new(),
+            dir: PathBuf::new(),
             overflowed: AtomicBool::new(false),
         }
     }
@@ -114,6 +151,44 @@ impl History {
         payload.push(KIND_OUTPUT);
         payload.extend_from_slice(bytes);
         self.send(terminal, &payload);
+    }
+
+    /// Queues PTY output of `terminal` that ends with host record `seq` (0: unknown).
+    pub fn output_at(&self, terminal: &str, bytes: &[u8], seq: u64) {
+        if bytes.is_empty() {
+            return;
+        }
+        let mut payload = Vec::with_capacity(1 + bytes.len());
+        payload.push(KIND_OUTPUT);
+        payload.extend_from_slice(bytes);
+        let mut data = frame(&payload);
+        if seq > 0 {
+            let mut mark = vec![KIND_SEQ];
+            mark.extend_from_slice(&seq.to_le_bytes());
+            data.extend_from_slice(&frame(&mark));
+        }
+        self.send_frame(terminal, data);
+    }
+
+    /// Queues a checkpoint of `terminal` (#1194).
+    pub fn checkpoint(&self, terminal: &str, checkpoint: &Checkpoint) {
+        let mut payload = Vec::with_capacity(CHECKPOINT_HEAD + checkpoint.grid.len());
+        payload.push(KIND_CHECKPOINT);
+        payload.extend_from_slice(&checkpoint.seq.to_le_bytes());
+        payload.extend_from_slice(&checkpoint.cols.to_le_bytes());
+        payload.extend_from_slice(&checkpoint.rows.to_le_bytes());
+        payload.extend_from_slice(&checkpoint.grid);
+        if payload.len() as u64 > u64::from(MAX_PAYLOAD) {
+            return;
+        }
+        self.send(terminal, &payload);
+    }
+
+    /// Queues the removal of the log of `terminal`: the next record starts a new one.
+    pub fn reset(&self, terminal: &str) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.try_send(Msg::Reset(terminal.to_string()));
+        }
     }
 
     /// Queues a resize of `terminal`.
@@ -135,10 +210,14 @@ impl History {
     }
 
     fn send(&self, terminal: &str, payload: &[u8]) {
+        self.send_frame(terminal, frame(payload));
+    }
+
+    fn send_frame(&self, terminal: &str, frame: Vec<u8>) {
         let Some(tx) = &self.tx else { return };
         let msg = Msg::Frame {
             id: terminal.to_string(),
-            frame: frame(payload),
+            frame,
         };
         match tx.try_send(msg) {
             Ok(()) => self.overflowed.store(false, Ordering::Relaxed),
@@ -205,7 +284,29 @@ fn decode(payload: &[u8]) -> Option<Record> {
             cols: u16::from_le_bytes([*c0, *c1]),
             rows: u16::from_le_bytes([*r0, *r1]),
         }),
+        (&KIND_SEQ, body) => Some(Record::Seq(u64::from_le_bytes(body.try_into().ok()?))),
+        (&KIND_CHECKPOINT, _) => Some(Record::Checkpoint(decode_checkpoint(payload))),
         _ => None,
+    }
+}
+
+/// A checkpoint payload; a short one gives an empty checkpoint (size 0) that no rebuild uses,
+/// so a damaged checkpoint does not hide the records after it.
+fn decode_checkpoint(payload: &[u8]) -> Checkpoint {
+    let Some(head) = payload.get(..CHECKPOINT_HEAD) else {
+        return Checkpoint {
+            seq: 0,
+            cols: 0,
+            rows: 0,
+            grid: Vec::new(),
+        };
+    };
+    let word = |at: usize| u16::from_le_bytes([head[at], head[at + 1]]);
+    Checkpoint {
+        seq: u64::from_le_bytes(head[1..9].try_into().expect("8 bytes")),
+        cols: word(9),
+        rows: word(11),
+        grid: payload[CHECKPOINT_HEAD..].to_vec(),
     }
 }
 
@@ -235,6 +336,8 @@ struct Worker {
     reported: HashSet<String>,
     total: u64,
     ready: bool,
+    /// Size of a log at which a shrink could not drop anything (a checkpoint has to stay).
+    stuck: HashMap<String, u64>,
 }
 
 impl Worker {
@@ -262,6 +365,7 @@ impl Worker {
             reported: HashSet::new(),
             total,
             ready: false,
+            stuck: HashMap::new(),
         }
     }
 
@@ -285,10 +389,27 @@ impl Worker {
             return;
         }
         let size = self.sizes.get(id).copied().unwrap_or(0);
-        if size > self.limits.per_terminal {
+        let stuck = self
+            .stuck
+            .get(id)
+            .map_or(0, |s| s + self.limits.per_terminal / 8);
+        if size > self.limits.per_terminal && size >= stuck {
             self.shrink(id, self.limits.per_terminal - self.limits.per_terminal / 8);
         }
         self.enforce_total();
+    }
+
+    /// Removes the log of `id`.
+    fn reset(&mut self, id: &str) {
+        if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') {
+            return;
+        }
+        self.open.remove(id);
+        self.stuck.remove(id);
+        let _ = std::fs::remove_file(self.dir.join(id));
+        if let Some(old) = self.sizes.remove(id) {
+            self.total = self.total.saturating_sub(old);
+        }
     }
 
     fn write(&mut self, id: &str, frame: &[u8]) -> std::io::Result<()> {
@@ -358,6 +479,14 @@ impl Worker {
             if frames.is_empty() {
                 keep = 0;
             }
+            // The log starts at a checkpoint, when it has one (#1194): the first one at or after
+            // the cut, else the last one (the file then stays above the target).
+            let is_checkpoint = |i: usize| data[frames[i].0 + FRAME_HEAD] == KIND_CHECKPOINT;
+            if (0..keep).any(is_checkpoint) {
+                first = (first..keep)
+                    .find(|&i| is_checkpoint(i))
+                    .unwrap_or_else(|| (0..keep).rev().find(|&i| is_checkpoint(i)).unwrap_or(0));
+            }
             let mut out = MAGIC.to_vec();
             if keep > first {
                 out.extend_from_slice(&data[frames[first].0..frames[keep - 1].1]);
@@ -371,6 +500,11 @@ impl Worker {
         });
         match result {
             Ok(size) => {
+                if size >= before {
+                    self.stuck.insert(id.to_string(), before);
+                } else {
+                    self.stuck.remove(id);
+                }
                 self.sizes.insert(id.to_string(), size);
                 self.total = self.total.saturating_sub(before) + size;
             }

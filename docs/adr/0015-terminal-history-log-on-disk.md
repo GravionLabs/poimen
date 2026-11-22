@@ -15,11 +15,11 @@ What a terminal printed lives in the PTY host's 1 MiB ring and in the server's `
 
 ### Who writes
 
-The server, not the host. The host stays small and is not updated with the server (ADR 0009). Output the host holds while the server is down, beyond its ring, stays a `gap` and is not logged. The replay of the ring when the server adopts a host is not logged either (it was logged when it first passed, or it is that gap).
+The server, not the host. The host stays small and is not updated with the server (ADR 0009). Output the host holds while the server is down, beyond its ring, stays a `gap` and is not logged. The replay of the ring when the server adopts a host is logged only for the records the log does not hold (#1194).
 
 ### What is stored
 
-Raw PTY bytes as the host delivered them, and resize records (`cols`, `rows`). Not stored: input, the grid, agent status. Periodic serialized-grid checkpoints, which make a rebuild cheap, are #1194 and use the same file.
+Raw PTY bytes as the host delivered them, and resize records (`cols`, `rows`). Not stored: input, the grid, agent status. Checkpoints (#1194, below) are in the same file.
 
 ### Format
 
@@ -37,9 +37,12 @@ Terminal output is on disk, without redaction. The files are private (mode 0600,
 
 The output path only queues the record in a bounded channel for a writer thread; a full queue drops the record and logs it once. A write error (disk full, permission) is logged to `server.log` once per terminal and the terminal goes on.
 
+### Checkpoints and the rebuild (#1194)
+
+A checkpoint record (kind `3`) holds the serialized grid (screen, scrollback, modes, title; the bytes of `Emulator::snapshot`), its size and the host `seq` it covers; the records before it in the file are what it covers. It is written every 1 MiB of output, on a clean shutdown, and as the empty first record of a new log. Kind `4` records the host `seq` after an output record. A rebuild starts from the newest checkpoint that restores (an invalid one falls back to the one before, else to the start) and replays the records after it. Checkpoints count toward the caps; eviction cuts at a checkpoint, so a log never loses its starting point. After `adopt_terminals` the grid is rebuilt from the log and the host ring is read only after the `seq` the log covers: no `gap` marker when the ring has everything after it or the host's `gap` ends before it, a marker for the records neither holds. A log that does not belong to the host (no `seq`, or beyond the host's) is replaced. A damaged checkpoint or log is skipped; it never stops the server.
+
 ## Left to the sibling PBIs
 
-- #1194: checkpoints and the rebuild after a restart.
 - #1195: the read-only terminal after a reboot.
 - #1196: the setting, the limits as settings, removal on close.
 

@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, sync_channel};
 
 fn stream() -> (TermStream, Arc<Mutex<Vec<Event>>>) {
@@ -357,4 +358,53 @@ fn queries_in_output_dropped_for_a_lagging_observer_are_still_answered() {
     assert!(link.lagging.load(Ordering::SeqCst));
     s.output(b"\x1b[c");
     assert_eq!(answered(&sink), "\x1b[?6c");
+}
+
+fn logged(name: &str) -> (TermStream, PathBuf, Arc<History>) {
+    let dir = std::env::temp_dir().join(format!("poimen-stream-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let history = Arc::new(History::start(
+        dir.join("history"),
+        crate::history::Limits::default(),
+        dir.join("server.log"),
+    ));
+    let (s, _) = stream();
+    s.set_history(Arc::clone(&history));
+    (s, dir.join("history").join("t1"), history)
+}
+
+#[test]
+fn a_checkpoint_is_written_after_the_set_number_of_output_bytes_and_covers_the_seq() {
+    let (s, path, history) = logged("interval");
+    s.start_log();
+    s.set_checkpoint_every(100);
+    s.output_at(&[b'a'; 60], 1);
+    s.output_at(&[b'b'; 60], 2);
+    s.output_at(b"tail", 3);
+    history.flush();
+    let records = crate::history::read(&path);
+    let checkpoints: Vec<u64> = records
+        .iter()
+        .filter_map(|r| match r {
+            crate::history::Record::Checkpoint(c) => Some(c.seq),
+            _ => None,
+        })
+        .collect();
+    // The empty one at the start, one after 120 bytes.
+    assert_eq!(checkpoints, [0, 2]);
+    let rebuilt = crate::adopt::rebuild::rebuild(&path, (20, 5), 100).unwrap();
+    assert_eq!(rebuilt.seq, 3);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn a_replay_is_logged_with_its_seq_too() {
+    let (s, path, history) = logged("replay");
+    s.start_log();
+    s.replay_at(b"ring", 5);
+    s.checkpoint();
+    history.flush();
+    let rebuilt = crate::adopt::rebuild::rebuild(&path, (20, 5), 100).unwrap();
+    assert_eq!(rebuilt.seq, 5);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
 }

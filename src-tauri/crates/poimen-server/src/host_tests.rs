@@ -177,6 +177,7 @@ fn reader(read: u64) -> (Feed, mpsc::Receiver<Chunk>) {
         read: Arc::new(AtomicU64::new(read)),
         tx,
         queued: Arc::default(),
+        pending: Arc::default(),
         replay_until: 0,
     };
     (feed, rx)
