@@ -20,7 +20,7 @@ src-tauri/src/lib.rs	3748
 src-tauri/src/machines.rs	1938
 src-tauri/src/poimen_backend.rs	2547
 src-tauri/src/poimen_server.rs	1319
-src-tauri/src/settings.rs	2465
+src-tauri/src/settings.rs	2391
 src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1045
 src/app/core/snapshot.spec.ts	1040
