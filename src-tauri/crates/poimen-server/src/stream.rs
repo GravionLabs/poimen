@@ -24,6 +24,7 @@ use poimen_protocol::{
 use serde_json::json;
 
 use crate::emulator::{Colors, Emulator, Signal};
+use crate::history::History;
 use crate::pty::{MAX_BATCH, PtyWriter};
 use crate::{WRITE_TIMEOUT, send, write_line};
 use poimen_client::transport::Conn;
@@ -92,6 +93,8 @@ pub(crate) struct TermStream {
     /// Where the agent status signals of the output go (OSC 7501, new prompts, RIS), called
     /// outside the stream lock.
     signals: OnceLock<SignalSink>,
+    /// Where the live output and the resizes are logged to disk (#973).
+    history: OnceLock<Arc<History>>,
 }
 
 /// Receives the signals of one output batch, in order.
@@ -134,7 +137,13 @@ impl TermStream {
             colors,
             writer: Mutex::new(None),
             signals: OnceLock::new(),
+            history: OnceLock::new(),
         }
+    }
+
+    /// Where output and resizes are written to the history log; set once.
+    pub fn set_history(&self, history: Arc<History>) {
+        let _ = self.history.set(history);
     }
 
     /// Where the agent status signals of the output go; set once.
@@ -171,6 +180,9 @@ impl TermStream {
     /// answers of the grid are dropped so a query never gets two replies. The hand-over is at
     /// attach and detach of the controller.
     pub fn output(&self, bytes: &[u8]) {
+        if let Some(history) = self.history.get() {
+            history.output(&self.terminal_id, bytes);
+        }
         self.feed(bytes, true);
     }
 
@@ -234,6 +246,9 @@ impl TermStream {
 
     /// The controller's resize: grid and records. (The caller resizes the PTY.)
     pub fn resized(&self, cols: u16, rows: u16) {
+        if let Some(history) = self.history.get() {
+            history.resize(&self.terminal_id, cols, rows);
+        }
         let mut st = self.lock();
         st.emulator.resize(cols, rows);
         st.seq += 1;

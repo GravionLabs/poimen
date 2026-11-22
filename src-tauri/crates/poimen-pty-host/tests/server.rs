@@ -29,6 +29,7 @@ fn server(name: &str) -> (Env, Client, String) {
     let config = Config {
         socket: dir.join("run").join("s.sock"),
         state_file: dir.join("server.json"),
+        history_dir: dir.join("server.json").with_file_name("history"),
         scrollback: 100,
         home: None,
         pty_host: PtyHost::Binary(PathBuf::from(env!("CARGO_BIN_EXE_poimen-pty-host"))),

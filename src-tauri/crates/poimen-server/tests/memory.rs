@@ -16,6 +16,10 @@ fn a_running_terminal_lists_its_memory_and_an_exited_one_does_not() {
     let config = Config {
         socket: dir.join("run").join("server.sock"),
         state_file: dir.join("state").join("server.json"),
+        history_dir: dir
+            .join("state")
+            .join("server.json")
+            .with_file_name("history"),
         scrollback: 1000,
         home: None,
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),

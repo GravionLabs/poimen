@@ -1,7 +1,6 @@
 //! The TUI against an in-process poimen-server on a temporary socket (never the user's server),
 //! drawn on ratatui's test backend. Unix-only: the terminals run POSIX shell scripts.
 #![cfg(unix)]
-
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,6 +48,7 @@ fn fixture(name: &str) -> Fixture {
     let config = ServerConfig {
         socket: dir.join("run").join("server.sock"),
         state_file: dir.join("state").join("server.json"),
+        history_dir: dir.join("state").join("history"),
         scrollback: 1000,
         home: None,
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),

@@ -45,6 +45,11 @@ fn fixture(name: &str, pty_host: PtyHost) -> Fixture {
     let config = Config {
         socket: env.dir.join("run").join("server.sock"),
         state_file: env.dir.join("state").join("server.json"),
+        history_dir: env
+            .dir
+            .join("state")
+            .join("server.json")
+            .with_file_name("history"),
         scrollback: 100,
         home: None,
         pty_host,

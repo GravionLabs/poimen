@@ -40,6 +40,11 @@ impl Env {
         Config {
             socket: self.dir.join(run).join("server.sock"),
             state_file: self.dir.join("state").join("server.json"),
+            history_dir: self
+                .dir
+                .join("state")
+                .join("server.json")
+                .with_file_name("history"),
             scrollback: 1000,
             home: Some(self.home()),
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
