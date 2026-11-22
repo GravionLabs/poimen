@@ -51,6 +51,21 @@ pub(super) fn adopt_terminals(
         let reached = match reached {
             Ok(reached) => reached,
             Err(e) => {
+                // The host is gone (a reboot): what the log holds stays to look at (#1195).
+                if inner.layout.space(&t.space_id).is_ok()
+                    && let Some(ended) = ended(shared, &t)
+                {
+                    shared.log(
+                        "server",
+                        &format!(
+                            "terminal {} ({}): its host does not answer ({e}); kept as an ended terminal with its history",
+                            t.id,
+                            t.endpoint.display()
+                        ),
+                    );
+                    inner.terminals.push(ended);
+                    continue;
+                }
                 dropped(&format!("its host does not answer: {e}"));
                 continue;
             }
@@ -71,6 +86,60 @@ pub(super) fn adopt_terminals(
         );
         inner.terminals.push(adopted(shared, t, reached));
     }
+}
+
+/// The entry of a terminal whose host is gone but whose history log holds something (#1195):
+/// status `exited`, no process, the grid rebuilt from the log and read-only to every client.
+/// `None` without a usable log, then the terminal is dropped.
+fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntry> {
+    let (cols, rows) = (t.cols.max(1), t.rows.max(1));
+    let rebuilt = rebuild::rebuild(&shared.history.path(&t.id), (cols, rows), shared.scrollback)?;
+    let stream = new_stream(shared, &t.id, cols, rows);
+    let (cols, rows) = rebuilt.emulator.size();
+    stream.ended_from_history(rebuilt.emulator);
+    // The process is gone; only a program's own `idle` or `done` stays, as after an exit.
+    let agent = t
+        .agent
+        .clone()
+        .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+    Some(TerminalEntry {
+        info: Terminal {
+            id: t.id.clone(),
+            space_id: t.space_id.clone(),
+            name: t.name.clone(),
+            cwd: t.cwd.clone(),
+            cols,
+            rows,
+            status: TerminalStatus::Exited,
+            exit_code: None,
+            program: t.program.clone(),
+            args: t.args.clone(),
+            agent,
+            tokens: Default::default(),
+            survives_restart: false,
+            host_version: None,
+            host_bundled_version: None,
+            records: Vec::new(),
+            hibernated: None,
+            started_by: t.started_by.clone(),
+            report: t.report.clone(),
+            agent_source: None,
+            memory_bytes: None,
+            status_history: Vec::new(),
+            from_history: true,
+        },
+        host: None,
+        ended_endpoint: Some(t.endpoint.clone()),
+        stream,
+        agent_seq: t.agent_seq,
+        agent_persisted: None,
+        osc: None,
+        hook_agent: None,
+        records: records::Records::default(),
+        tokens: Vec::new(),
+        resuming: false,
+        last_input_ms: None,
+    })
 }
 
 /// The entry of an adopted terminal: the stored state over a grid fed from the host's ring.
@@ -152,8 +221,10 @@ fn adopted(
             }),
             memory_bytes: None,
             status_history: Vec::new(),
+            from_history: false,
         },
         host: Some(handle),
+        ended_endpoint: None,
         stream,
         agent_seq: t.agent_seq,
         agent_persisted: None,

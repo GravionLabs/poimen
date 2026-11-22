@@ -540,3 +540,27 @@ fn a_tab_and_its_split_tree_round_trip() {
         serde_json::from_value(serde_json::json!({"kind":"terminal","terminal_id":"t1"})).unwrap();
     assert_eq!(leaf, Node::terminal("t1"));
 }
+
+#[test]
+fn an_ended_terminal_from_history_is_additive() {
+    let base = json!({"id":"t1","space_id":"s1","name":"zsh","cwd":"/","cols":80,"rows":24,"status":"exited"});
+    let old: Terminal = serde_json::from_value(base.clone()).unwrap();
+    assert!(!old.from_history);
+    assert_eq!(serde_json::to_value(&old).unwrap(), base);
+    let mut with = base;
+    with["from_history"] = json!(true);
+    let t: Terminal = serde_json::from_value(with.clone()).unwrap();
+    assert!(t.from_history);
+    assert_eq!(serde_json::to_value(&t).unwrap(), with);
+
+    let attach =
+        json!({"terminal_id":"t1","seq":0,"cols":80,"rows":24,"mode":"observe","snapshot":""});
+    let old: AttachResult = serde_json::from_value(attach.clone()).unwrap();
+    assert!(!old.read_only);
+    assert_eq!(serde_json::to_value(&old).unwrap(), attach);
+    let mut with = attach;
+    with["read_only"] = json!(true);
+    let r: AttachResult = serde_json::from_value(with.clone()).unwrap();
+    assert!(r.read_only);
+    assert_eq!(serde_json::to_value(&r).unwrap(), with);
+}

@@ -83,6 +83,9 @@ struct State {
     controller: Option<u64>,
     /// `Some(code)` once the process has exited.
     exited: Option<Option<u32>>,
+    /// The terminal's history from the log after its process was gone (#1195): attaching is
+    /// read-only.
+    read_only: bool,
     /// The host `seq` of the last output record the grid has seen (0: unknown).
     host_seq: u64,
     /// Output bytes since the last checkpoint of the history log.
@@ -143,6 +146,7 @@ impl TermStream {
                 next_client: 1,
                 controller: None,
                 exited: None,
+                read_only: false,
                 host_seq: 0,
                 since_checkpoint: 0,
                 mid_batch: false,
@@ -185,6 +189,15 @@ impl TermStream {
         st.emulator = emulator;
         st.host_seq = seq;
         st.since_checkpoint = 0;
+    }
+
+    /// Makes the stream the read-only history of an ended terminal (#1195): the grid rebuilt
+    /// from the log, no process, no controller ever. Nothing is written to the log.
+    pub fn ended_from_history(&self, emulator: Emulator) {
+        let mut st = self.lock();
+        st.emulator = emulator;
+        st.exited = Some(None);
+        st.read_only = true;
     }
 
     /// Queues a checkpoint of the grid as it is now to the history log (#1194).
@@ -426,6 +439,12 @@ impl TermStream {
         link: Arc<Link>,
     ) -> Result<Attached, (ErrorCode, String)> {
         let mut st = self.lock();
+        // The history of an ended terminal can only be looked at.
+        let mode = if st.read_only {
+            AttachMode::Observe
+        } else {
+            mode
+        };
         if mode == AttachMode::Control && st.controller.is_some() && !take_over {
             return Err((
                 ErrorCode::Conflict,
@@ -440,6 +459,7 @@ impl TermStream {
             rows,
             mode,
             snapshot: encode_bytes(&st.emulator.snapshot()),
+            read_only: st.read_only,
         };
         let response = line_of(&Response::ok(request_id, json!(result)));
         // A fresh channel has room.
