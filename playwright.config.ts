@@ -1,11 +1,9 @@
 // UI end-to-end tests (#1156): the Angular app in headless Chromium against the demo build (`ng run
-// poimen:serve:demo`, #1109), in the light and the dark theme, with a fixed clock and reduced motion.
+// poimen:serve:demo`, #1109), in the light and the dark theme, with a fixed clock (`e2e/support.ts`) and reduced motion.
 // `pnpm e2e` runs them; the variants of the backend are explained in `docs/agents/frontend.md`.
 import { defineConfig } from "@playwright/test";
 
 const PORT = 1422;
-/** The instant the clock is fixed to (the demo data counts back from it); same as `scripts/screenshots/views.mjs`. */
-const TIME = "2026-11-21T10:00:00Z";
 
 const use = {
   baseURL: `http://localhost:${PORT}`,
@@ -34,5 +32,4 @@ export default defineConfig({
     { name: "light", use: { ...use, colorScheme: "light" } },
     { name: "dark", use: { ...use, colorScheme: "dark" } },
   ],
-  metadata: { time: TIME },
 });
