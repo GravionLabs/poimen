@@ -212,6 +212,11 @@
             <app-changes-view [dir]="changesDirOfGroup" />
           }
         }
+        @for (previewFile of [previewOf(g)]; track previewFile) {
+          @if (previewFile) {
+            <app-file-preview [path]="previewFile" />
+          }
+        }
         @for (id of viewIds(g); track id) {
           @if (paneLayout(id); as layout) {
             <app-tab-layout

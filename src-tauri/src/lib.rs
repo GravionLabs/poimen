@@ -11,7 +11,9 @@ mod changes_files;
 mod changes_git;
 mod commit_message;
 mod deliver;
+mod deliver_command;
 mod editor;
+mod file_preview;
 mod git_sync;
 mod github_branches;
 mod github_issues;
@@ -2422,36 +2424,6 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Watches the deliver runs (progress events in `<git-common-dir>/.agents/events`, else the
-/// status file `.agents/deliver-loop/status.json`) of the repositories of `dirs` (one watch per
-/// repository: its worktrees count as one, named by the toplevel of the first), replacing the
-/// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
-/// content. Returns the watched roots. Read-only.
-#[tauri::command]
-async fn deliver_watch(
-    app: AppHandle,
-    watch: State<'_, DeliverWatch>,
-    dirs: Vec<String>,
-) -> Result<Vec<String>, String> {
-    let roots = tauri::async_runtime::spawn_blocking(move || git::repo_roots(&dirs))
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
-    let current = watches.keys().cloned().collect();
-    let (stop, start) = deliver::plan(&current, &roots);
-    for root in stop {
-        watches.remove(&root);
-    }
-    for root in start {
-        let (app, name) = (app.clone(), root.clone());
-        let handle = deliver::watch(PathBuf::from(&root), move |read| {
-            let _ = app.emit("deliver", json!({ "root": name, "read": read }));
-        });
-        watches.insert(root, handle);
-    }
-    Ok(roots)
-}
-
 /// What goes over the channel of a stream for one record. The PTY bytes (snapshot and
 /// output) are sent raw, which the webview receives as an `ArrayBuffer`; the other records are JSON.
 fn channel_messages(record: &backend::StreamRecord) -> Vec<InvokeResponseBody> {
@@ -2762,6 +2734,7 @@ pub fn run() {
         .manage(SubagentWatch::default())
         .manage(TokenWatch::default())
         .manage(DeliverWatch::default())
+        .manage(file_preview::Watches::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
@@ -2959,7 +2932,10 @@ pub fn run() {
             subagents_unwatch,
             tokens_watch,
             tokens_unwatch,
-            deliver_watch,
+            deliver_command::deliver_watch,
+            file_preview::preview_read,
+            file_preview::preview_watch,
+            file_preview::preview_unwatch,
             open_terminal,
             terminal_input,
             terminal_resize,

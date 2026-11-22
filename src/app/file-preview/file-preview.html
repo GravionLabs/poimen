@@ -1,0 +1,50 @@
+<header>
+  <span class="file">
+    <span class="name">{{ name() }}</span>
+    <span class="dir">{{ dir() }}</span>
+  </span>
+  <span class="spacer"></span>
+  @if (canToggle()) {
+    <hx-select-button
+      class="view"
+      aria-label="View"
+      size="small"
+      [options]="viewOptions"
+      optionLabel="label"
+      optionValue="value"
+      [allowEmpty]="false"
+      [value]="view()"
+      (valueChange)="view.set($any($event))"
+    />
+  }
+  <button
+    type="button"
+    hx-button
+    variant="outlined"
+    severity="secondary"
+    size="small"
+    class="open-editor"
+    (click)="openInEditor()"
+  >
+    Open in editor
+  </button>
+</header>
+<section class="body">
+  @if (error(); as message) {
+    <p class="note problem" role="alert">{{ message }}</p>
+  } @else if (data(); as shown) {
+    @if (notice(); as text) {
+      <p class="note">{{ text }}</p>
+    } @else if (shown.state === "text") {
+      @if (rendered()) {
+        <div class="markdown" data-testid="rendered" [innerHTML]="html()"></div>
+      } @else {
+        @defer {
+          <app-source-view [path]="filePath()" [text]="shown.text" />
+        }
+      }
+    }
+  } @else {
+    <p class="note">Loading…</p>
+  }
+</section>

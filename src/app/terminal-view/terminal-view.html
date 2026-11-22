@@ -112,7 +112,7 @@
 @if (fileMenu(); as menu) {
   <app-context-menu
     [at]="menu.at"
-    [groups]="fileMenuGroups"
+    [groups]="fileMenuGroups(menu.changed)"
     (picked)="pickFileLink($event.id)"
     (closed)="fileMenu.set(null)"
   />

@@ -13,6 +13,7 @@ import {
   untracked,
 } from "@angular/core";
 import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { EditorTabs } from "../core/editor-tabs";
 import { ExternalEditor, joinPath } from "../core/external-editor";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { plainGroups } from "../ui/context-menu/menu-model";
@@ -291,6 +292,7 @@ export class ChangesView {
   protected readonly pullRequest = inject(CreatePullRequest);
   private readonly ui = inject(UiState);
   private readonly externalEditor = inject(ExternalEditor);
+  private readonly tabs = inject(EditorTabs);
   /** The line the last click on a line number of the diff picked, and its file (#1002). */
   private lastLine: { path: string; line: number } | null = null;
   protected readonly menuAt = signal<{
@@ -298,7 +300,10 @@ export class ChangesView {
     x: number;
     y: number;
   } | null>(null);
-  protected readonly menuGroups = plainGroups([{ id: "open-in-editor", label: "Open in editor" }]);
+  protected readonly menuGroups = plainGroups([
+    { id: "open-in-editor", label: "Open in editor" },
+    { id: "preview", label: "Preview" },
+  ]);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The latest `n`/`p` press, handed to the diff as an input (a new object each time). */
   protected readonly jump = signal<DiffJump | null>(null);
@@ -392,6 +397,24 @@ export class ChangesView {
   protected openFileMenu(event: MouseEvent, path: string): void {
     event.preventDefault();
     this.menuAt.set({ path, x: event.clientX, y: event.clientY });
+  }
+
+  /** The entry of the file menu: the editor, or the preview tab (#1004). */
+  protected pickMenu(id: string, path: string): void {
+    if (id === "preview") this.preview(path);
+    else this.openFile(path);
+  }
+
+  /** Opens the read-only preview tab of a changed file. */
+  protected preview(path: string): void {
+    this.menuAt.set(null);
+    this.tabs.openPreview(joinPath(this.path(), path));
+  }
+
+  /** The selected file can be previewed: it is there (a deleted one is not). */
+  protected canPreview(): boolean {
+    const file = this.changes.selectedFile();
+    return !!file && file.status !== "deleted";
   }
 
   /** Opens a changed file in the editor, at the picked line when it is a line of that file. */
