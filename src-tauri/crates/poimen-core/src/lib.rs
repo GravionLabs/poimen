@@ -27,6 +27,7 @@ pub mod ssh_config;
 pub mod task_start;
 pub mod tasks;
 pub mod templates;
+pub mod terminal_history;
 pub mod transcripts;
 pub mod trust;
 pub mod usage;

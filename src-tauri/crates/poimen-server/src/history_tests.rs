@@ -354,3 +354,79 @@ fn a_reset_removes_the_log_and_the_next_record_starts_a_new_one() {
     assert_eq!(read(&dir.join("history").join("t1")), vec![out("new")]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn off_writes_nothing_and_leaves_what_exists_then_on_continues_with_a_hole() {
+    let dir = temp("off");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"before");
+    h.flush();
+    h.configure(false, Limits::default());
+    h.output("t1", b"while off");
+    h.output("t2", b"never");
+    h.resize("t1", 10, 10);
+    h.flush();
+    assert_eq!(read(&dir.join("history").join("t1")), vec![out("before")]);
+    assert!(!dir.join("history").join("t2").exists());
+    h.configure(true, Limits::default());
+    h.output("t1", b"after");
+    h.flush();
+    assert_eq!(
+        read(&dir.join("history").join("t1")),
+        vec![out("before"), Record::Hole, out("after")]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn changed_limits_apply_to_the_next_writes() {
+    let dir = temp("limits");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.configure(
+        true,
+        Limits {
+            per_terminal: 2000,
+            total: DEFAULT_TOTAL,
+        },
+    );
+    for i in 0..100 {
+        h.output("t1", format!("line {i:03} {}", "x".repeat(40)).as_bytes());
+    }
+    h.flush();
+    let size = std::fs::metadata(dir.join("history").join("t1"))
+        .unwrap()
+        .len();
+    assert!(size <= 2000, "{size}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn remove_deletes_the_log() {
+    let dir = temp("remove");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"x");
+    h.flush();
+    assert!(dir.join("history").join("t1").exists());
+    h.remove("t1");
+    h.flush();
+    assert!(!dir.join("history").join("t1").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_orphan_sweep_removes_logs_without_a_terminal_and_leftovers_only() {
+    let dir = temp("orphans");
+    let logs = dir.join("history");
+    std::fs::create_dir_all(logs.join("sub")).unwrap();
+    for name in ["t1", "t2", ".t1.tmp"] {
+        std::fs::write(logs.join(name), b"x").unwrap();
+    }
+    let keep = HashSet::from(["t1".to_string()]);
+    assert_eq!(sweep_orphans(&logs, &keep), 2);
+    assert!(logs.join("t1").exists());
+    assert!(!logs.join("t2").exists());
+    assert!(!logs.join(".t1.tmp").exists());
+    assert!(logs.join("sub").is_dir());
+    assert_eq!(sweep_orphans(&dir.join("missing"), &keep), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -27,7 +27,7 @@ Raw PTY bytes as the host delivered them, and resize records (`cols`, `rows`). N
 
 ### Where and how much
 
-The `Config.history_dir`, by default `history/` next to `server.json`. Per terminal 8 MiB: the oldest records are dropped (the file is rewritten without them, down to 7/8 of the cap, so the rewrite does not happen on every write). In total 256 MiB: the oldest records of the largest log are dropped first. Both limits are constants for now; they become settings in #1196. The log of an ended terminal is kept until the user closes the terminal (#1196).
+The `Config.history_dir`, by default `history/` next to `server.json`. Per terminal 8 MiB: the oldest records are dropped (the file is rewritten without them, down to 7/8 of the cap, so the rewrite does not happen on every write). In total 256 MiB: the oldest records of the largest log are dropped first. Both limits are the `terminalHistory` setting (#1196: `enabled`, `perTerminalMiB`, `totalMiB`, defaults on, 8, 256), applied to new output without a restart. The log of an ended terminal is kept until the user closes the terminal, which removes it; logs without a terminal are removed at server start (#1196).
 
 ### Privacy
 

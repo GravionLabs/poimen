@@ -33,6 +33,7 @@ mod records;
 pub mod report;
 mod reports;
 mod runs;
+mod settings_reread;
 pub mod stdio;
 mod store;
 mod stream;
@@ -391,6 +392,8 @@ pub(crate) struct Shared {
     state_file: PathBuf,
     /// Writes the history logs of the terminals (#973).
     history: Arc<history::History>,
+    /// When the user config was last read for `terminalHistory` (#1196).
+    history_read: Mutex<Option<Instant>>,
     scrollback: usize,
     home: Option<PathBuf>,
     /// The sleep inhibitor of `agents.keepAwake` (#987).
@@ -588,26 +591,6 @@ impl Shared {
         if changed {
             self.persist(&inner);
         }
-    }
-
-    /// The `agents.silentAfter` setting in minutes, read from the user config at most every 30 s
-    /// (#898); without a home it is the default.
-    fn silent_after(&self, now: Instant) -> u64 {
-        let mut cached = lock(&self.silent_after);
-        if let Some((at, minutes)) = *cached
-            && now.duration_since(at) < SETTINGS_REREAD
-        {
-            return minutes;
-        }
-        let minutes = match self.home.as_deref() {
-            Some(home) => std::fs::read_to_string(poimen_core::settings::config_path(home))
-                .map_or(poimen_core::settings::DEFAULT_SILENT_AFTER_MIN, |t| {
-                    poimen_core::settings::silent_after_text(&t)
-                }),
-            None => poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
-        };
-        *cached = Some((now, minutes));
-        minutes
     }
 
     /// Marks the agents silent that are `working` and sent no report for `minutes` (`0` is off,
@@ -818,6 +801,7 @@ impl Server {
                 std::process::id()
             ),
         );
+        let history = history::start_after_sweep(&config, &terminals, &log_file);
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 layout,
@@ -830,11 +814,8 @@ impl Server {
             confirms: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
-            history: Arc::new(history::History::start(
-                config.history_dir,
-                history::Limits::default(),
-                log::path(&config.state_file),
-            )),
+            history,
+            history_read: Mutex::new(None),
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
@@ -849,6 +830,7 @@ impl Server {
             stopped: AtomicBool::new(false),
             server_lock: Mutex::new(lock_file),
         });
+        shared.refresh_history(Instant::now());
         {
             // Under the lock, so an adopted host whose child has ended meanwhile reports its exit
             // only once its terminal is in the list.
@@ -907,6 +889,7 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+                shared.refresh_history(Instant::now());
                 shared.mark_silent(now_millis(), shared.silent_after(Instant::now()));
             }
         });
@@ -2399,6 +2382,8 @@ fn close_entry(shared: &Shared, entry: TerminalEntry) {
     if let Some(host) = entry.host {
         host.kill();
     }
+    // The terminal is gone: so is what it printed (#1196).
+    shared.history.remove(&entry.info.id);
     shared.publish(Event::TerminalClosed {
         terminal_id: entry.info.id,
         space_id: entry.info.space_id,
