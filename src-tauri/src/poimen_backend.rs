@@ -767,15 +767,13 @@ impl Backend for PoimenBackend {
             }
             Err(err) => return Err(text(err)),
         };
-        let mut writer = attachment.writer().map_err(text)?;
-        streams::restore(self, request.target, &mut writer);
-        lock(&self.streams).insert(
-            id,
-            Arc::new(Stream {
-                terminal_id: request.target.to_owned(),
-                writer: Mutex::new(writer),
-            }),
-        );
+        let writer = attachment.writer().map_err(text)?;
+        let stream = Arc::new(Stream {
+            terminal_id: request.target.to_owned(),
+            writer: Mutex::new(writer),
+        });
+        lock(&self.streams).insert(id, Arc::clone(&stream));
+        streams::restore(self, &stream);
         let streams = Arc::clone(&self.streams);
         let info = attachment.info.clone();
         let controls = request.mode == Mode::Control;

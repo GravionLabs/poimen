@@ -27,29 +27,32 @@ impl PoimenBackend {
 /// The terminals whose prompt bar holds text.
 pub(super) type Drafts = Mutex<HashSet<String>>;
 
-/// Remembers the draft of `terminal_id` and tells the server on every open stream of it.
+/// Remembers the draft of `terminal_id` and tells the server on every open stream of it. The
+/// drafts lock is held throughout, so a stream that [`restore`] handles meanwhile is ordered.
 pub(super) fn set(backend: &PoimenBackend, terminal_id: &str, draft: bool) -> Result<(), String> {
-    {
-        let mut held = lock(&backend.drafts);
-        if draft {
-            held.insert(terminal_id.to_owned());
-        } else {
-            held.remove(terminal_id);
-        }
+    let mut held = lock(&backend.drafts);
+    if draft {
+        held.insert(terminal_id.to_owned());
+    } else {
+        held.remove(terminal_id);
     }
     let streams: Vec<_> = lock(&backend.streams)
         .values()
         .filter(|s| s.terminal_id == terminal_id)
         .cloned()
         .collect();
-    streams
-        .iter()
-        .try_for_each(|s| lock(&s.writer).set_draft(draft).map_err(text))
+    let mut result = Ok(());
+    for s in streams {
+        if let Err(e) = lock(&s.writer).set_draft(draft) {
+            result = result.and(Err(text(e)));
+        }
+    }
+    result
 }
 
-/// A new stream of `terminal_id` tells the server about a draft that is still held.
-pub(super) fn restore(backend: &PoimenBackend, terminal_id: &str, writer: &mut AttachmentWriter) {
-    if lock(&backend.drafts).contains(terminal_id) {
-        let _ = writer.set_draft(true);
+/// A stream just inserted into `streams` tells the server about a draft that is still held.
+pub(super) fn restore(backend: &PoimenBackend, stream: &Stream) {
+    if lock(&backend.drafts).contains(&stream.terminal_id) {
+        let _ = lock(&stream.writer).set_draft(true);
     }
 }
