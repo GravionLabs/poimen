@@ -4,7 +4,6 @@ docs/agents/agents-and-hooks.md src-tauri/src/harness.rs	1
 docs/agents/backend-and-server.md src/task_start.rs	1
 docs/agents/backend-and-server.md src/worktree.rs	1
 docs/agents/changes-and-git.md .agents/state/	1
-docs/agents/changes-and-git.md .claude/worktrees	1
 docs/agents/console.md src/tui/	1
 docs/agents/frontend.md src-tauri/src/git.rs	1
 docs/agents/spaces-and-layouts.md .agents/herdr-layout.json	1
