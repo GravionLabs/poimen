@@ -46,6 +46,15 @@ const STROKES = {
     "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   ],
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
+  // Lucide "bot": an agent.
+  agent: [
+    "M12 8V4H8",
+    "M6 8h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
+    "M2 14h2",
+    "M20 14h2",
+    "M15 13v2",
+    "M9 13v2",
+  ],
 } as const;
 
 export type IconName = keyof typeof PATHS | keyof typeof STROKES;
