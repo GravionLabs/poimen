@@ -14,6 +14,7 @@ poimen-server, its protocol, the client and the PTY host. Read before you touch 
 
 - `server.json` durability (#967): `store::save` syncs, keeps `server.json.bak` and syncs the directory; `store::load` falls back to the backup, sets an unreadable file aside as `.damaged-<secs>` (three kept) and refuses a newer `version` (`load_or_refuse`: exit 1, line in `server.log` that `server_paths::describe` shows in the app). Tests: `store_durability_tests.rs`.
 - Keep awake (#987): `poimen-server/src/awake.rs` (`Shared::awake_sweep`, run by `serve` every 5 s; tests give the clock and `Server::set_awake_command`). The hold is a helper process on a stdin pipe, so a release or a dead server ends it; the setting is read from the config file each pass. Frontend: `SpacesStore.awake` from `server.awake_changed`, `awake` item of the status bar, switch on the Agents page. Windows uses `SetThreadExecutionState` through PowerShell, not `PowerCreateRequest` (no Windows API crate in the server).
+- Memory per terminal (#971): `poimen-server/src/memory.rs` (one `ps` table cached 30 s in `Shared.processes`, `tree_bytes` of the child pid the host's `hello` gives, `Handle::child_pid`); `terminal.list` fills `Terminal.memory_bytes` on its copies, events and `server.json` never carry it. The app shows it as the row token `memory` (`sidebar/spaces.ts`: `memoryText`, `spaceMemory` sums a space; in the default workspace, agent and terminal rows). Tests: `tests/memory.rs`, `sidebar-memory.spec.ts`.
 
 ## Compatibility with the last release (#969)
 

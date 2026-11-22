@@ -3,6 +3,7 @@
 
 import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
 import type { BranchPull } from "./branch-pull";
+import type { ChildRecord } from "./child-record";
 import type { SidebarSort } from "./settings";
 import { naturalCompare } from "./natural-compare";
 import { markStarters } from "./started-by";
@@ -192,19 +193,6 @@ export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undef
   return first ?? snapshot.terminals.find((t) => t.space_id === spaceId);
 }
 
-/** A child record of a terminal (OSC 7501 with an `id`, #684): a row below the terminal. */
-export interface ChildRecord {
-  /** `/`-separated path such as `run/issue-12`; a parent's id is a prefix of its children's. */
-  id: string;
-  status: AgentStatus;
-  app?: string;
-  message?: string;
-  progress?: number;
-  kind?: string;
-  tone?: string;
-  title?: string;
-}
-
 export interface Terminal {
   terminal_id: string;
   tab_id: string;
@@ -241,6 +229,8 @@ export interface Terminal {
   tokens?: Record<string, string>;
   /** Runs in a PTY host that a restarted poimen-server adopts (poimen backend, #604). */
   survives_restart?: boolean;
+  /** Resident memory in bytes of the terminal's process tree (poimen backend, #971); absent where unknown. */
+  memory_bytes?: number;
   /** The program the terminal runs (poimen backend). */
   program?: string;
   /** Version of the PTY host the terminal runs in, and of the one the server ships with (#606). */
@@ -268,6 +258,7 @@ export interface RepoInfo {
 }
 
 export type { BranchPull } from "./branch-pull";
+export type { ChildRecord } from "./child-record";
 
 /** The backend-neutral state: spaces hold tabs hold terminals (a terminal is identified by `terminal_id`). */
 export interface Snapshot {

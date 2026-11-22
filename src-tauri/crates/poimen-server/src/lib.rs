@@ -23,6 +23,7 @@ mod host;
 pub mod integration;
 pub mod log;
 pub mod mcp_config;
+mod memory;
 mod pty;
 mod records;
 pub mod report;
@@ -54,7 +55,7 @@ use poimen_protocol::{
     SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
     SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace,
     TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
-    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
+    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalRename,
     TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
     WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
@@ -379,6 +380,8 @@ pub(crate) struct Shared {
     awake: Mutex<awake::Awake>,
     /// `agents.silentAfter` in minutes with the time it was read (#898).
     silent_after: Mutex<Option<(Instant, u64)>>,
+    /// The process table `terminal.list` reads the memory of terminals from (#971).
+    processes: Mutex<memory::Cache>,
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
@@ -815,6 +818,7 @@ impl Server {
             home: config.home,
             awake: Mutex::default(),
             silent_after: Mutex::new(None),
+            processes: Mutex::new(memory::Cache::default()),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
             resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
@@ -1216,7 +1220,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "space.apply_layout" => space_apply_layout(shared, parsed(request)?),
         "space.rename" => space_rename(shared, parsed(request)?),
         "space.close" => space_close(shared, parsed(request)?),
-        "terminal.list" => terminal_list(shared, parsed(request)?),
+        "terminal.list" => memory::terminal_list(shared, parsed(request)?),
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
@@ -1921,18 +1925,6 @@ fn space_close(shared: &Shared, p: SpaceClose) -> ApiResult {
     Ok(json!({}))
 }
 
-fn terminal_list(shared: &Shared, p: TerminalList) -> ApiResult {
-    shared.expire_tokens();
-    let inner = lock(&shared.inner);
-    let terminals: Vec<&Terminal> = inner
-        .terminals
-        .iter()
-        .map(|t| &t.info)
-        .filter(|t| p.space_id.as_ref().is_none_or(|id| &t.space_id == id))
-        .collect();
-    Ok(json!({ "terminals": terminals }))
-}
-
 fn server_set_colors(shared: &Shared, p: SetColors) -> ApiResult {
     let mut colors = Colors {
         foreground: parse_hex(&p.foreground)?,
@@ -2045,6 +2037,7 @@ fn spawn_terminal(
         report: None,
         agent_source: None,
         status_history: Vec::new(),
+        memory_bytes: None,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),

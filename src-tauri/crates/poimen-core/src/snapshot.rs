@@ -187,6 +187,9 @@ pub struct Terminal {
     /// Runs in a PTY host that a restarted poimen-server adopts (#604).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub survives_restart: bool,
+    /// Resident memory in bytes of the terminal's process tree (#971); absent where unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
     /// The program the terminal runs (poimen-server).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
@@ -243,7 +246,7 @@ mod tests {
                  "agent_reported_at": 1800, "agent_status_since": 1600,
                  "agent_silent_since": 1900,
                  "label": "review", "tokens": {"deliver_step": "build"},
-                 "survives_restart": true, "program": "/bin/zsh", "host_version": "0.15.0",
+                 "survives_restart": true, "memory_bytes": 52428800, "program": "/bin/zsh", "host_version": "0.15.0",
                  "host_bundled_version": "0.16.0", "focused": false},
                 {"terminal_id": "t2", "tab_id": "tab1", "space_id": "s1",
                  "agent_status": "unknown", "cwd": "/work/api", "focused": true}

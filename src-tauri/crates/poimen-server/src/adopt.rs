@@ -133,6 +133,7 @@ fn adopted(
                     a.agent.clone().unwrap_or_default()
                 }
             }),
+            memory_bytes: None,
             status_history: Vec::new(),
         },
         host: Some(handle),

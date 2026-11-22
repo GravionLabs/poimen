@@ -507,7 +507,7 @@ describe("DEFAULT_SIDEBAR_ROWS (#1075, #1111)", () => {
   it("has the card lines as the workspace default", () => {
     expect(DEFAULT_SIDEBAR_ROWS.workspace.map((l) => l.map((t) => t.token))).toEqual([
       ["state_icon", "name", "state_text"],
-      ["branch", "dir", "dirty", "sync", "pr"],
+      ["branch", "dir", "dirty", "sync", "pr", "memory"],
     ]);
   });
 });

@@ -322,6 +322,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
         survives_restart: terminal.survives_restart,
+        memory_bytes: terminal.memory_bytes,
         program: terminal.program.clone(),
         // The mark on a terminal whose host is older than the bundled one (#606).
         host_version: terminal
