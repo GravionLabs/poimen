@@ -6,6 +6,9 @@
 @if (writeError(); as m) {
   <p class="field-error" role="alert">{{ m }}</p>
 }
+@if (resetError(); as m) {
+  <p class="field-error" role="alert">{{ m }}</p>
+}
 @for (g of groups; track g.title) {
   <section class="shortcut-group" [attr.aria-label]="g.title">
     <h3>{{ g.title }}</h3>

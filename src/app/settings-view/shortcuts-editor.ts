@@ -40,6 +40,7 @@ export class ShortcutsEditor {
   protected readonly groups = SHORTCUT_GROUPS;
   protected readonly title = shortcutTitle;
   protected readonly writeError = this.store.writeError;
+  protected readonly resetError = signal<string | null>(null);
   protected readonly recording = signal<Recording | null>(null);
 
   /** The action that already has the recorded combination. */
@@ -116,6 +117,12 @@ export class ShortcutsEditor {
 
   protected async reset(action: ShortcutAction): Promise<void> {
     this.cancel();
+    const other = shortcutConflict(this.keymap.shortcuts(), action, DEFAULT_SHORTCUTS[action]);
+    if (other) {
+      this.resetError.set(`${this.title(action)}: the default is used by ${this.title(other)}`);
+      return;
+    }
+    this.resetError.set(null);
     await this.set(action, null);
   }
 

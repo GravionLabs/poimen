@@ -170,7 +170,23 @@ pub fn set_shortcut_text(
     }
     let path = ["shortcuts", action];
     match accelerator {
-        None => remove_path_text(text, &path),
+        None => {
+            let default = ACTIONS
+                .iter()
+                .find(|(id, _)| *id == action)
+                .map(|(_, d)| *d);
+            let current = super::resolve(Some(text), || None).shortcuts;
+            if let Some((other, _)) = current
+                .iter()
+                .find(|(id, v)| *id != action && Some(v.as_str()) == default)
+            {
+                return Err(format!(
+                    "{} is already used by {other}",
+                    default.unwrap_or_default()
+                ));
+            }
+            remove_path_text(text, &path)
+        }
         Some(a) if a.trim().is_empty() => set_path_text(text, &path, "\"\""),
         Some(a) => {
             let acc = normalize_accelerator(a).ok_or_else(|| {
@@ -238,5 +254,9 @@ mod tests {
         let reset = set_shortcut_text(&cleared, "closeTab", None).unwrap();
         assert_eq!(shortcuts(&reset)["closeTab"], "CmdOrCtrl+W");
         assert_eq!(set_shortcut_text("{}", "closeTab", None).unwrap(), "{}");
+        // Reset is refused while another action holds the default.
+        let taken = set_shortcut_text(&cleared, "newTerminal", Some("CmdOrCtrl+W")).unwrap();
+        let err = set_shortcut_text(&taken, "closeTab", None).unwrap_err();
+        assert!(err.contains("newTerminal"), "{err}");
     }
 }

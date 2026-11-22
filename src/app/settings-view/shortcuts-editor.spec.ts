@@ -105,4 +105,15 @@ describe("ShortcutsEditor", () => {
       { action: "closeTab", accelerator: "" },
     ]);
   });
+
+  it("refuses a reset while another action has the default", async () => {
+    const { button, settle, calls, host } = setup({
+      closeTab: "Ctrl+Alt+X",
+      newTerminal: "CmdOrCtrl+W",
+    });
+    button("Reset Close Tab").click();
+    await settle();
+    expect(calls()).toEqual([]);
+    expect(host.textContent).toContain("default is used by");
+  });
 });
