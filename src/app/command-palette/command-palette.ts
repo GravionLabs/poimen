@@ -17,12 +17,14 @@ import type { PrAction } from "../github/pulls";
 import { EditorTabs } from "../core/editor-tabs";
 import { SnippetRunner } from "../core/snippets";
 import type { ProjectEntry } from "../core/project-entries";
+import { HxTag } from "@gravionlabs/helix-ui";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
 @Component({
   selector: "app-command-palette",
+  imports: [HxTag],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./command-palette.html",
   styleUrl: "./command-palette.css",
@@ -99,6 +101,7 @@ export class CommandPalette {
   protected key(event: KeyboardEvent): void {
     if (event.key === "ArrowDown") this.palette.move(1);
     else if (event.key === "ArrowUp") this.palette.move(-1);
+    else if (event.key === "Tab") this.palette.stepTab(event.shiftKey ? -1 : 1);
     else if (event.key === "Enter") {
       const item = this.palette.current();
       if (item) this.run(item);

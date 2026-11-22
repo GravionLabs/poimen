@@ -20,6 +20,7 @@ const item = (key: string, title: string): PaletteItem => ({
   title,
   shortcut: "Ctrl+X",
   command: "refresh",
+  source: "poimen",
 });
 
 const a = item("a", "Alpha");
@@ -49,6 +50,13 @@ function makeHost() {
     current: () => entries[selected],
     close: () => undefined,
     setQuery: () => undefined,
+    sourceTabs: () => [
+      { id: "all", label: "All", sources: null },
+      { id: "project", label: "Project", sources: ["project"] },
+    ],
+    tab: () => "all",
+    selectTab: () => undefined,
+    sourceLabel: () => "Poimen",
   };
   @Component({
     selector: "app-host",
@@ -84,6 +92,18 @@ describe("command palette template", () => {
     expect(el.querySelector("input")?.getAttribute("placeholder")).toBe("Type an action name");
   });
 
+  it("renders the tabs as a tablist with the active one selected, the list stays a listbox", () => {
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(makeHost());
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const tabs = [...el.querySelectorAll('[role="tablist"] [role="tab"]')];
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual(["All", "Project"]);
+    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["true", "false"]);
+    expect(el.querySelector('ul[role="listbox"]')).not.toBeNull();
+    expect(el.querySelector("hx-tag")).toBeNull();
+  });
+
   it("steps over a heading with the arrow keys", () => {
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(makeHost());
@@ -103,7 +123,7 @@ describe("command palette template", () => {
       fixture.detectChanges();
       expect(selectedTitle()).toBe(expected);
     }
-    expect(el.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(el.querySelectorAll('[role="option"][aria-selected="true"]')).toHaveLength(1);
     expect(el.querySelector(".heading")?.getAttribute("aria-selected")).toBeNull();
   });
 });
