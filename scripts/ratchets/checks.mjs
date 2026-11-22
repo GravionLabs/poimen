@@ -83,19 +83,26 @@ export function pathsIn(text, tops) {
   return found;
 }
 
+/**
+ * Whether `p` is a tracked file or a directory holding one. Only tracked files count, so an ignored local
+ * directory (`.claude/worktrees`, a build output) gives the same result on a developer machine as in CI.
+ */
+export function isTrackedPath(p, files) {
+  const clean = path.posix.normalize(p).replace(/\/$/, "");
+  const dir = `${clean}/`;
+  return files.some((f) => f === clean || f.startsWith(dir));
+}
+
 export function docPaths(root, files = tracked(root)) {
-  const tops = new Set(
-    fs.readdirSync(root).filter((e) => e !== "node_modules" && e !== "target" && e !== ".git"),
-  );
+  const tops = new Set(files.filter((f) => f.includes("/")).map((f) => f.split("/")[0]));
   const map = new Map();
   for (const file of files) {
     if (file !== "AGENTS.md" && !/^docs\/agents\/[^/]+\.md$/.test(file)) continue;
     const text = read(root, file);
     for (const p of pathsIn(text, tops)) {
-      const direct = fs.existsSync(path.join(root, p));
       // A link target is relative to its file (`../adr/x.md` in docs/agents/).
-      const relative = fs.existsSync(path.resolve(root, path.dirname(file), p));
-      if (!direct && !relative) map.set(`${file} ${p}`, 1);
+      const relative = path.posix.join(path.posix.dirname(file), p);
+      if (!isTrackedPath(p, files) && !isTrackedPath(relative, files)) map.set(`${file} ${p}`, 1);
     }
   }
   return map;
