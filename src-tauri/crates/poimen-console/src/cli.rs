@@ -2,26 +2,30 @@
 
 use poimen_protocol::AttachMode;
 
-pub const USAGE: &str = "usage: poimen [<command>]\n\
-\n\
-  (none)                              the TUI: spaces and terminals, the selected one attached.\n\
-                                      Ctrl+B d detaches, Ctrl+B Up/Down selects, Ctrl+B b\n\
-                                      toggles the sidebar (console.prefix, console.keys)\n\
-  ls [--json]                         spaces, terminals and agent status\n\
-  status <terminal> [--json]          one terminal: state and agent status\n\
-  new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id\n\
-  send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
-  prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
-  mcp                                 a stdio MCP server with read-only tools for agents\n\
-  doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;\n\
-                                      --bundle writes a local diagnostics file (never uploaded)\n\
-  -V, --version                       prints the version\n\
-  attach [--control [--takeover]] <terminal>\n\
-                                      shows a terminal; observes by default, --control sends your\n\
-                                      input and sets the size, --takeover replaces a controller.\n\
-                                      Detach with Ctrl+B d (Ctrl+B Ctrl+B sends Ctrl+B)\n\
-\n\
-Inside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.";
+/// A raw string: a `\` line continuation would drop the indentation of the next line.
+pub const USAGE: &str = r#"usage: poimen [<command>]
+
+  (none)                              the TUI: spaces and terminals, the selected one attached.
+                                      Ctrl+B then: d detaches, : palette, N notifications,
+                                      c new tab, % " split, h j k l focus, Up/Down select,
+                                      b sidebar (console.prefix, console.keys)
+  ls [--json]                         spaces, terminals and agent status
+  status <terminal> [--json]          one terminal: state and agent status
+  new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id
+  send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)
+  prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked
+  mcp                                 a stdio MCP server for agents: read tools, start_agent,
+                                      prompt_agent, wait_agent, report_done
+  doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;
+                                      --bundle writes a local diagnostics file (never uploaded)
+  -V, --version                       prints the version
+  attach [--control [--takeover]] <terminal>
+                                      shows a terminal; observes by default, --control sends your
+                                      input and sets the size, --takeover replaces a controller.
+                                      Detach with Ctrl+B d (Ctrl+B Ctrl+B sends Ctrl+B)
+
+Inside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.
+Guide: https://gravionlabs.github.io/poimen/guide/console"#;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AttachArgs {
@@ -372,6 +376,20 @@ mod tests {
     #[test]
     fn takeover_alone_is_refused() {
         assert!(p(&["attach", "--takeover", "t1"]).is_err());
+    }
+
+    #[test]
+    fn usage_keeps_the_column_indentation() {
+        let line = |start: &str| {
+            USAGE
+                .lines()
+                .find(|l| l.trim_start().starts_with(start))
+                .unwrap_or_else(|| panic!("no usage line for {start}"))
+                .to_owned()
+        };
+        assert!(line("ls [--json]").starts_with("  ls"));
+        assert!(line("prompt_agent,").starts_with(&" ".repeat(38)));
+        assert!(!line("mcp ").contains("read-only"));
     }
 
     #[test]
