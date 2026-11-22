@@ -66,33 +66,10 @@ impl Serialize for SoundSetting {
     }
 }
 
-/// The `usage` setting: which provider limits the status bar asks for (#784).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Usage {
-    /// `usage.claude`: ask the Claude usage endpoint (default true); false reads no token and
-    /// sends no request.
-    pub claude: bool,
-}
-
-impl Default for Usage {
-    fn default() -> Self {
-        Self { claude: true }
-    }
-}
-
-fn resolve_usage(value: &Value, warnings: &mut Vec<String>) -> Usage {
-    let mut usage = Usage::default();
-    let Some(object) = value.as_object() else {
-        warnings.push("usage must be an object".into());
-        return usage;
-    };
-    match object.get("claude") {
-        None => {}
-        Some(Value::Bool(b)) => usage.claude = *b,
-        Some(other) => warnings.push(format!("usage.claude {other} must be true or false")),
-    }
-    usage
-}
+#[path = "settings_usage.rs"]
+mod usage_setting;
+pub use usage_setting::Usage;
+use usage_setting::resolve_usage;
 
 /// The `sounds` setting: what plays when an agent is blocked or done (#724).
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
@@ -239,6 +216,8 @@ pub struct Settings {
     /// `agents.silentAfter`: minutes of `working` without an agent report before the server marks
     /// the agent silent; `0` is off (default 10, #898).
     pub silent_after: u64,
+    /// `terminalHistory`: whether the server logs terminal output to disk and the limits (#1196).
+    pub terminal_history: poimen_core::terminal_history::TerminalHistory,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -284,6 +263,7 @@ impl Default for Settings {
             usage: Usage::default(),
             claude_classic_renderer: false,
             keep_awake: false,
+            terminal_history: Default::default(),
             silent_after: poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
             home: None,
             warnings: Vec::new(),
@@ -573,6 +553,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("agents") {
         resolve_agents(value, &mut s);
+    }
+    if let Some(value) = root.get("terminalHistory") {
+        s.terminal_history = poimen_core::terminal_history::resolve(value, &mut s.warnings);
     }
 
     if let Some(ui) = root.get("ui") {
@@ -985,6 +968,13 @@ pub fn set_sound_text(text: &str, kind: &str, value: &Value) -> Result<String, S
         _ => return Err("a sound is true, false or the path of an audio file".into()),
     }
     set_path_text(text, &["sounds", kind], &value.to_string())
+}
+
+/// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
+#[tauri::command]
+pub fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
+    let home = crate::home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    save_sound(&home, &kind, &value)
 }
 
 /// Writes `sounds.<kind>` below `home`, like `save_theme`.

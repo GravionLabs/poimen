@@ -399,6 +399,14 @@ fn draw_panes(f: &mut Frame, area: Rect, app: &App) {
 pub fn status_text(app: &App) -> (String, String) {
     let name = app.selected_name().unwrap_or("-");
     let state = match app.focused() {
+        Some(p)
+            if app
+                .model
+                .terminal(&p.terminal_id)
+                .is_some_and(|t| t.from_history) =>
+        {
+            "ended, history (read-only)".into()
+        }
         Some(p) if p.exited.is_some() => match p.exited {
             Some(Some(code)) => format!("exited with {code}"),
             _ => "exited".into(),

@@ -17,7 +17,7 @@ The sidebar lists **spaces**, one per project directory, with their terminals. E
 - **New pane:** `CmdOrCtrl+T` or right-click a space. A dialog asks for the type: Terminal (the default) or an installed agent; the pane starts in the space's directory.
 - **Split:** right-click a pane or its tab, *Split right* or *Split down*. The new shell starts in the pane's directory.
 - **Start agent:** right-click a shell pane, *Start agent...* (kind, optional name and arguments).
-- **Rename and close:** from the same menu. Closing a pane always asks first and warns while an agent works. It ends the terminal and the processes of its session. Closing a **tab** only closes the view.
+- **Rename and close:** from the same menu. To rename a terminal in place in the sidebar, double-click its name, press F2 on the focused row or pick *Rename*. Enter or leaving the field saves, Escape cancels, and an error shows next to the text, which is kept. Closing a pane always asks first and warns while an agent works. It ends the terminal and the processes of its session. Closing a **tab** only closes the view.
 
 A space that lost its terminals, for example after a restart that could not adopt them, offers a **Rebuild** button that builds its layout again in its directory.
 
@@ -47,3 +47,7 @@ Named layouts (`layouts`) can be shared by templates and edited under **Settings
 ## Changes view
 
 *Show changes* in a space's menu opens the diff of the working tree against the base branch (or against `HEAD`): files with counts, side by side or inline, with syntax highlighting. You can comment on lines and send the comments to an agent of the space, stage files, commit and push from there. Push is never forced and is refused on `main` and `release/*`.
+
+- **Sections and actions per file.** Against `HEAD` the list has the sections *Conflicts*, *Staged* and *Changes* with a count each. Empty sections are hidden, a section collapses, and its header offers *Stage all* or *Unstage all*. A row shows the file name, the directory in muted text, the status and the added and removed lines. On hover or focus it offers *Stage* or *Unstage* and *Discard*; discarding asks first, names the file and cannot be undone. Shift-click selects a range, Escape clears it, and the actions then apply to the selection. Against the base branch the list stays flat.
+- **Large diffs.** A file above a size limit shows its counts and a *Load diff* button instead of the diff, so a lock file does not slow the view. Above a hard limit the diff is not offered and the row says why.
+- **Create a pull request.** When the branch is pushed and has no open pull request, *Create pull request...* opens a dialog with base, title, description and a *Draft* checkbox. *Draft with agent* fills title and description from the commits and the diff through a one-shot call of a harness. Create runs `gh pr create`, never pushes, and opens the pull request in the [GitHub](/guide/github) tab. An error of `gh` stays in the dialog with everything you typed.

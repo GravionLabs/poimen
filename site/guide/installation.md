@@ -75,11 +75,11 @@ Pick one:
 
 ## Console
 
-The `poimen` binary (TUI and CLI, see [Console and MCP](/guide/console)) ships with every installer and as its own download:
+The `poimen` binary (TUI and CLI, see [Console](/guide/console)) ships with every installer and as its own download:
 
 - **macOS:** inside the app at `/Applications/poimen.app/Contents/MacOS/poimen`. Link it onto the PATH with `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen`.
 - **Windows:** the `-setup.exe` and the `.msi` install `poimen.exe` next to the app and add that directory to your user PATH (open a new terminal afterwards).
-- **Linux:** the `.deb` and `.rpm` of the app install `/usr/bin/poimen`. For a host without the app, install the `poimen-cli` package (`.deb` or `.rpm` of the release; it conflicts with the app package).
+- **Linux:** the `.deb` and `.rpm` of the app install `/usr/bin/poimen`. For a host without the app, install the `poimen-cli` package (`.deb` or `.rpm` of the release; it conflicts with the app package). It holds the console and the server: `/usr/bin/poimen`, `/usr/bin/poimen-server` and `/usr/bin/poimen-pty-host`. The package starts no server, see [Console setup](/guide/console#the-server-must-run).
 - **Without the app:** the release assets `poimen-<version>-<target>.tar.gz` (Linux, macOS) and `.zip` (Windows) hold only the binary.
 
 Run `poimen doctor` to check the setup.

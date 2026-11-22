@@ -163,6 +163,7 @@ describe("parseSettings", () => {
       explorerShowHidden: false,
       claudeClassicRenderer: false,
       keepAwake: false,
+      terminalHistory: { enabled: true, perTerminalMib: 8, totalMib: 256 },
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       layouts: [],
@@ -213,6 +214,22 @@ describe("parseSettings", () => {
     expect(parseSettings({}).keepAwake).toBe(false);
     expect(parseSettings({ keepAwake: true }).keepAwake).toBe(true);
     expect(parseSettings({ keepAwake: "yes" }).keepAwake).toBe(false);
+  });
+
+  it("reads terminalHistory, on with 8 and 256 MiB by default", () => {
+    expect(parseSettings({}).terminalHistory).toEqual({
+      enabled: true,
+      perTerminalMib: 8,
+      totalMib: 256,
+    });
+    expect(
+      parseSettings({ terminalHistory: { enabled: false, perTerminalMib: 2, totalMib: 10 } })
+        .terminalHistory,
+    ).toEqual({ enabled: false, perTerminalMib: 2, totalMib: 10 });
+    expect(
+      parseSettings({ terminalHistory: { enabled: "no", perTerminalMib: 0, totalMib: 1.5 } })
+        .terminalHistory,
+    ).toEqual({ enabled: true, perTerminalMib: 8, totalMib: 256 });
   });
 
   it("reads the scrollback and keeps 10000 for a value that is not a whole number from 0", () => {

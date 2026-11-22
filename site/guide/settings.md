@@ -33,9 +33,10 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 <Screenshot src="settings-server-dark.png" light="settings-server-light.png" alt="Settings, Backend, Server: the version, state, socket and log of poimen-server, and the hook and MCP state of Claude Code and Copilot CLI" caption="Settings > Backend > Server: the server, and the hooks and MCP entries of your agents (demo data)." />
 
+- `terminalHistory`: `{ "enabled": true, "perTerminalMiB": 8, "totalMiB": 256 }`. The server writes what each terminal prints to a file in its state directory (readable only by you), so a terminal can show its output after a reboot. **This stores terminal output on disk, including anything secret that appears on screen.** Set `enabled` to `false` (or use **Settings > Backend > Server**) to stop writing; logs that exist stay until their terminal is closed. Closing a terminal removes its log, and the server removes logs without a terminal when it starts. When a log passes `perTerminalMiB` the oldest output is dropped; `totalMiB` limits all logs together. Changes apply to new output without a restart.
 - `machines`: see [Remote machines](/guide/remote-machines).
 - `trustedProjects`: managed by the trust dialog and **Settings > Workspace > Trusted projects**, never imported.
-- `console.prefix` and `console.keys`: the TUI keys, see [Console and MCP](/guide/console).
+- `console.prefix` and `console.keys`: the TUI keys, see [Console](/guide/console#configuration).
 
 **Settings > General > Export & import** moves your settings to another machine as a JSON file. Import shows what it would add, change and remove before it writes anything.
 

@@ -451,6 +451,18 @@ export class SettingsView {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
 
+  protected setHistory(field: "enabled" | "perTerminalMib" | "totalMib", event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const current = this.settings().terminalHistory;
+    const next =
+      field === "enabled"
+        ? { ...current, enabled: input.checked }
+        : { ...current, [field]: Number(input.value) };
+    void this.store.setTerminalHistory(next).then((ok) => {
+      if (!ok && field !== "enabled") input.value = String(current[field]);
+    });
+  }
+
   protected setKeepAwake(event: Event): void {
     void this.store.setKeepAwake((event.target as HTMLInputElement).checked);
   }

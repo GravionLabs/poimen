@@ -287,9 +287,37 @@ export interface Settings {
   sounds: SoundSettings;
   /** `usage`: which provider limits the status bar asks for (#784). */
   usage: UsageSettings;
+  /** `terminalHistory`: the server logs terminal output to disk (#1196). */
+  terminalHistory: TerminalHistorySettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
+}
+
+/** `terminalHistory` (defaults: on, 8 and 256 MiB). The server keeps the output on disk. */
+export interface TerminalHistorySettings {
+  enabled: boolean;
+  perTerminalMib: number;
+  totalMib: number;
+}
+
+export const DEFAULT_TERMINAL_HISTORY: TerminalHistorySettings = {
+  enabled: true,
+  perTerminalMib: 8,
+  totalMib: 256,
+};
+
+function mib(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : fallback;
+}
+
+function parseTerminalHistory(v: unknown): TerminalHistorySettings {
+  const r = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  return {
+    enabled: r["enabled"] !== false,
+    perTerminalMib: mib(r["perTerminalMib"], DEFAULT_TERMINAL_HISTORY.perTerminalMib),
+    totalMib: mib(r["totalMib"], DEFAULT_TERMINAL_HISTORY.totalMib),
+  };
 }
 
 /** `usage.claude` (default true): off reads no token and sends no request. */
@@ -386,6 +414,7 @@ export const DEFAULT_SETTINGS: Settings = {
   machines: [],
   sounds: { blocked: false, done: false },
   usage: { claude: true },
+  terminalHistory: DEFAULT_TERMINAL_HISTORY,
   home: null,
   warnings: [],
 };
@@ -499,6 +528,7 @@ export function parseSettings(raw: unknown): Settings {
       : [],
     sounds: parseSounds(r["sounds"]),
     usage: parseUsage(r["usage"]),
+    terminalHistory: parseTerminalHistory(r["terminalHistory"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
@@ -593,6 +623,27 @@ export class SettingsStore {
   /** Writes `agents.keepAwake` of config.json; the server reads it and holds or releases. */
   async setKeepAwake(keepAwake: boolean): Promise<void> {
     await this.write({ keepAwake }, "the keep awake option", "set_keep_awake", { on: keepAwake });
+  }
+
+  /**
+   * Writes `terminalHistory` of config.json; the server applies it to new output without a
+   * restart (#1196). The limits are whole MiB from 1; anything else is refused and not written.
+   */
+  async setTerminalHistory(value: TerminalHistorySettings): Promise<boolean> {
+    if (
+      !Number.isInteger(value.perTerminalMib) ||
+      !Number.isInteger(value.totalMib) ||
+      value.perTerminalMib < 1 ||
+      value.totalMib < 1
+    ) {
+      this.failed("the terminal history", "the limits must be whole numbers of MiB, at least 1");
+      return false;
+    }
+    return this.write({ terminalHistory: value }, "the terminal history", "set_terminal_history", {
+      enabled: value.enabled,
+      perTerminalMib: value.perTerminalMib,
+      totalMib: value.totalMib,
+    });
   }
 
   /** Writes `sounds.<kind>` (`false`, `true` or an audio file path) and applies it at once. */

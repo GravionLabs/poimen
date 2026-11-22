@@ -44,6 +44,7 @@ impl Env {
         Config {
             socket: self.dir.join(format!("run{n}")).join("server.sock"),
             state_file: self.state_file(),
+            history_dir: self.state_file().with_file_name("history"),
             scrollback: 100,
             home: None,
             pty_host,
@@ -333,8 +334,8 @@ fn a_gap_of_the_ring_is_one_marker_line_in_the_adopted_grid() {
         first.output(1, "early");
         let mut second = Peer::accept(&listener, 40, &start.endpoint);
         let _ = tx.send(format!("{:?}", second.read()));
-        // Records 1 to 38 left the ring while no server read it.
-        second.send(&HostMessage::Gap { from: 1, to: 38 });
+        // Records 2 to 38 left the ring while no server read it.
+        second.send(&HostMessage::Gap { from: 2, to: 38 });
         second.output(39, "late\r\n");
         second.output(40, "$ ready");
         while second.read().is_some() {}
@@ -365,11 +366,106 @@ fn a_gap_of_the_ring_is_one_marker_line_in_the_adopted_grid() {
     assert_eq!(
         lines,
         [
-            "[poimen: earlier output lost, 38 records left the host's buffer]",
+            "[poimen: earlier output lost, 37 records left the host's buffer]",
             "late"
         ],
         "{s:?}"
     );
+}
+
+/// Server A reads records 1 and 2 of a fake host and is stopped keeping the terminal; server B
+/// adopts it when the host is at record 4 and sends `second_gap` (if any), then records 3 and 4.
+/// Returns the screen of B and the history file of the terminal; `damage` may change the file
+/// between the two servers.
+fn restart_with_gap(
+    name: &str,
+    second_gap: Option<(u64, u64)>,
+    damage: impl FnOnce(&Path),
+) -> (String, PathBuf) {
+    let env = Env::new(name);
+    let (host, rx) = fake(move |listener, start, tx| {
+        let mut first = Peer::accept(&listener, 0, &start.endpoint);
+        first.read();
+        first.output(1, "early ");
+        first.output(2, "middle\r\n");
+        let mut second = Peer::accept(&listener, 4, &start.endpoint);
+        let _ = tx.send(format!("{:?}", second.read()));
+        if let Some((from, to)) = second_gap {
+            second.send(&HostMessage::Gap { from, to });
+        }
+        second.output(3, "down ");
+        second.output(4, "ready");
+        while second.read().is_some() {}
+    });
+    let (a, a_down) = start(&env.config(1, host));
+    let space = a.create_space("work", &env.work()).unwrap().id;
+    let id = a
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["fake-shell".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    wait_for_screen(&a, &id, "middle");
+    a.shutdown_keeping_terminals().unwrap();
+    a_down.recv_timeout(WAIT).unwrap();
+    let log = env.state_file().with_file_name("history").join(&id);
+    damage(&log);
+
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert_eq!(said(&rx), "Some(Attach { since: 0 })");
+    let s = wait_for_screen(&b, &id, "ready");
+    // The server is alive and answers.
+    assert!(b.list_terminals(None).is_ok());
+    (s, log)
+}
+
+#[test]
+fn a_restart_whose_log_covers_the_history_leaves_no_gap_marker() {
+    // The ring lost records 1 and 2 meanwhile, but the log has them.
+    let (s, _) = restart_with_gap("covered", Some((1, 2)), |_| {});
+    assert!(!s.contains("poimen:"), "{s:?}");
+    for text in ["early", "middle", "down ready"] {
+        assert!(s.contains(text), "{text}: {s:?}");
+    }
+}
+
+#[test]
+fn a_restart_whose_log_misses_records_keeps_the_gap_for_them_only() {
+    // Record 3 left the ring too and no log has it: one record lost.
+    let (s, _) = restart_with_gap("missing", Some((1, 3)), |_| {});
+    assert!(
+        s.contains("[poimen: earlier output lost, 1 record left the host's buffer]"),
+        "{s:?}"
+    );
+    assert!(s.contains("early") && s.contains("middle") && s.contains("ready"));
+}
+
+#[test]
+fn a_restart_without_a_log_builds_the_grid_from_the_ring_and_marks_the_gap() {
+    let (s, _) = restart_with_gap("nolog", Some((1, 3)), |log| {
+        std::fs::remove_file(log).unwrap();
+    });
+    assert!(
+        s.contains("[poimen: earlier output lost, 3 records left the host's buffer]"),
+        "{s:?}"
+    );
+    assert!(!s.contains("early") && s.contains("ready"), "{s:?}");
+}
+
+#[test]
+fn a_damaged_log_never_stops_the_server() {
+    let (s, _) = restart_with_gap("damaged", None, |log| {
+        // The checkpoint of the shutdown and the end of the log are garbage.
+        let mut data = std::fs::read(log).unwrap();
+        let at = data.len() - 40;
+        for b in &mut data[at..] {
+            *b ^= 0x5a;
+        }
+        std::fs::write(log, data).unwrap();
+    });
+    assert!(s.contains("ready"), "{s:?}");
 }
 
 /// A terminal list and layout as a previous server left them: space `s1` with tab `tab3`, a
@@ -552,4 +648,105 @@ fn a_real_shell_keeps_running_across_a_server_restart() {
     b.input(&id, "echo again-$X\n").unwrap();
     assert!(wait_for_screen(&b, &id, "again-kept").contains("again-kept"));
     b.close_terminal(&id).unwrap();
+}
+
+/// A server that ran one terminal printing "early middle", stopped keeping it, and whose host is
+/// gone afterwards (a reboot). Returns the env, the terminal id and its history log.
+fn host_gone_after_a_shutdown(name: &str) -> (Env, String, PathBuf) {
+    let env = Env::new(name);
+    let (host, _) = fake(move |listener, start, _| {
+        let mut peer = Peer::accept(&listener, 0, &start.endpoint);
+        peer.read();
+        peer.output(1, "early ");
+        peer.output(2, "middle\r\n");
+        while peer.read().is_some() {}
+        // The listener goes with the script: nobody answers at the endpoint any more.
+    });
+    let (a, a_down) = start(&env.config(1, host));
+    let space = a.create_space("work", &env.work()).unwrap().id;
+    let id = a
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["fake-shell".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    wait_for_screen(&a, &id, "middle");
+    a.shutdown_keeping_terminals().unwrap();
+    a_down.recv_timeout(WAIT).unwrap();
+    let endpoint = env.state()["terminals"][0]["endpoint"].clone();
+    let _ = std::fs::remove_file(endpoint.as_str().unwrap());
+    let log = env.state_file().with_file_name("history").join(&id);
+    (env, id, log)
+}
+
+/// The terminals in `server.json`; the key is absent when there are none.
+fn listed(env: &Env) -> Vec<Value> {
+    env.state()["terminals"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_terminal_whose_host_is_gone_but_whose_log_exists_is_kept_as_read_only_history() {
+    let (env, id, _) = host_gone_after_a_shutdown("ended");
+    let (b, _) = start(&env.config(2, no_new_host()));
+    let terminals = b.list_terminals(None).unwrap();
+    assert_eq!(terminals.len(), 1);
+    let t = &terminals[0];
+    assert_eq!(
+        (t.id.as_str(), t.status),
+        (id.as_str(), TerminalStatus::Exited)
+    );
+    assert!(t.from_history && t.exit_code.is_none() && !t.survives_restart);
+    // Its tab stays.
+    assert_eq!(b.list_layout().unwrap().tabs[0].root, Node::terminal(&id));
+
+    // Attaching as controller gives the history, read-only and as an observer.
+    let mut a = b.attach(&id, AttachMode::Control, false).unwrap();
+    assert!(a.info.read_only);
+    assert_eq!(a.info.mode, AttachMode::Observe);
+    let snapshot = String::from_utf8_lossy(&decode_bytes(&a.info.snapshot).unwrap()).into_owned();
+    assert!(
+        snapshot.contains("early") && snapshot.contains("middle"),
+        "{snapshot:?}"
+    );
+    assert!(
+        a.next_record().is_ok(),
+        "the stream ends with an exit record"
+    );
+    // Nobody controls it, and input is refused with a clear error, attached or not.
+    assert!(!b.list_terminals(None).unwrap().is_empty());
+    let err = b.input(&id, "ls\r").unwrap_err().to_string();
+    assert!(err.contains("read-only"), "{err}");
+
+    // The list keeps it for the next restart, and closing removes it.
+    assert_eq!(listed(&env).len(), 1);
+    b.close_terminal(&id).unwrap();
+    assert!(b.list_terminals(None).unwrap().is_empty());
+    assert!(b.list_layout().unwrap().tabs.is_empty());
+    assert!(listed(&env).is_empty());
+}
+
+#[test]
+fn an_ended_terminal_survives_a_second_restart() {
+    let (env, id, _) = host_gone_after_a_shutdown("ended-twice");
+    let (b, b_down) = start(&env.config(2, no_new_host()));
+    assert_eq!(b.list_terminals(None).unwrap().len(), 1);
+    b.shutdown_keeping_terminals().unwrap();
+    b_down.recv_timeout(WAIT).unwrap();
+    let (c, _) = start(&env.config(3, no_new_host()));
+    let s = screen(&c, &id);
+    assert!(s.contains("early") && s.contains("middle"), "{s:?}");
+}
+
+#[test]
+fn a_terminal_whose_host_is_gone_without_a_usable_log_is_dropped() {
+    let (env, _, log) = host_gone_after_a_shutdown("no-log");
+    std::fs::remove_file(log).unwrap();
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert!(b.list_terminals(None).unwrap().is_empty());
+    assert!(listed(&env).is_empty());
 }

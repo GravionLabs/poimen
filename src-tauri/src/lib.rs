@@ -2059,13 +2059,6 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
-/// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
-#[tauri::command]
-fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_sound(&home, &kind, &value)
-}
-
 /// The Claude limit windows for the status bar (#784). With `usage.claude` off nothing is read
 /// and nothing is sent; any failure is an error text (without the token) the frontend shows once.
 #[tauri::command]
@@ -2936,7 +2929,8 @@ pub fn run() {
             set_explorer_show_hidden,
             agent_settings::set_claude_classic_renderer,
             agent_settings::set_keep_awake,
-            set_sound,
+            settings::set_sound,
+            agent_settings::set_terminal_history,
             sound_file,
             editor::open_in_editor,
             editor::resolve_file_links,

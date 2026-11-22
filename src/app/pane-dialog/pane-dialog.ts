@@ -44,6 +44,17 @@ export class PaneDialog {
       .catch(() => this.harnesses.set([]));
   }
 
+  /** What a type starts: its program and the status note (#1185). */
+  protected detail(agent: HarnessInfo): string {
+    const program = agent.command.length > 0 ? agent.command.join(" ") : agent.id;
+    return `${program}${this.note(agent.id)}`;
+  }
+
+  /** A double click on a type creates the pane. */
+  protected submit(event: Event): void {
+    (event.currentTarget as HTMLElement).querySelector("input")?.form?.requestSubmit();
+  }
+
   protected async create(form: HTMLFormElement): Promise<void> {
     const type = String(new FormData(form).get("type") ?? "terminal");
     const harness = type === "terminal" ? undefined : this.agents().find((h) => h.id === type);

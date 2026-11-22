@@ -15,11 +15,14 @@ use std::sync::{Arc, Mutex};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
-use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::cell::{Flags, Hyperlink};
+
+mod snapshot_pen;
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{
     Color, CursorShape, NamedColor, Processor, Rgb, StdSyncHandler,
 };
+use snapshot_pen::{Pen, kitty_flags, link_sequence};
 
 /// The scrollback kept per terminal unless configured otherwise.
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
@@ -174,6 +177,7 @@ impl Emulator {
         let title = Listener::default();
         let config = Config {
             scrolling_history: scrollback,
+            kitty_keyboard: true,
             ..Config::default()
         };
         let term = Term::new(
@@ -204,6 +208,11 @@ impl Emulator {
     #[cfg(test)]
     pub fn mode(&self) -> TermMode {
         *self.term.mode()
+    }
+
+    /// Whether the alternate screen is active (a full-screen program).
+    pub fn alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -335,6 +344,7 @@ impl Emulator {
         let cols = grid.columns();
         let mut out = String::new();
         let mut pen = Pen::default();
+        let mut link: Option<Hyperlink> = None;
         let mut line = top;
         while line <= bottom {
             let row = &grid[Line(line)];
@@ -345,6 +355,11 @@ impl Emulator {
             }
             for c in 0..end {
                 let cell = &row[Column(c)];
+                let cell_link = cell.hyperlink();
+                if cell_link != link {
+                    link_sequence(&mut out, cell_link.as_ref());
+                    link = cell_link;
+                }
                 if cell
                     .flags
                     .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
@@ -363,6 +378,9 @@ impl Emulator {
                 out.push_str("\r\n");
             }
             line += 1;
+        }
+        if link.is_some() {
+            link_sequence(&mut out, None);
         }
         pen.reset(&mut out);
         let c = grid.cursor.point;
@@ -430,110 +448,23 @@ impl Emulator {
         };
         let _ = write!(out, "\x1b[{code} q");
         set(&mut out, "?25", mode.contains(TermMode::SHOW_CURSOR));
+        // The kitty keyboard flags the program pushed (of the active screen's stack).
+        let flags = kitty_flags(mode);
+        if flags != 0 {
+            let _ = write!(out, "\x1b[>{flags}u");
+        }
         out.into_bytes()
     }
 }
 
 fn is_blank(cell: &alacritty_terminal::term::cell::Cell) -> bool {
-    (cell.c == ' ' || cell.c == '\0')
+    cell.hyperlink().is_none()
+        && (cell.c == ' ' || cell.c == '\0')
         && matches!(cell.bg, Color::Named(NamedColor::Background))
         && !cell
             .flags
             .intersects(Flags::INVERSE | Flags::ALL_UNDERLINES | Flags::STRIKEOUT | Flags::WRAPLINE)
         && cell.zerowidth().is_none()
-}
-
-/// The SGR state of the stream being written, so only changes are emitted.
-#[derive(Default)]
-struct Pen {
-    state: Option<(Color, Color, Flags)>,
-}
-
-const DEFAULT_PEN: (Color, Color, Flags) = (
-    Color::Named(NamedColor::Foreground),
-    Color::Named(NamedColor::Background),
-    Flags::empty(),
-);
-
-impl Pen {
-    fn apply(&mut self, out: &mut String, fg: Color, bg: Color, flags: Flags) {
-        let flags = flags
-            & (Flags::INVERSE
-                | Flags::BOLD
-                | Flags::ITALIC
-                | Flags::DIM
-                | Flags::HIDDEN
-                | Flags::STRIKEOUT
-                | Flags::ALL_UNDERLINES);
-        let wanted = (fg, bg, flags);
-        if self.state.unwrap_or(DEFAULT_PEN) == wanted {
-            return;
-        }
-        out.push_str("\x1b[0");
-        if flags.contains(Flags::BOLD) {
-            out.push_str(";1");
-        }
-        if flags.contains(Flags::DIM) {
-            out.push_str(";2");
-        }
-        if flags.contains(Flags::ITALIC) {
-            out.push_str(";3");
-        }
-        if flags.contains(Flags::DOUBLE_UNDERLINE) {
-            out.push_str(";21");
-        } else if flags.contains(Flags::UNDERCURL) {
-            out.push_str(";4:3");
-        } else if flags.intersects(Flags::ALL_UNDERLINES) {
-            out.push_str(";4");
-        }
-        if flags.contains(Flags::INVERSE) {
-            out.push_str(";7");
-        }
-        if flags.contains(Flags::HIDDEN) {
-            out.push_str(";8");
-        }
-        if flags.contains(Flags::STRIKEOUT) {
-            out.push_str(";9");
-        }
-        color(out, fg, 30, 90, 38);
-        color(out, bg, 40, 100, 48);
-        out.push('m');
-        self.state = Some(wanted);
-    }
-
-    fn reset(&mut self, out: &mut String) {
-        if self.state.is_some_and(|s| s != DEFAULT_PEN) {
-            out.push_str("\x1b[0m");
-        }
-        self.state = None;
-    }
-}
-
-fn color(out: &mut String, c: Color, base: u8, bright: u8, ext: u8) {
-    let n = match c {
-        Color::Spec(Rgb { r, g, b }) => {
-            let _ = write!(out, ";{ext};2;{r};{g};{b}");
-            return;
-        }
-        Color::Indexed(i) => usize::from(i),
-        Color::Named(n) => match n as usize {
-            i @ 0..=15 => i,
-            // The dim variants are the plain colors; DIM carries the rest.
-            i @ 259..=266 => i - 259,
-            _ => return,
-        },
-    };
-    match n {
-        0..=7 => {
-            let _ = write!(out, ";{}", usize::from(base) + n);
-        }
-        8..=15 => {
-            let _ = write!(out, ";{}", usize::from(bright) + n - 8);
-        }
-        _ => {
-            let _ = write!(out, ";{ext};5;{n}");
-        }
-    }
 }
 
 // --- the scanner -------------------------------------------------------------------------------

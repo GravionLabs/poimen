@@ -20,20 +20,19 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use poimen_client::transport::{self, Conn, Entry};
 use poimen_protocol::host::{ClientMessage, HostMessage, HostStart, Size, SpawnSpec, to_line};
-use poimen_protocol::{CHANNEL, Channel, ENV_SOCKET, ENV_TERMINAL_ID, decode_bytes, encode_bytes};
+use poimen_protocol::{CHANNEL, Channel, ENV_SOCKET, ENV_TERMINAL_ID, decode_bytes};
 
+use crate::outbox::{InputLines, Outbox};
 use crate::pty::{self, Chunk, PtyWriter};
 
 /// How long a started host may take to answer with `hello`.
 const START_TIMEOUT: Duration = Duration::from_secs(10);
-/// Input queued for a host and not yet written; a writer past it waits (outside the global lock).
-const INPUT_QUEUE_BYTES: usize = 1024 * 1024;
 /// A write or read on the connection of `kill` gives up after this (Unix; pipes have no
 /// timeouts). Longer than the host's wait for a killed child.
 const KILL_IO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -183,10 +182,10 @@ pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
 /// The connection to a host, shared by the reader (which replaces it on a reconnect) and the
 /// [`Outbox`]'s writer thread.
 #[derive(Clone)]
-struct HostConn(Arc<Mutex<Conn>>);
+pub(crate) struct HostConn(Arc<Mutex<Conn>>);
 
 impl HostConn {
-    fn current(&self) -> Conn {
+    pub(crate) fn current(&self) -> Conn {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -234,128 +233,6 @@ fn send_kill(endpoint: &Path, since: u64) {
     });
 }
 
-#[derive(Default)]
-struct Pending {
-    input: VecDeque<Vec<u8>>,
-    /// Bytes in `input` ([`INPUT_QUEUE_BYTES`]).
-    queued: usize,
-    /// The latest size asked for and not yet written; an older one is superseded.
-    resize: Option<(u16, u16)>,
-    closed: bool,
-}
-
-/// What the server sends a host over its connection, written by one thread per terminal
-/// ([`Outbox::run`]): every line is written whole, without a timeout, so the connection never
-/// holds half a line. Callers never wait for the host: a resize only replaces the pending size,
-/// input waits only while [`INPUT_QUEUE_BYTES`] are queued (outside the global lock, like a
-/// blocking PTY write).
-struct Outbox {
-    pending: Mutex<Pending>,
-    changed: Condvar,
-}
-
-impl Outbox {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            pending: Mutex::new(Pending::default()),
-            changed: Condvar::new(),
-        })
-    }
-
-    fn lock(&self) -> MutexGuard<'_, Pending> {
-        self.pending.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn input(&self, data: &[u8]) -> io::Result<()> {
-        let mut pending = self.lock();
-        while !pending.closed
-            && pending.queued > 0
-            && pending.queued + data.len() > INPUT_QUEUE_BYTES
-        {
-            pending = self
-                .changed
-                .wait(pending)
-                .unwrap_or_else(|e| e.into_inner());
-        }
-        if pending.closed {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "the terminal has ended",
-            ));
-        }
-        pending.queued += data.len();
-        pending.input.push_back(data.to_vec());
-        self.changed.notify_all();
-        Ok(())
-    }
-
-    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let mut pending = self.lock();
-        if pending.closed {
-            return Err("the terminal has ended".into());
-        }
-        pending.resize = Some((cols, rows));
-        self.changed.notify_all();
-        Ok(())
-    }
-
-    /// Nothing more is written; queued input is dropped and waiting writers return an error.
-    fn close(&self) {
-        let mut pending = self.lock();
-        pending.closed = true;
-        pending.input.clear();
-        pending.queued = 0;
-        pending.resize = None;
-        self.changed.notify_all();
-    }
-
-    /// The next line to write (a pending resize first), `None` once closed.
-    fn next(&self) -> Option<ClientMessage> {
-        let mut pending = self.lock();
-        loop {
-            if pending.closed {
-                return None;
-            }
-            if let Some((cols, rows)) = pending.resize.take() {
-                return Some(ClientMessage::Resize { cols, rows });
-            }
-            if let Some(data) = pending.input.pop_front() {
-                pending.queued -= data.len();
-                self.changed.notify_all();
-                return Some(ClientMessage::Input {
-                    bytes: encode_bytes(&data),
-                });
-            }
-            pending = self
-                .changed
-                .wait(pending)
-                .unwrap_or_else(|e| e.into_inner());
-        }
-    }
-
-    /// Writes the lines to the current connection until closed. A failed write means the
-    /// connection is gone (the reader attaches again); its line is dropped.
-    fn run(&self, conn: &HostConn) {
-        while let Some(message) = self.next() {
-            let _ = (&conn.current()).write_all(&to_line(&message));
-        }
-    }
-}
-
-/// The input side for [`PtyWriter`]: every write is one `input` line.
-struct InputLines(Arc<Outbox>);
-
-impl Write for InputLines {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.input(buf)?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 /// A terminal's host as the server keeps it: the endpoint, the last `seq` read, the connection
 /// and the outbox for input and resize. Dropping it stops the writing.
 pub(crate) struct Handle {
@@ -366,9 +243,16 @@ pub(crate) struct Handle {
     conn: HostConn,
     /// The host binary's version from its `hello`.
     version: String,
+    /// The child's process id from the `hello`; absent when the host did not say.
+    child_pid: Option<u32>,
 }
 
 impl Handle {
+    /// The process id of the terminal's child (the root of its process tree), when known.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
+    }
+
     /// The version of the host binary running this terminal.
     pub fn version(&self) -> &str {
         &self.version
@@ -427,7 +311,7 @@ impl Drop for Handle {
 pub(crate) fn start(
     host: &PtyHost,
     spec: &Spec<'_>,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Result<Handle, String> {
     let endpoint = endpoint_for(spec.socket, spec.terminal_id);
@@ -446,14 +330,17 @@ pub(crate) fn start(
             let _ = child.wait();
         });
     }
-    let (conn, lines, version) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
+    let (conn, lines, version, child_pid) =
+        attached.map_err(|e| format!("could not reach the host: {e}"))?;
     let source = Source {
         endpoint,
         log: spec.log.to_path_buf(),
         conn,
         lines,
         replay_until: 0,
+        read_from: 0,
         version,
+        child_pid,
     };
     Ok(follow(source, on_output, on_exit))
 }
@@ -470,6 +357,8 @@ pub(crate) struct Reached {
     pub size: Size,
     /// The host binary's version in its `hello`.
     version: String,
+    /// The child's process id in its `hello`.
+    child_pid: Option<u32>,
 }
 
 /// Connects to the running host at `endpoint`, reads its `hello` (within `timeout`) and attaches
@@ -484,7 +373,7 @@ pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<
     thread::spawn(move || {
         let _ = tx.send(hello_of(&target));
     });
-    let (conn, lines, seq, size, version) = match rx.recv_timeout(timeout) {
+    let (conn, lines, seq, size, version, child_pid) = match rx.recv_timeout(timeout) {
         Ok(result) => result.map_err(|e| e.to_string())?,
         Err(_) => {
             return Err(format!("no hello within {} ms", timeout.as_millis()));
@@ -505,6 +394,7 @@ pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<
         seq,
         size,
         version,
+        child_pid,
     })
 }
 
@@ -520,7 +410,7 @@ impl Reached {
     }
 }
 
-type HelloOf = io::Result<(Conn, BufReader<Conn>, u64, Size, String)>;
+type HelloOf = io::Result<(Conn, BufReader<Conn>, u64, Size, String, Option<u32>)>;
 
 /// Connects and reads the `hello` line.
 fn hello_of(endpoint: &Path) -> HelloOf {
@@ -530,18 +420,25 @@ fn hello_of(endpoint: &Path) -> HelloOf {
     lines.read_line(&mut line)?;
     match poimen_protocol::host::parse_host_line(&line) {
         Ok(HostMessage::Hello {
-            seq, size, version, ..
-        }) => Ok((conn, lines, seq, size, version)),
+            seq,
+            size,
+            version,
+            child_pid,
+            ..
+        }) => Ok((conn, lines, seq, size, version, child_pid)),
         _ => Err(io::Error::other(format!("no hello: {:?}", line.trim_end()))),
     }
 }
 
 /// Reads a [`reach`]ed host as [`start`] reads a new one; the records up to its `hello` go to
 /// `on_output` as a replay (`live` false), so their queries are not answered a second time.
+/// The records up to `read_from` are not read again: the grid has them already (a rebuild from
+/// the history log, #1194); with `0` the whole ring is read.
 pub(crate) fn adopt(
     reached: Reached,
     log: &Path,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    read_from: u64,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
     let Reached {
@@ -550,6 +447,7 @@ pub(crate) fn adopt(
         lines,
         seq,
         version,
+        child_pid,
         ..
     } = reached;
     let source = Source {
@@ -558,7 +456,9 @@ pub(crate) fn adopt(
         conn,
         lines,
         replay_until: seq,
+        read_from,
         version,
+        child_pid,
     };
     follow(source, on_output, on_exit)
 }
@@ -571,13 +471,16 @@ struct Source {
     conn: Conn,
     lines: BufReader<Conn>,
     replay_until: u64,
+    /// The records up to this `seq` count as read.
+    read_from: u64,
     version: String,
+    child_pid: Option<u32>,
 }
 
 /// Starts the threads that read and write an attached host connection.
 fn follow(
     source: Source,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
     let Source {
@@ -586,22 +489,26 @@ fn follow(
         conn,
         lines,
         replay_until,
+        read_from,
         version,
+        child_pid,
     } = source;
     let conn = HostConn(Arc::new(Mutex::new(conn)));
     let handle = Handle {
         endpoint,
-        read: Arc::new(AtomicU64::new(0)),
+        read: Arc::new(AtomicU64::new(read_from)),
         outbox: Outbox::new(),
         closing: Arc::new(AtomicBool::new(false)),
         conn: conn.clone(),
         version,
+        child_pid,
     };
     let outbox = Arc::clone(&handle.outbox);
     let writing = conn.clone();
     thread::spawn(move || outbox.run(&writing));
     let (tx, rx) = mpsc::channel::<Chunk>();
     let queued = Arc::new(AtomicUsize::new(0));
+    let pending = Arc::new(Mutex::new(VecDeque::new()));
     let reader = Reader {
         feed: Feed {
             endpoint: handle.endpoint.clone(),
@@ -609,6 +516,7 @@ fn follow(
             read: Arc::clone(&handle.read),
             tx,
             queued: Arc::clone(&queued),
+            pending: Arc::clone(&pending),
             replay_until,
         },
         conn,
@@ -616,9 +524,24 @@ fn follow(
     };
     thread::spawn(move || reader.run(lines));
     let mut on_output = on_output;
+    let echo = Arc::clone(&handle.outbox);
+    let interactive = move || echo.input_within(pty::ECHO_WINDOW);
     thread::spawn(move || {
-        let code = pty::coalesce(&rx, |batch, live| {
-            on_output(batch, live);
+        let mut done = read_from;
+        let code = pty::coalesce(&rx, interactive, |batch, live| {
+            // A batch is whole records: the last one in it is the `seq` the grid has reached.
+            let mut left = batch.len();
+            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            while let Some(&(seq, len)) = pending.front() {
+                if len > left {
+                    break;
+                }
+                left -= len;
+                done = seq;
+                pending.pop_front();
+            }
+            drop(pending);
+            on_output(batch, live, done);
             queued.fetch_sub(batch.len(), Ordering::SeqCst);
         });
         on_exit(code);
@@ -638,14 +561,19 @@ pub(crate) fn gap_marker(from: u64, to: u64, after_output: bool) -> Vec<u8> {
 }
 
 /// Connects to the host, reads its `hello` and attaches after record `since`.
-fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>, String)> {
+fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>, String, Option<u32>)> {
     let conn = Conn::connect(endpoint)?;
     let mut lines = BufReader::new(conn.clone());
     let mut line = String::new();
     lines.read_line(&mut line)?;
-    let version = match poimen_protocol::host::parse_host_line(&line) {
+    let (version, child_pid) = match poimen_protocol::host::parse_host_line(&line) {
         // A host behind `since` is another one than the one read so far.
-        Ok(HostMessage::Hello { seq, version, .. }) if seq >= since => version,
+        Ok(HostMessage::Hello {
+            seq,
+            version,
+            child_pid,
+            ..
+        }) if seq >= since => (version, child_pid),
         Ok(HostMessage::Hello { seq, .. }) => {
             return Err(io::Error::other(format!(
                 "the host at {} is at seq {seq}, behind {since}",
@@ -661,7 +589,7 @@ fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>, Str
         }
     };
     (&conn).write_all(&to_line(&ClientMessage::Attach { since }))?;
-    Ok((conn, lines, version))
+    Ok((conn, lines, version, child_pid))
 }
 
 /// How a connection to a host ended.
@@ -686,6 +614,9 @@ struct Feed {
     tx: mpsc::Sender<Chunk>,
     /// Bytes in `tx` not yet fed ([`QUEUE_BYTES`]).
     queued: Arc<AtomicUsize>,
+    /// `seq` and length of the chunks in `tx` not yet fed, to tell the stream how far a batch
+    /// reaches.
+    pending: Arc<Mutex<VecDeque<(u64, usize)>>>,
     /// Records up to this `seq` ran before this server read the host: a replay.
     replay_until: u64,
 }
@@ -724,7 +655,7 @@ impl Reader {
                 break None;
             }
             match attach(&feed.endpoint, feed.read.load(Ordering::SeqCst)) {
-                Ok((conn, next, _)) => {
+                Ok((conn, next, ..)) => {
                     self.conn.replace(conn);
                     lines = next;
                     // A close while attaching: this connection may have replaced the one `kill`
@@ -785,6 +716,7 @@ impl Feed {
                     }
                     self.read.store(seq, Ordering::SeqCst);
                     self.queued.fetch_add(data.len(), Ordering::SeqCst);
+                    self.note(seq, data.len());
                     if self.tx.send(self.chunk(seq, data)).is_err() {
                         return Ended::Stopped;
                     }
@@ -794,9 +726,12 @@ impl Feed {
                     if to <= self.read.load(Ordering::SeqCst) {
                         continue;
                     }
-                    let after_output = self.read.load(Ordering::SeqCst) > 0;
-                    let marker = gap_marker(from, to, after_output);
+                    let read = self.read.load(Ordering::SeqCst);
+                    let after_output = read > 0;
+                    // What the grid has seen is not lost.
+                    let marker = gap_marker(from.max(read + 1), to, after_output);
                     self.queued.fetch_add(marker.len(), Ordering::SeqCst);
+                    self.note(to, marker.len());
                     if self.tx.send(self.chunk(to, marker)).is_err() {
                         return Ended::Stopped;
                     }
@@ -816,6 +751,13 @@ impl Feed {
         }
     }
 
+    fn note(&self, seq: u64, len: usize) {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back((seq, len));
+    }
+
     /// Output of record `seq`: a replay when it ran before this server read the host.
     fn chunk(&self, seq: u64, data: Vec<u8>) -> Chunk {
         if seq <= self.replay_until {
@@ -827,289 +769,5 @@ impl Feed {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_host_binary_is_looked_for_next_to_the_server() {
-        let exe = Path::new("/opt/poimen/poimen-server");
-        assert_eq!(
-            host_beside(exe, false, Channel::Stable),
-            PathBuf::from("/opt/poimen/poimen-pty-host")
-        );
-        assert_eq!(
-            host_beside(exe, false, Channel::Rc),
-            PathBuf::from("/opt/poimen/poimen-pty-host-rc")
-        );
-        assert_eq!(
-            host_beside(Path::new(r"C:\p\poimen-server.exe"), true, Channel::Stable)
-                .file_name()
-                .unwrap(),
-            "poimen-pty-host.exe"
-        );
-        assert_eq!(
-            host_beside(Path::new(""), false, Channel::Stable),
-            PathBuf::from("poimen-pty-host")
-        );
-    }
-
-    #[test]
-    fn the_endpoint_is_in_the_hosts_directory_next_to_the_socket() {
-        assert_eq!(
-            endpoint_for(Path::new("/run/u/poimen/server.sock"), "t12"),
-            PathBuf::from("/run/u/poimen/hosts/t12")
-        );
-    }
-
-    static NO_ENV: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-
-    fn spec<'a>(command: &'a [String], term: Option<&'a str>) -> Spec<'a> {
-        Spec {
-            terminal_id: "t3",
-            log: Path::new("/run/server.log"),
-            socket: Path::new("/run/s.sock"),
-            command,
-            cwd: "/w",
-            cols: 100,
-            rows: 30,
-            term,
-            locale_set: false,
-            env: &NO_ENV,
-        }
-    }
-
-    #[test]
-    fn the_start_line_carries_the_command_and_poimens_environment() {
-        let command = vec!["sh".to_string(), "-l".to_string()];
-        let start = start_line(&spec(&command, Some("xterm-kitty")), PathBuf::from("/e"));
-        assert_eq!(start.endpoint, PathBuf::from("/e"));
-        assert_eq!(start.spawn.argv, command);
-        assert_eq!(start.spawn.cwd, "/w");
-        assert_eq!((start.spawn.cols, start.spawn.rows), (100, 30));
-        let mut expected = std::collections::BTreeMap::from([
-            ("POIMEN_SOCKET".to_string(), "/run/s.sock".to_string()),
-            ("POIMEN_TERMINAL_ID".to_string(), "t3".to_string()),
-        ]);
-        if let Some(ctype) = default_lc_ctype() {
-            expected.insert("LC_CTYPE".to_string(), ctype.to_string());
-        }
-        assert_eq!(start.spawn.env, expected);
-        assert_eq!(start.orphan_timeout_ms, 86_400_000);
-    }
-
-    #[test]
-    fn extra_env_is_added_but_cannot_override_poimens_variables() {
-        let command = vec!["sh".to_string()];
-        let env = std::collections::BTreeMap::from([
-            (
-                "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN".to_string(),
-                "1".to_string(),
-            ),
-            ("POIMEN_TERMINAL_ID".to_string(), "evil".to_string()),
-            ("POIMEN_SOCKET".to_string(), "/evil".to_string()),
-        ]);
-        let start = start_line(
-            &Spec {
-                env: &env,
-                ..spec(&command, Some("xterm"))
-            },
-            PathBuf::from("/e"),
-        );
-        let got = &start.spawn.env;
-        assert_eq!(
-            got.get("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN")
-                .map(String::as_str),
-            Some("1")
-        );
-        assert_eq!(
-            got.get("POIMEN_TERMINAL_ID").map(String::as_str),
-            Some("t3")
-        );
-        assert_eq!(
-            got.get("POIMEN_SOCKET").map(String::as_str),
-            Some("/run/s.sock")
-        );
-    }
-
-    #[test]
-    fn a_missing_or_dumb_term_becomes_xterm_256color() {
-        let command = vec!["sh".to_string()];
-        for term in [None, Some(""), Some("dumb")] {
-            let start = start_line(&spec(&command, term), PathBuf::from("/e"));
-            assert_eq!(
-                start.spawn.env.get("TERM").map(String::as_str),
-                Some("xterm-256color"),
-                "{term:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_server_without_a_locale_gives_its_children_a_utf8_ctype() {
-        let command = vec!["sh".to_string()];
-        let start = start_line(&spec(&command, None), PathBuf::from("/e"));
-        let expected = if cfg!(target_os = "macos") {
-            Some("UTF-8")
-        } else if cfg!(unix) {
-            Some("C.UTF-8")
-        } else {
-            None
-        };
-        assert_eq!(
-            start.spawn.env.get("LC_CTYPE").map(String::as_str),
-            expected
-        );
-    }
-
-    #[test]
-    fn each_locale_variable_of_the_server_suppresses_the_default() {
-        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
-            let set = locale_set(|k| (k == name).then(|| "de_DE.ISO-8859-1".to_string()));
-            assert!(set, "{name} counts as a locale");
-            let command = vec!["sh".to_string()];
-            let start = start_line(
-                &Spec {
-                    locale_set: set,
-                    ..spec(&command, None)
-                },
-                PathBuf::from("/e"),
-            );
-            assert_eq!(start.spawn.env.get("LC_CTYPE"), None, "{name}");
-        }
-        assert!(!locale_set(|_| None), "no variable is no locale");
-    }
-
-    #[test]
-    fn an_empty_locale_variable_counts_as_unset() {
-        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
-            let set = locale_set(|k| (k == name).then(String::new));
-            assert!(!set, "an empty {name} is unset");
-        }
-    }
-
-    #[test]
-    fn a_missing_host_binary_is_a_clear_error() {
-        let host = PtyHost::Binary(PathBuf::from("/nonexistent/poimen-pty-host"));
-        let start = start_line(&spec(&["sh".into()], None), PathBuf::from("/e"));
-        let err = launch(&host, &start, None).unwrap_err();
-        assert_eq!(
-            err,
-            "poimen-pty-host is missing: /nonexistent/poimen-pty-host (it ships next to poimen-server)"
-        );
-    }
-
-    fn reader(read: u64) -> (Feed, mpsc::Receiver<Chunk>) {
-        let (tx, rx) = mpsc::channel();
-        let feed = Feed {
-            endpoint: PathBuf::from("/e"),
-            log: PathBuf::from("/e.server.log"),
-            read: Arc::new(AtomicU64::new(read)),
-            tx,
-            queued: Arc::default(),
-            replay_until: 0,
-        };
-        (feed, rx)
-    }
-
-    fn output(seq: u64, text: &str) -> String {
-        String::from_utf8(to_line(&HostMessage::Output {
-            seq,
-            bytes: encode_bytes(text.as_bytes()),
-        }))
-        .unwrap()
-    }
-
-    fn data(rx: &mpsc::Receiver<Chunk>) -> Vec<String> {
-        rx.try_iter()
-            .map(|c| match c {
-                Chunk::Data(d) => String::from_utf8(d).unwrap(),
-                Chunk::Replay(d) => format!("replay {}", String::from_utf8(d).unwrap()),
-                Chunk::End(code) => format!("end {code:?}"),
-            })
-            .collect()
-    }
-
-    #[test]
-    fn records_are_read_strictly_by_seq_and_none_twice() {
-        let (reader, rx) = reader(0);
-        let lines = [
-            output(1, "a"),
-            output(2, "b"),
-            output(2, "b"),
-            output(1, "a"),
-            output(3, "c"),
-        ]
-        .concat();
-        let ended = reader.pump(&mut lines.as_bytes());
-        assert_eq!(ended, Ended::Lost);
-        assert_eq!(data(&rx), ["a", "b", "c"]);
-        assert_eq!(reader.read.load(Ordering::SeqCst), 3);
-    }
-
-    fn gap(from: u64, to: u64) -> String {
-        String::from_utf8(to_line(&HostMessage::Gap { from, to })).unwrap()
-    }
-
-    #[test]
-    fn a_reattached_connection_goes_on_after_the_last_seq_read_and_marks_the_gap() {
-        let (reader, rx) = reader(5);
-        let lines = [
-            output(4, "old"),
-            output(5, "old"),
-            gap(6, 7),
-            output(8, "new"),
-        ]
-        .concat();
-        reader.pump(&mut lines.as_bytes());
-        assert_eq!(
-            data(&rx),
-            [
-                "\r\n[poimen: earlier output lost, 2 records left the host's buffer]\r\n",
-                "new"
-            ]
-        );
-        assert_eq!(reader.read.load(Ordering::SeqCst), 8);
-    }
-
-    #[test]
-    fn a_gap_already_behind_the_last_record_read_leaves_no_marker() {
-        let (reader, rx) = reader(9);
-        let lines = [gap(1, 7), output(10, "x")].concat();
-        reader.pump(&mut lines.as_bytes());
-        assert_eq!(data(&rx), ["x"]);
-    }
-
-    #[test]
-    fn the_ring_of_an_adopted_host_is_a_replay_up_to_its_hello_and_live_after() {
-        let (mut reader, rx) = reader(0);
-        reader.replay_until = 3;
-        let lines = [gap(1, 1), output(2, "b"), output(3, "c"), output(4, "d")].concat();
-        reader.pump(&mut lines.as_bytes());
-        assert_eq!(
-            data(&rx),
-            [
-                "replay [poimen: earlier output lost, 1 record left the host's buffer]\r\n",
-                "replay b",
-                "replay c",
-                "d"
-            ]
-        );
-    }
-
-    #[test]
-    fn exit_replaced_and_noise_end_or_pass_as_documented() {
-        let (reader, rx) = reader(0);
-        let lines = [
-            "not json\n".to_string(),
-            "{\"type\":\"title\",\"text\":\"x\"}\n".to_string(),
-            output(1, "x"),
-            "{\"type\":\"exit\",\"code\":7}\n".to_string(), // a host before #968
-            output(2, "after"),
-        ]
-        .concat();
-        assert_eq!(reader.pump(&mut lines.as_bytes()), Ended::Exit(Some(7)));
-        assert_eq!(data(&rx), ["x"]);
-        let replaced = String::from_utf8(to_line(&HostMessage::Replaced)).unwrap();
-        assert_eq!(reader.pump(&mut replaced.as_bytes()), Ended::Replaced);
-    }
-}
+#[path = "host_tests.rs"]
+mod tests;

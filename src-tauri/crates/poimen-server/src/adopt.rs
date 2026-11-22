@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(crate) mod rebuild;
+
 /// Adopts the hosts of the terminal list a previous server wrote (ADR 0009, "Server update"):
 /// connects to every one at once, then rebuilds each grid from its ring and restores name, size,
 /// agent status and tokens. A terminal keeps its id, so tabs and splits still point to it. A host
@@ -49,6 +51,21 @@ pub(super) fn adopt_terminals(
         let reached = match reached {
             Ok(reached) => reached,
             Err(e) => {
+                // The host is gone (a reboot): what the log holds stays to look at (#1195).
+                if inner.layout.space(&t.space_id).is_ok()
+                    && let Some(ended) = ended(shared, &t)
+                {
+                    shared.log(
+                        "server",
+                        &format!(
+                            "terminal {} ({}): its host does not answer ({e}); kept as an ended terminal with its history",
+                            t.id,
+                            t.endpoint.display()
+                        ),
+                    );
+                    inner.terminals.push(ended);
+                    continue;
+                }
                 dropped(&format!("its host does not answer: {e}"));
                 continue;
             }
@@ -71,6 +88,60 @@ pub(super) fn adopt_terminals(
     }
 }
 
+/// The entry of a terminal whose host is gone but whose history log holds something (#1195):
+/// status `exited`, no process, the grid rebuilt from the log and read-only to every client.
+/// `None` without a usable log, then the terminal is dropped.
+fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntry> {
+    let (cols, rows) = (t.cols.max(1), t.rows.max(1));
+    let rebuilt = rebuild::rebuild(&shared.history.path(&t.id), (cols, rows), shared.scrollback)?;
+    let stream = new_stream(shared, &t.id, cols, rows);
+    let (cols, rows) = rebuilt.emulator.size();
+    stream.ended_from_history(rebuilt.emulator);
+    // The process is gone; only a program's own `idle` or `done` stays, as after an exit.
+    let agent = t
+        .agent
+        .clone()
+        .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+    Some(TerminalEntry {
+        info: Terminal {
+            id: t.id.clone(),
+            space_id: t.space_id.clone(),
+            name: t.name.clone(),
+            cwd: t.cwd.clone(),
+            cols,
+            rows,
+            status: TerminalStatus::Exited,
+            exit_code: None,
+            program: t.program.clone(),
+            args: t.args.clone(),
+            agent,
+            tokens: Default::default(),
+            survives_restart: false,
+            host_version: None,
+            host_bundled_version: None,
+            records: Vec::new(),
+            hibernated: None,
+            started_by: t.started_by.clone(),
+            report: t.report.clone(),
+            agent_source: None,
+            memory_bytes: None,
+            status_history: Vec::new(),
+            from_history: true,
+        },
+        host: None,
+        ended_endpoint: Some(t.endpoint.clone()),
+        stream,
+        agent_seq: t.agent_seq,
+        agent_persisted: None,
+        osc: None,
+        hook_agent: None,
+        records: records::Records::default(),
+        tokens: Vec::new(),
+        resuming: false,
+        last_input_ms: None,
+    })
+}
+
 /// The entry of an adopted terminal: the stored state over a grid fed from the host's ring.
 fn adopted(
     shared: &Arc<Shared>,
@@ -79,9 +150,24 @@ fn adopted(
 ) -> TerminalEntry {
     let (cols, rows) = (reached.size.cols.max(1), reached.size.rows.max(1));
     let stream = new_stream(shared, &t.id, cols, rows);
+    // The grid comes from the history log when it reaches the host's ring (#1194); then the
+    // ring is read only after what the log covers, and a `gap` is marked only for what neither
+    // holds. Without a usable log the grid is built from the ring as before and a new log starts.
+    let read_from = match rebuilt(shared, &t.id, (cols, rows), reached.seq) {
+        Some(rebuilt) => {
+            let seq = rebuilt.seq;
+            stream.restore(rebuilt.emulator, seq);
+            seq
+        }
+        None => {
+            stream.start_log();
+            0
+        }
+    };
     let handle = host::adopt(
         reached,
         &log::path(&shared.state_file),
+        read_from,
         output_to(&stream),
         exit_to(shared, &t.id),
     );
@@ -133,9 +219,12 @@ fn adopted(
                     a.agent.clone().unwrap_or_default()
                 }
             }),
+            memory_bytes: None,
             status_history: Vec::new(),
+            from_history: false,
         },
         host: Some(handle),
+        ended_endpoint: None,
         stream,
         agent_seq: t.agent_seq,
         agent_persisted: None,
@@ -146,4 +235,80 @@ fn adopted(
         resuming: false,
         last_input_ms: None,
     }
+}
+
+/// The grid of terminal `id` rebuilt from its history log, `None` when there is no log, it holds
+/// nothing, or it does not belong to this host (it covers records the host never had).
+fn rebuilt(shared: &Shared, id: &str, size: (u16, u16), host_seq: u64) -> Option<rebuild::Rebuilt> {
+    let path = shared.history.path(id);
+    let rebuilt = rebuild::rebuild(&path, size, shared.scrollback)?;
+    if rebuilt.seq == 0 || rebuilt.seq > host_seq {
+        return None;
+    }
+    shared.log(
+        "server",
+        &format!(
+            "terminal {id}: grid rebuilt from its history log up to host record {}",
+            rebuilt.seq
+        ),
+    );
+    Some(rebuilt)
+}
+
+/// The screen of a new terminal, with a new history log.
+pub(crate) fn fresh_stream(
+    shared: &Arc<Shared>,
+    id: &str,
+    cols: u16,
+    rows: u16,
+) -> Arc<TermStream> {
+    let stream = new_stream(shared, id, cols, rows);
+    stream.start_log();
+    stream
+}
+
+/// The screen and attachments of a new or adopted terminal.
+pub(crate) fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermStream> {
+    let stream = Arc::new(TermStream::new(
+        id,
+        cols,
+        rows,
+        shared.scrollback,
+        Arc::clone(&shared.colors),
+        {
+            let weak = Arc::downgrade(shared);
+            Arc::new(move |event| {
+                if let Some(shared) = weak.upgrade() {
+                    shared.publish(event);
+                }
+            })
+        },
+    ));
+    stream.set_history(Arc::clone(&shared.history));
+    let (weak, id) = (Arc::downgrade(shared), id.to_string());
+    stream.set_signal_sink(Arc::new(move |signals| {
+        if let Some(shared) = weak.upgrade() {
+            shared.output_signals(&id, signals);
+        }
+    }));
+    stream
+}
+
+/// Where a host's output goes: the grid and the clients; a replay answers no query.
+pub(crate) fn output_to(stream: &Arc<TermStream>) -> impl FnMut(&[u8], bool, u64) + Send + 'static {
+    let stream = Arc::clone(stream);
+    move |bytes, live, seq| {
+        if live {
+            stream.output_at(bytes, seq);
+        } else {
+            stream.replay_at(bytes, seq);
+        }
+    }
+}
+
+/// The host's reader reports the exit through the shared state.
+pub(crate) fn exit_to(shared: &Arc<Shared>, id: &str) -> impl FnOnce(Option<u32>) + Send + 'static {
+    let id = id.to_string();
+    let shared = Arc::clone(shared);
+    move |code| shared.terminal_exited(&id, code)
 }

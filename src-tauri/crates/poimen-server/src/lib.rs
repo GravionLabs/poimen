@@ -7,6 +7,7 @@
 //! adopts the hosts of that list (#604) and drops the leaves whose terminal did not come back.
 
 mod adopt;
+
 mod agent_state;
 mod awake;
 pub mod check;
@@ -18,16 +19,21 @@ mod emulator;
 pub mod gemini;
 mod hex_color;
 mod hibernate;
+pub mod history;
 pub mod hook;
 mod host;
+mod input;
 pub mod integration;
 pub mod log;
 pub mod mcp_config;
+mod memory;
+mod outbox;
 mod pty;
 mod records;
 pub mod report;
 mod reports;
 mod runs;
+mod settings_reread;
 pub mod stdio;
 mod store;
 mod stream;
@@ -39,7 +45,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
+use std::sync::mpsc::{self, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -49,14 +55,14 @@ use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
-    ClientKind, DetachReason, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult,
-    RepoEnsure, RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space,
-    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
-    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace,
-    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
-    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
-    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
-    WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
+    ClientKind, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure,
+    RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space, SpaceApplyLayout,
+    SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList,
+    SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace, TabRename, TabResizeSplit,
+    TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
+    TerminalDetach, TerminalInput, TerminalRename, TerminalReportAgent, TerminalReportTokens,
+    TerminalResize, TerminalStatus, TranscriptState, WorktreeCleanup, WorktreeCleanupResult,
+    WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -65,7 +71,7 @@ pub use emulator::DEFAULT_SCROLLBACK;
 use hex_color::parse_hex;
 pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
-use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
+use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of, write_stream};
 
 /// How often the tokens with a TTL are checked.
 const TOKEN_SWEEP: Duration = Duration::from_millis(500);
@@ -75,6 +81,7 @@ const SETTINGS_REREAD: Duration = Duration::from_secs(30);
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+use adopt::{exit_to, fresh_stream, output_to};
 use poimen_client::transport::{self, Conn, Entry, Listener};
 
 /// Where the server listens and keeps its spaces.
@@ -82,6 +89,8 @@ use poimen_client::transport::{self, Conn, Entry, Listener};
 pub struct Config {
     pub socket: PathBuf,
     pub state_file: PathBuf,
+    /// The terminal history logs, one file per terminal (#973); default next to `state_file`.
+    pub history_dir: PathBuf,
     /// Lines of scrollback kept per terminal for the attach snapshot.
     pub scrollback: usize,
     /// The user's home: its `~/.config/poimen/config.json` gives `space.create` the `trustedProjects`,
@@ -98,6 +107,7 @@ impl Config {
         Self {
             socket: proto::socket_path(),
             state_file: state_file_path(),
+            history_dir: state_file_path().with_file_name("history"),
             scrollback: std::env::var("POIMEN_SCROLLBACK")
                 .ok()
                 .and_then(|v| v.trim().parse().ok())
@@ -142,6 +152,9 @@ struct TerminalEntry {
     info: Terminal,
     /// The terminal's host (endpoint, last `seq` read, connection); `None` once it has exited.
     host: Option<host::Handle>,
+    /// Set for a terminal that is only its history after its host was gone (#1195): the
+    /// endpoint the host had, kept so the next server finds the log again.
+    ended_endpoint: Option<PathBuf>,
     /// The screen state and the attached clients; outlives the process.
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
@@ -174,10 +187,14 @@ struct TokenEntry {
 impl TerminalEntry {
     /// The entry as the terminal list keeps it; `None` once the terminal has exited (no host).
     fn stored(&self, now: Instant, now_ms: u64) -> Option<store::StoredTerminal> {
-        let host = self.host.as_ref()?;
-        if self.info.status == TerminalStatus::Exited {
-            return None;
-        }
+        // A terminal that is only its history is listed again, so a second restart keeps it.
+        let (endpoint, seq) = match (&self.host, &self.ended_endpoint) {
+            (Some(host), _) if self.info.status != TerminalStatus::Exited => {
+                (host.endpoint().to_path_buf(), host.seq())
+            }
+            (None, Some(endpoint)) => (endpoint.clone(), 0),
+            _ => return None,
+        };
         let tokens = self
             .tokens
             .iter()
@@ -203,8 +220,8 @@ impl TerminalEntry {
             args: self.info.args.clone(),
             cols: self.info.cols,
             rows: self.info.rows,
-            endpoint: host.endpoint().to_path_buf(),
-            seq: host.seq(),
+            endpoint,
+            seq,
             agent: self.info.agent.clone(),
             osc: self.osc.is_some(),
             hook_agent: self.hook_agent.clone(),
@@ -373,12 +390,18 @@ pub(crate) struct Shared {
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
+    /// Writes the history logs of the terminals (#973).
+    history: Arc<history::History>,
+    /// When the user config was last read for `terminalHistory` (#1196).
+    history_read: Mutex<Option<Instant>>,
     scrollback: usize,
     home: Option<PathBuf>,
     /// The sleep inhibitor of `agents.keepAwake` (#987).
     awake: Mutex<awake::Awake>,
     /// `agents.silentAfter` in minutes with the time it was read (#898).
     silent_after: Mutex<Option<(Instant, u64)>>,
+    /// The process table `terminal.list` reads the memory of terminals from (#971).
+    processes: Mutex<memory::Cache>,
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
@@ -568,26 +591,6 @@ impl Shared {
         if changed {
             self.persist(&inner);
         }
-    }
-
-    /// The `agents.silentAfter` setting in minutes, read from the user config at most every 30 s
-    /// (#898); without a home it is the default.
-    fn silent_after(&self, now: Instant) -> u64 {
-        let mut cached = lock(&self.silent_after);
-        if let Some((at, minutes)) = *cached
-            && now.duration_since(at) < SETTINGS_REREAD
-        {
-            return minutes;
-        }
-        let minutes = match self.home.as_deref() {
-            Some(home) => std::fs::read_to_string(poimen_core::settings::config_path(home))
-                .map_or(poimen_core::settings::DEFAULT_SILENT_AFTER_MIN, |t| {
-                    poimen_core::settings::silent_after_text(&t)
-                }),
-            None => poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
-        };
-        *cached = Some((now, minutes));
-        minutes
     }
 
     /// Marks the agents silent that are `working` and sent no report for `minutes` (`0` is off,
@@ -798,6 +801,7 @@ impl Server {
                 std::process::id()
             ),
         );
+        let history = history::start_after_sweep(&config, &terminals, &log_file);
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 layout,
@@ -810,11 +814,14 @@ impl Server {
             confirms: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
+            history,
+            history_read: Mutex::new(None),
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
             awake: Mutex::default(),
             silent_after: Mutex::new(None),
+            processes: Mutex::new(memory::Cache::default()),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
             resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
@@ -823,6 +830,7 @@ impl Server {
             stopped: AtomicBool::new(false),
             server_lock: Mutex::new(lock_file),
         });
+        shared.refresh_history(Instant::now());
         {
             // Under the lock, so an adopted host whose child has ended meanwhile reports its exit
             // only once its terminal is in the list.
@@ -881,6 +889,7 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+                shared.refresh_history(Instant::now());
                 shared.mark_silent(now_millis(), shared.silent_after(Instant::now()));
             }
         });
@@ -1089,10 +1098,21 @@ fn attach(
         Arc::clone(&link),
     )?;
     let terminal_id = p.terminal_id.clone();
-    thread::spawn(move || write_stream(writer_stream, &rx, &link, &terminal_id));
+    let resyncing = Arc::clone(&term);
+    let client_id = attached.client_id;
+    thread::spawn(move || {
+        write_stream(
+            writer_stream,
+            &rx,
+            &link,
+            &terminal_id,
+            &resyncing,
+            client_id,
+        );
+    });
     // Only a controller wakes a hibernated agent (ADR 0014); an observer triggers nothing.
     if attached.mode == AttachMode::Control {
-        shared.resume_hibernated(&p.terminal_id);
+        shared.controller_attached(&term, &p.terminal_id);
     }
     *attachment = Some(Attachment {
         stream: term,
@@ -1101,39 +1121,6 @@ fn attach(
         mode: attached.mode,
     });
     Ok(tx)
-}
-
-/// The writer of an attached connection: the lines of its queue in order, then, when the stream
-/// ran over, a `detached` record. A client that stops reading blocks only this thread, which
-/// gives up after [`WRITE_TIMEOUT`] (Unix; named pipes have no write timeout, so on Windows it
-/// waits for that client alone).
-fn write_stream(mut stream: Conn, rx: &Receiver<Line>, link: &Link, terminal_id: &str) {
-    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
-    loop {
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(line) => {
-                if write_line(&mut stream, &line.text).is_err() || line.last {
-                    break;
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        // The server let the terminal go to the next one: the connection just ends.
-        if link.released.load(std::sync::atomic::Ordering::SeqCst) {
-            break;
-        }
-        if link.overflowed.load(std::sync::atomic::Ordering::SeqCst) {
-            let detached = Event::TerminalDetached {
-                terminal_id: terminal_id.to_string(),
-                reason: DetachReason::Overflow,
-            };
-            let _ = send(&mut stream, &detached);
-            break;
-        }
-    }
-    // Wakes the request loop of this connection, which then detaches.
-    let _ = stream.shutdown();
 }
 
 fn write_line(writer: &mut Conn, text: &str) -> io::Result<()> {
@@ -1216,7 +1203,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "space.apply_layout" => space_apply_layout(shared, parsed(request)?),
         "space.rename" => space_rename(shared, parsed(request)?),
         "space.close" => space_close(shared, parsed(request)?),
-        "terminal.list" => terminal_list(shared, parsed(request)?),
+        "terminal.list" => memory::terminal_list(shared, parsed(request)?),
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
@@ -1233,8 +1220,8 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.report_done" => reports::terminal_report_done(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
         "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
-        "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
-        "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
+        "terminal.input" => input::terminal_input(shared, parsed(request)?, ctx),
+        "terminal.resize" => input::terminal_resize(shared, parsed(request)?, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
     }
 }
@@ -1921,18 +1908,6 @@ fn space_close(shared: &Shared, p: SpaceClose) -> ApiResult {
     Ok(json!({}))
 }
 
-fn terminal_list(shared: &Shared, p: TerminalList) -> ApiResult {
-    shared.expire_tokens();
-    let inner = lock(&shared.inner);
-    let terminals: Vec<&Terminal> = inner
-        .terminals
-        .iter()
-        .map(|t| &t.info)
-        .filter(|t| p.space_id.as_ref().is_none_or(|id| &t.space_id == id))
-        .collect();
-    Ok(json!({ "terminals": terminals }))
-}
-
 fn server_set_colors(shared: &Shared, p: SetColors) -> ApiResult {
     let mut colors = Colors {
         foreground: parse_hex(&p.foreground)?,
@@ -2001,7 +1976,7 @@ fn spawn_terminal(
         .filter(|n| !n.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| pty::program_name(&command[0]));
-    let stream = new_stream(shared, &id, cols, rows);
+    let stream = fresh_stream(shared, &id, cols, rows);
     let term = std::env::var("TERM").ok();
     let locale_set = host::locale_set(|name| std::env::var(name).ok());
     let spawned = host::start(
@@ -2045,10 +2020,13 @@ fn spawn_terminal(
         report: None,
         agent_source: None,
         status_history: Vec::new(),
+        memory_bytes: None,
+        from_history: false,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
         host: Some(spawned),
+        ended_endpoint: None,
         stream,
         agent_seq: None,
         agent_persisted: None,
@@ -2063,51 +2041,6 @@ fn spawn_terminal(
         terminal: info.clone(),
     });
     Ok(info)
-}
-
-/// The screen and attachments of a new or adopted terminal.
-fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermStream> {
-    let stream = Arc::new(TermStream::new(
-        id,
-        cols,
-        rows,
-        shared.scrollback,
-        Arc::clone(&shared.colors),
-        {
-            let weak = Arc::downgrade(shared);
-            Arc::new(move |event| {
-                if let Some(shared) = weak.upgrade() {
-                    shared.publish(event);
-                }
-            })
-        },
-    ));
-    let (weak, id) = (Arc::downgrade(shared), id.to_string());
-    stream.set_signal_sink(Arc::new(move |signals| {
-        if let Some(shared) = weak.upgrade() {
-            shared.output_signals(&id, signals);
-        }
-    }));
-    stream
-}
-
-/// Where a host's output goes: the grid and the clients; a replay answers no query.
-fn output_to(stream: &Arc<TermStream>) -> impl FnMut(&[u8], bool) + Send + 'static {
-    let stream = Arc::clone(stream);
-    move |bytes, live| {
-        if live {
-            stream.output(bytes);
-        } else {
-            stream.replay(bytes);
-        }
-    }
-}
-
-/// The host's reader reports the exit through the shared state.
-fn exit_to(shared: &Arc<Shared>, id: &str) -> impl FnOnce(Option<u32>) + Send + 'static {
-    let id = id.to_string();
-    let shared = Arc::clone(shared);
-    move |code| shared.terminal_exited(&id, code)
 }
 
 /// The version of the host this server ships with. While the server and the host ship together
@@ -2449,6 +2382,8 @@ fn close_entry(shared: &Shared, entry: TerminalEntry) {
     if let Some(host) = entry.host {
         host.kill();
     }
+    // The terminal is gone: so is what it printed (#1196).
+    shared.history.remove(&entry.info.id);
     shared.publish(Event::TerminalClosed {
         terminal_id: entry.info.id,
         space_id: entry.info.space_id,
@@ -2614,78 +2549,6 @@ fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
     shared.apply(&inner, events);
     let tab = inner.layout.tab(&p.tab_id)?;
     Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
-}
-
-fn running_host<'a>(
-    entry: &'a mut TerminalEntry,
-    id: &str,
-) -> Result<&'a mut host::Handle, (ErrorCode, String)> {
-    entry
-        .host
-        .as_mut()
-        .ok_or_else(|| (ErrorCode::Exited, format!("terminal {id} has exited")))
-}
-
-/// Input belongs to the controller. A connection attached to this terminal must be its
-/// controller to send it; a connection that is not attached may send input only while nobody
-/// controls. Resize also belongs to observers and to unattached connections while nobody
-/// controls, so the unfocused leaves of a split tab follow their containers.
-fn authorize(
-    stream: &TermStream,
-    ctx: Option<&Attachment>,
-    terminal_id: &str,
-    resize: bool,
-) -> Result<(), (ErrorCode, String)> {
-    let denied = |why: &str| Err((ErrorCode::NotController, why.to_string()));
-    match ctx.filter(|a| a.terminal_id == terminal_id) {
-        Some(_) if resize && !stream.has_controller() => Ok(()),
-        Some(a) if a.mode == AttachMode::Observe => {
-            denied("an observer can neither send input nor resize a terminal with a controller")
-        }
-        Some(a) if !stream.is_controller(a.client_id) => denied("the control was taken over"),
-        Some(_) => Ok(()),
-        None if resize && stream.has_controller() => {
-            denied("only the controller resizes a terminal that has one")
-        }
-        None => Ok(()),
-    }
-}
-
-fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -> ApiResult {
-    // The write may block on a full PTY; do it outside the global lock.
-    let writer = {
-        let mut inner = lock(&shared.inner);
-        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-        authorize(&entry.stream, ctx, &p.terminal_id, false)?;
-        let writer = running_host(entry, &p.terminal_id)?.writer();
-        entry.last_input_ms = Some(now_millis());
-        reset_error_on_input(shared, &mut inner, &p.terminal_id, &p.data);
-        writer
-    };
-    writer
-        .write(p.data.as_bytes())
-        .map_err(|e| (ErrorCode::Internal, e))?;
-    Ok(json!({}))
-}
-
-fn terminal_resize(shared: &Shared, p: TerminalResize, ctx: Option<&Attachment>) -> ApiResult {
-    if p.cols == 0 || p.rows == 0 {
-        return Err((
-            ErrorCode::InvalidParams,
-            "cols and rows must be at least 1".into(),
-        ));
-    }
-    let mut inner = lock(&shared.inner);
-    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-    authorize(&entry.stream, ctx, &p.terminal_id, true)?;
-    running_host(entry, &p.terminal_id)?
-        .resize(p.cols, p.rows)
-        .map_err(|e| (ErrorCode::Internal, e))?;
-    entry.info.cols = p.cols;
-    entry.info.rows = p.rows;
-    entry.stream.resized(p.cols, p.rows);
-    shared.persist(&inner);
-    Ok(json!({}))
 }
 
 fn now_millis() -> u64 {

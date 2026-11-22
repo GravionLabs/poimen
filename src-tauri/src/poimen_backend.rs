@@ -28,6 +28,8 @@ use crate::backend::{
     OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
     StreamRequest,
 };
+use stream_closed::{closed_silently, controller_held, history_ended, lost};
+mod stream_closed;
 use crate::poimen_server;
 use crate::trust;
 use poimen_core::snapshot as snap;
@@ -322,6 +324,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
         survives_restart: terminal.survives_restart,
+        memory_bytes: terminal.memory_bytes,
         program: terminal.program.clone(),
         // The mark on a terminal whose host is older than the bundled one (#606).
         host_version: terminal
@@ -456,32 +459,6 @@ pub fn map_event(event: Event) -> Option<StreamRecord> {
             code: Some(CloseCode::Exited),
         }),
         _ => None,
-    }
-}
-
-/// The connection of an attached stream ended without a record.
-fn lost(err: &ClientError) -> StreamRecord {
-    StreamRecord::Closed {
-        reason: format!("the connection to poimen-server ended: {err}"),
-        exit_code: None,
-        code: Some(CloseCode::Lost),
-    }
-}
-
-/// `detached`: the view closes without a banner.
-fn closed_silently() -> StreamRecord {
-    StreamRecord::Closed {
-        reason: "detached".into(),
-        exit_code: None,
-        code: None,
-    }
-}
-
-fn controller_held() -> StreamRecord {
-    StreamRecord::Closed {
-        reason: "another client controls this terminal".into(),
-        exit_code: None,
-        code: Some(CloseCode::ControllerHeld),
     }
 }
 
@@ -823,6 +800,7 @@ impl Backend for PoimenBackend {
                 match attachment.next_record() {
                     Ok(event) => {
                         if let Some(record) = map_event(event) {
+                            let record = history_ended(record, info.read_only);
                             if matches!(record, StreamRecord::Closed { .. }) {
                                 break record;
                             }

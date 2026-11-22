@@ -133,6 +133,11 @@ fn config(dir: &Dir, n: u32, pty_host: PtyHost) -> Config {
     Config {
         socket: dir.0.join(format!("run{n}")).join("server.sock"),
         state_file: dir.0.join("state").join("server.json"),
+        history_dir: dir
+            .0
+            .join("state")
+            .join("server.json")
+            .with_file_name("history"),
         scrollback: 100,
         home: None,
         pty_host,
