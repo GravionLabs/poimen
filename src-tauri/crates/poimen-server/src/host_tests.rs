@@ -1,4 +1,5 @@
 use super::*;
+use poimen_protocol::encode_bytes;
 
 #[test]
 fn the_host_binary_is_looked_for_next_to_the_server() {

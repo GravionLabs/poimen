@@ -24,6 +24,7 @@ pub mod integration;
 pub mod log;
 pub mod mcp_config;
 mod memory;
+mod outbox;
 mod pty;
 mod records;
 pub mod report;
@@ -40,7 +41,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
+use std::sync::mpsc::{self, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -50,14 +51,14 @@ use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
-    ClientKind, DetachReason, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult,
-    RepoEnsure, RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space,
-    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
-    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace,
-    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
-    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalRename,
-    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
-    WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
+    ClientKind, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure,
+    RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space, SpaceApplyLayout,
+    SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList,
+    SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace, TabRename, TabResizeSplit,
+    TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
+    TerminalDetach, TerminalInput, TerminalRename, TerminalReportAgent, TerminalReportTokens,
+    TerminalResize, TerminalStatus, TranscriptState, WorktreeCleanup, WorktreeCleanupResult,
+    WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -66,7 +67,7 @@ pub use emulator::DEFAULT_SCROLLBACK;
 use hex_color::parse_hex;
 pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
-use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
+use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of, write_stream};
 
 /// How often the tokens with a TTL are checked.
 const TOKEN_SWEEP: Duration = Duration::from_millis(500);
@@ -1093,7 +1094,18 @@ fn attach(
         Arc::clone(&link),
     )?;
     let terminal_id = p.terminal_id.clone();
-    thread::spawn(move || write_stream(writer_stream, &rx, &link, &terminal_id));
+    let resyncing = Arc::clone(&term);
+    let client_id = attached.client_id;
+    thread::spawn(move || {
+        write_stream(
+            writer_stream,
+            &rx,
+            &link,
+            &terminal_id,
+            &resyncing,
+            client_id,
+        );
+    });
     // Only a controller wakes a hibernated agent (ADR 0014); an observer triggers nothing.
     if attached.mode == AttachMode::Control {
         shared.controller_attached(&term, &p.terminal_id);
@@ -1105,39 +1117,6 @@ fn attach(
         mode: attached.mode,
     });
     Ok(tx)
-}
-
-/// The writer of an attached connection: the lines of its queue in order, then, when the stream
-/// ran over, a `detached` record. A client that stops reading blocks only this thread, which
-/// gives up after [`WRITE_TIMEOUT`] (Unix; named pipes have no write timeout, so on Windows it
-/// waits for that client alone).
-fn write_stream(mut stream: Conn, rx: &Receiver<Line>, link: &Link, terminal_id: &str) {
-    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
-    loop {
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(line) => {
-                if write_line(&mut stream, &line.text).is_err() || line.last {
-                    break;
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        // The server let the terminal go to the next one: the connection just ends.
-        if link.released.load(std::sync::atomic::Ordering::SeqCst) {
-            break;
-        }
-        if link.overflowed.load(std::sync::atomic::Ordering::SeqCst) {
-            let detached = Event::TerminalDetached {
-                terminal_id: terminal_id.to_string(),
-                reason: DetachReason::Overflow,
-            };
-            let _ = send(&mut stream, &detached);
-            break;
-        }
-    }
-    // Wakes the request loop of this connection, which then detaches.
-    let _ = stream.shutdown();
 }
 
 fn write_line(writer: &mut Conn, text: &str) -> io::Result<()> {
