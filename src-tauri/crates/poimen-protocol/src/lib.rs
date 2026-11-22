@@ -10,10 +10,12 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod attach;
 pub mod files;
 pub mod host;
 pub mod report;
 pub mod status;
+pub use attach::{AttachMode, AttachResult, DetachReason};
 pub use files::windows_dir_from;
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
@@ -599,6 +601,11 @@ pub struct Terminal {
     /// an exited terminal, an older server).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+    /// The process is gone (a reboot, a vanished host) and what is left is the history rebuilt
+    /// from the terminal's log on disk (#1195, ADR 0015): `status` is `exited`, `exit_code`
+    /// absent, `terminal.attach` is read-only. Absent (false) otherwise and from older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_history: bool,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -1453,16 +1460,6 @@ pub struct TerminalResize {
     pub rows: u16,
 }
 
-/// How a connection attaches to a terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttachMode {
-    /// Receives the output and size changes; cannot send input or resize.
-    Observe,
-    /// The one connection that sends input and sets the size.
-    Control,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalAttach {
     pub terminal_id: String,
@@ -1471,31 +1468,6 @@ pub struct TerminalAttach {
     /// reason `taken_over`) instead of failing with `conflict`.
     #[serde(default)]
     pub take_over: bool,
-}
-
-/// Result of `terminal.attach`. The records of the stream have a `seq` greater than `seq` here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttachResult {
-    pub terminal_id: String,
-    pub seq: u64,
-    pub cols: u16,
-    pub rows: u16,
-    pub mode: AttachMode,
-    /// Base64 of the bytes that bring a fresh emulator of `cols` x `rows` to the current state
-    /// (screen, scrollback, modes, cursor, title). Write it to the emulator as is.
-    pub snapshot: String,
-}
-
-/// Why the server ended an attachment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DetachReason {
-    /// The client did not keep up; attach again for a fresh snapshot.
-    Overflow,
-    /// Another connection took over the control.
-    TakenOver,
-    /// The terminal was closed.
-    Closed,
 }
 
 /// Encodes bytes for the wire (standard base64).

@@ -649,3 +649,104 @@ fn a_real_shell_keeps_running_across_a_server_restart() {
     assert!(wait_for_screen(&b, &id, "again-kept").contains("again-kept"));
     b.close_terminal(&id).unwrap();
 }
+
+/// A server that ran one terminal printing "early middle", stopped keeping it, and whose host is
+/// gone afterwards (a reboot). Returns the env, the terminal id and its history log.
+fn host_gone_after_a_shutdown(name: &str) -> (Env, String, PathBuf) {
+    let env = Env::new(name);
+    let (host, _) = fake(move |listener, start, _| {
+        let mut peer = Peer::accept(&listener, 0, &start.endpoint);
+        peer.read();
+        peer.output(1, "early ");
+        peer.output(2, "middle\r\n");
+        while peer.read().is_some() {}
+        // The listener goes with the script: nobody answers at the endpoint any more.
+    });
+    let (a, a_down) = start(&env.config(1, host));
+    let space = a.create_space("work", &env.work()).unwrap().id;
+    let id = a
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["fake-shell".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    wait_for_screen(&a, &id, "middle");
+    a.shutdown_keeping_terminals().unwrap();
+    a_down.recv_timeout(WAIT).unwrap();
+    let endpoint = env.state()["terminals"][0]["endpoint"].clone();
+    let _ = std::fs::remove_file(endpoint.as_str().unwrap());
+    let log = env.state_file().with_file_name("history").join(&id);
+    (env, id, log)
+}
+
+/// The terminals in `server.json`; the key is absent when there are none.
+fn listed(env: &Env) -> Vec<Value> {
+    env.state()["terminals"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_terminal_whose_host_is_gone_but_whose_log_exists_is_kept_as_read_only_history() {
+    let (env, id, _) = host_gone_after_a_shutdown("ended");
+    let (b, _) = start(&env.config(2, no_new_host()));
+    let terminals = b.list_terminals(None).unwrap();
+    assert_eq!(terminals.len(), 1);
+    let t = &terminals[0];
+    assert_eq!(
+        (t.id.as_str(), t.status),
+        (id.as_str(), TerminalStatus::Exited)
+    );
+    assert!(t.from_history && t.exit_code.is_none() && !t.survives_restart);
+    // Its tab stays.
+    assert_eq!(b.list_layout().unwrap().tabs[0].root, Node::terminal(&id));
+
+    // Attaching as controller gives the history, read-only and as an observer.
+    let mut a = b.attach(&id, AttachMode::Control, false).unwrap();
+    assert!(a.info.read_only);
+    assert_eq!(a.info.mode, AttachMode::Observe);
+    let snapshot = String::from_utf8_lossy(&decode_bytes(&a.info.snapshot).unwrap()).into_owned();
+    assert!(
+        snapshot.contains("early") && snapshot.contains("middle"),
+        "{snapshot:?}"
+    );
+    assert!(
+        a.next_record().is_ok(),
+        "the stream ends with an exit record"
+    );
+    // Nobody controls it, and input is refused with a clear error, attached or not.
+    assert!(!b.list_terminals(None).unwrap().is_empty());
+    let err = b.input(&id, "ls\r").unwrap_err().to_string();
+    assert!(err.contains("read-only"), "{err}");
+
+    // The list keeps it for the next restart, and closing removes it.
+    assert_eq!(listed(&env).len(), 1);
+    b.close_terminal(&id).unwrap();
+    assert!(b.list_terminals(None).unwrap().is_empty());
+    assert!(b.list_layout().unwrap().tabs.is_empty());
+    assert!(listed(&env).is_empty());
+}
+
+#[test]
+fn an_ended_terminal_survives_a_second_restart() {
+    let (env, id, _) = host_gone_after_a_shutdown("ended-twice");
+    let (b, b_down) = start(&env.config(2, no_new_host()));
+    assert_eq!(b.list_terminals(None).unwrap().len(), 1);
+    b.shutdown_keeping_terminals().unwrap();
+    b_down.recv_timeout(WAIT).unwrap();
+    let (c, _) = start(&env.config(3, no_new_host()));
+    let s = screen(&c, &id);
+    assert!(s.contains("early") && s.contains("middle"), "{s:?}");
+}
+
+#[test]
+fn a_terminal_whose_host_is_gone_without_a_usable_log_is_dropped() {
+    let (env, _, log) = host_gone_after_a_shutdown("no-log");
+    std::fs::remove_file(log).unwrap();
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert!(b.list_terminals(None).unwrap().is_empty());
+    assert!(listed(&env).is_empty());
+}

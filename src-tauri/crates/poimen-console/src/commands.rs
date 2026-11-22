@@ -125,6 +125,7 @@ fn state_word(t: &Terminal) -> String {
     match (t.status, t.exit_code) {
         (TerminalStatus::Running, _) => "running".into(),
         (TerminalStatus::Exited, Some(c)) => format!("exited({c})"),
+        (TerminalStatus::Exited, None) if t.from_history => "ended(history)".into(),
         (TerminalStatus::Exited, None) => "exited".into(),
     }
 }

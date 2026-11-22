@@ -22,6 +22,7 @@ mod hibernate;
 pub mod history;
 pub mod hook;
 mod host;
+mod input;
 pub mod integration;
 pub mod log;
 pub mod mcp_config;
@@ -150,6 +151,9 @@ struct TerminalEntry {
     info: Terminal,
     /// The terminal's host (endpoint, last `seq` read, connection); `None` once it has exited.
     host: Option<host::Handle>,
+    /// Set for a terminal that is only its history after its host was gone (#1195): the
+    /// endpoint the host had, kept so the next server finds the log again.
+    ended_endpoint: Option<PathBuf>,
     /// The screen state and the attached clients; outlives the process.
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
@@ -182,10 +186,14 @@ struct TokenEntry {
 impl TerminalEntry {
     /// The entry as the terminal list keeps it; `None` once the terminal has exited (no host).
     fn stored(&self, now: Instant, now_ms: u64) -> Option<store::StoredTerminal> {
-        let host = self.host.as_ref()?;
-        if self.info.status == TerminalStatus::Exited {
-            return None;
-        }
+        // A terminal that is only its history is listed again, so a second restart keeps it.
+        let (endpoint, seq) = match (&self.host, &self.ended_endpoint) {
+            (Some(host), _) if self.info.status != TerminalStatus::Exited => {
+                (host.endpoint().to_path_buf(), host.seq())
+            }
+            (None, Some(endpoint)) => (endpoint.clone(), 0),
+            _ => return None,
+        };
         let tokens = self
             .tokens
             .iter()
@@ -211,8 +219,8 @@ impl TerminalEntry {
             args: self.info.args.clone(),
             cols: self.info.cols,
             rows: self.info.rows,
-            endpoint: host.endpoint().to_path_buf(),
-            seq: host.seq(),
+            endpoint,
+            seq,
             agent: self.info.agent.clone(),
             osc: self.osc.is_some(),
             hook_agent: self.hook_agent.clone(),
@@ -1229,8 +1237,8 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.report_done" => reports::terminal_report_done(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
         "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
-        "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
-        "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
+        "terminal.input" => input::terminal_input(shared, parsed(request)?, ctx),
+        "terminal.resize" => input::terminal_resize(shared, parsed(request)?, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
     }
 }
@@ -2030,10 +2038,12 @@ fn spawn_terminal(
         agent_source: None,
         status_history: Vec::new(),
         memory_bytes: None,
+        from_history: false,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
         host: Some(spawned),
+        ended_endpoint: None,
         stream,
         agent_seq: None,
         agent_persisted: None,
@@ -2554,78 +2564,6 @@ fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
     shared.apply(&inner, events);
     let tab = inner.layout.tab(&p.tab_id)?;
     Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
-}
-
-fn running_host<'a>(
-    entry: &'a mut TerminalEntry,
-    id: &str,
-) -> Result<&'a mut host::Handle, (ErrorCode, String)> {
-    entry
-        .host
-        .as_mut()
-        .ok_or_else(|| (ErrorCode::Exited, format!("terminal {id} has exited")))
-}
-
-/// Input belongs to the controller. A connection attached to this terminal must be its
-/// controller to send it; a connection that is not attached may send input only while nobody
-/// controls. Resize also belongs to observers and to unattached connections while nobody
-/// controls, so the unfocused leaves of a split tab follow their containers.
-fn authorize(
-    stream: &TermStream,
-    ctx: Option<&Attachment>,
-    terminal_id: &str,
-    resize: bool,
-) -> Result<(), (ErrorCode, String)> {
-    let denied = |why: &str| Err((ErrorCode::NotController, why.to_string()));
-    match ctx.filter(|a| a.terminal_id == terminal_id) {
-        Some(_) if resize && !stream.has_controller() => Ok(()),
-        Some(a) if a.mode == AttachMode::Observe => {
-            denied("an observer can neither send input nor resize a terminal with a controller")
-        }
-        Some(a) if !stream.is_controller(a.client_id) => denied("the control was taken over"),
-        Some(_) => Ok(()),
-        None if resize && stream.has_controller() => {
-            denied("only the controller resizes a terminal that has one")
-        }
-        None => Ok(()),
-    }
-}
-
-fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -> ApiResult {
-    // The write may block on a full PTY; do it outside the global lock.
-    let writer = {
-        let mut inner = lock(&shared.inner);
-        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-        authorize(&entry.stream, ctx, &p.terminal_id, false)?;
-        let writer = running_host(entry, &p.terminal_id)?.writer();
-        entry.last_input_ms = Some(now_millis());
-        reset_error_on_input(shared, &mut inner, &p.terminal_id, &p.data);
-        writer
-    };
-    writer
-        .write(p.data.as_bytes())
-        .map_err(|e| (ErrorCode::Internal, e))?;
-    Ok(json!({}))
-}
-
-fn terminal_resize(shared: &Shared, p: TerminalResize, ctx: Option<&Attachment>) -> ApiResult {
-    if p.cols == 0 || p.rows == 0 {
-        return Err((
-            ErrorCode::InvalidParams,
-            "cols and rows must be at least 1".into(),
-        ));
-    }
-    let mut inner = lock(&shared.inner);
-    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-    authorize(&entry.stream, ctx, &p.terminal_id, true)?;
-    running_host(entry, &p.terminal_id)?
-        .resize(p.cols, p.rows)
-        .map_err(|e| (ErrorCode::Internal, e))?;
-    entry.info.cols = p.cols;
-    entry.info.rows = p.rows;
-    entry.stream.resized(p.cols, p.rows);
-    shared.persist(&inner);
-    Ok(json!({}))
 }
 
 fn now_millis() -> u64 {

@@ -28,6 +28,8 @@ use crate::backend::{
     OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
     StreamRequest,
 };
+use stream_closed::{closed_silently, controller_held, history_ended, lost};
+mod stream_closed;
 use crate::poimen_server;
 use crate::trust;
 use poimen_core::snapshot as snap;
@@ -460,32 +462,6 @@ pub fn map_event(event: Event) -> Option<StreamRecord> {
     }
 }
 
-/// The connection of an attached stream ended without a record.
-fn lost(err: &ClientError) -> StreamRecord {
-    StreamRecord::Closed {
-        reason: format!("the connection to poimen-server ended: {err}"),
-        exit_code: None,
-        code: Some(CloseCode::Lost),
-    }
-}
-
-/// `detached`: the view closes without a banner.
-fn closed_silently() -> StreamRecord {
-    StreamRecord::Closed {
-        reason: "detached".into(),
-        exit_code: None,
-        code: None,
-    }
-}
-
-fn controller_held() -> StreamRecord {
-    StreamRecord::Closed {
-        reason: "another client controls this terminal".into(),
-        exit_code: None,
-        code: Some(CloseCode::ControllerHeld),
-    }
-}
-
 impl Backend for PoimenBackend {
     fn set_claude_classic_renderer(&self, on: bool) {
         self.classic_renderer.store(on, Ordering::Relaxed);
@@ -824,6 +800,7 @@ impl Backend for PoimenBackend {
                 match attachment.next_record() {
                     Ok(event) => {
                         if let Some(record) = map_event(event) {
+                            let record = history_ended(record, info.read_only);
                             if matches!(record, StreamRecord::Closed { .. }) {
                                 break record;
                             }
