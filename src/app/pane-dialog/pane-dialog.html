@@ -4,8 +4,8 @@
       <form (submit)="$event.preventDefault(); create($any($event.target))">
         <fieldset class="types">
           <legend class="sr-only">Type</legend>
-          <label class="type">
-            <input type="radio" name="type" value="terminal" checked (dblclick)="submit($event)" />
+          <label class="type" (dblclick)="submit($event)">
+            <input type="radio" name="type" value="terminal" checked />
             <app-icon name="terminal" />
             <span class="text">
               <span class="name">Terminal</span>
@@ -13,8 +13,8 @@
             </span>
           </label>
           @for (agent of agents(); track agent.id) {
-            <label class="type">
-              <input type="radio" name="type" [value]="agent.id" (dblclick)="submit($event)" />
+            <label class="type" (dblclick)="submit($event)">
+              <input type="radio" name="type" [value]="agent.id" />
               <app-icon name="agent" />
               <span class="text">
                 <span class="name">{{ agent.id }}</span>

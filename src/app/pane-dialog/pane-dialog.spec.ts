@@ -189,9 +189,9 @@ describe("PaneDialog start agent (#410)", () => {
     bridge.invoke.mockImplementation(async (command: string): Promise<unknown> =>
       command === "terminal_create" ? "p9" : undefined,
     );
-    const radio = root.querySelectorAll<HTMLInputElement>("input[name='type']")[1]!;
-    radio.click();
-    radio.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const row = root.querySelectorAll<HTMLElement>("label.type")[1]!;
+    row.querySelector<HTMLInputElement>("input")!.click();
+    row.querySelector(".name")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith(
         "agent_start",

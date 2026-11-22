@@ -52,7 +52,7 @@ export class PaneDialog {
 
   /** A double click on a type creates the pane. */
   protected submit(event: Event): void {
-    (event.target as HTMLInputElement).form?.requestSubmit();
+    (event.currentTarget as HTMLElement).querySelector("input")?.form?.requestSubmit();
   }
 
   protected async create(form: HTMLFormElement): Promise<void> {
