@@ -768,7 +768,7 @@ export class SettingsStore {
   }
 
   /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */
-  private async write(
+  async write(
     patch: Partial<Settings>,
     what: string,
     command: string,

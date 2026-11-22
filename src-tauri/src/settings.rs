@@ -236,8 +236,8 @@ const MAX_SCROLLBACK: u32 = 1_000_000;
 
 #[path = "settings_shortcuts.rs"]
 mod shortcuts;
-pub use shortcuts::default_shortcuts;
 use shortcuts::resolve_shortcuts;
+pub use shortcuts::{default_shortcuts, set_shortcut_text};
 
 impl Default for Settings {
     fn default() -> Self {

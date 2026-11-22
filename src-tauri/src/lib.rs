@@ -1149,13 +1149,6 @@ async fn settings_import_apply(
     .map_err(|e| e.to_string())?
 }
 
-/// Revokes the trust of the project file of `root`; the settings watcher emits the change.
-#[tauri::command]
-fn revoke_project(root: String) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::revoke_project(&home, &root)
-}
-
 /// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
 #[tauri::command]
 async fn project_config(dir: String) -> Result<project::Loaded, String> {
@@ -2898,11 +2891,12 @@ pub fn run() {
             usage_claude,
             set_spaces_layout,
             settings_write::set_layouts,
+            settings_write::set_shortcut,
             snippets::set_snippets,
             snippets::terminal_type,
             settings_write::set_space_templates,
             resolve_space_template,
-            revoke_project,
+            settings_write::revoke_project,
             settings_export,
             layout_export,
             layout_import,
