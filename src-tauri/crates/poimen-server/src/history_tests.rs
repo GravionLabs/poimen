@@ -430,3 +430,29 @@ fn the_orphan_sweep_removes_logs_without_a_terminal_and_leftovers_only() {
     assert_eq!(sweep_orphans(&dir.join("missing"), &keep), 0);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn late_output_of_a_removed_terminal_does_not_bring_its_log_back() {
+    let dir = temp("late");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"x");
+    h.remove("t1");
+    h.output("t1", b"late");
+    h.resize("t1", 10, 10);
+    h.flush();
+    assert!(!dir.join("history").join("t1").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_reset_while_off_leaves_the_log() {
+    let dir = temp("reset-off");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"x");
+    h.flush();
+    h.configure(false, Limits::default());
+    h.reset("t1");
+    h.flush();
+    assert_eq!(read(&dir.join("history").join("t1")), vec![out("x")]);
+    let _ = std::fs::remove_dir_all(dir);
+}

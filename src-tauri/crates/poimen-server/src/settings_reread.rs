@@ -39,12 +39,21 @@ impl Shared {
             }
             *read = Some(now);
         }
-        let setting = self
+        // No file is the default; a file that cannot be read or parsed (half-edited) keeps what
+        // was applied before, so it never turns a history that is off back on.
+        let text = self
             .home
             .as_deref()
-            .and_then(|home| std::fs::read_to_string(poimen_core::settings::config_path(home)).ok())
-            .map(|t| poimen_core::terminal_history::from_text(&t))
-            .unwrap_or_default();
+            .map(|home| std::fs::read_to_string(poimen_core::settings::config_path(home)));
+        let setting = match text {
+            None => Default::default(),
+            Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+            Some(Err(_)) => return,
+            Some(Ok(t)) => match poimen_core::terminal_history::from_text(&t) {
+                Some(setting) => setting,
+                None => return,
+            },
+        };
         const MIB: u64 = 1024 * 1024;
         self.history.configure(
             setting.enabled,

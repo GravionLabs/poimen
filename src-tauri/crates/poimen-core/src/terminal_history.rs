@@ -69,11 +69,11 @@ pub fn from_root(root: &Value, warnings: &mut Vec<String>) -> TerminalHistory {
         .map_or_else(TerminalHistory::default, |v| resolve(v, warnings))
 }
 
-/// The setting from the config `text`; unreadable text is the default (history on).
-pub fn from_text(text: &str) -> TerminalHistory {
-    serde_json::from_str::<Value>(text)
-        .map(|root| from_root(&root, &mut Vec::new()))
-        .unwrap_or_default()
+/// The setting from the config `text`; `None` when the text does not parse, so a caller can
+/// keep what it applied before (a half-edited file must not turn the history back on).
+pub fn from_text(text: &str) -> Option<TerminalHistory> {
+    let root = serde_json::from_str::<Value>(text).ok()?;
+    Some(from_root(&root, &mut Vec::new()))
 }
 
 #[cfg(test)]
@@ -113,8 +113,12 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_text_is_the_default() {
-        assert_eq!(from_text("not json"), TerminalHistory::default());
-        assert!(!from_text(r#"{"terminalHistory":{"enabled":false}}"#).enabled);
+    fn unreadable_text_is_none_so_the_last_setting_stays() {
+        assert_eq!(from_text("not json"), None);
+        assert!(
+            !from_text(r#"{"terminalHistory":{"enabled":false}}"#)
+                .unwrap()
+                .enabled
+        );
     }
 }

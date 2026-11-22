@@ -123,6 +123,9 @@ pub struct History {
     dir: PathBuf,
     overflowed: AtomicBool,
     live: Arc<Live>,
+    /// Terminals whose log was removed on close: ids are never reused, so late output of a
+    /// closed terminal is refused instead of bringing its log back (#1196).
+    removed: std::sync::Mutex<HashSet<String>>,
     /// Terminals whose next record must be preceded by a [`Record::Hole`].
     holes: std::sync::Mutex<HashSet<String>>,
 }
@@ -157,6 +160,7 @@ impl History {
             dir,
             overflowed: AtomicBool::new(false),
             live,
+            removed: Default::default(),
             holes: Default::default(),
         }
     }
@@ -185,6 +189,7 @@ impl History {
             dir: PathBuf::new(),
             overflowed: AtomicBool::new(false),
             live: Arc::new(Live::new(Limits::default())),
+            removed: Default::default(),
             holes: Default::default(),
         }
     }
@@ -233,6 +238,10 @@ impl History {
 
     /// Queues the removal of the log of `terminal`: the next record starts a new one.
     pub fn reset(&self, terminal: &str) {
+        // Off: the logs that exist stay as they are until their terminal closes.
+        if !self.live.enabled.load(Ordering::Relaxed) {
+            return;
+        }
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(Msg::Reset(terminal.to_string()));
         }
@@ -241,6 +250,12 @@ impl History {
     /// Removes the log of a closed `terminal` (#1196). Waits for room in the queue: a dropped
     /// removal would leave the output of a closed terminal on disk.
     pub fn remove(&self, terminal: &str) {
+        let mut removed = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+        removed.insert(terminal.to_string());
+        self.holes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(terminal);
         if let Some(tx) = &self.tx {
             let _ = tx.send(Msg::Reset(terminal.to_string()));
         }
@@ -270,6 +285,11 @@ impl History {
 
     fn send_frame(&self, terminal: &str, frame: Vec<u8>) {
         let Some(tx) = &self.tx else { return };
+        // Held while queueing, so a removal cannot slip between the check and the send.
+        let removed = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+        if removed.contains(terminal) {
+            return;
+        }
         let mut holes = self.holes.lock().unwrap_or_else(|e| e.into_inner());
         if !self.live.enabled.load(Ordering::Relaxed) {
             // Off: the log of a terminal that is written again later shows the gap.
