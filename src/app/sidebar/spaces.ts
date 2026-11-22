@@ -194,6 +194,19 @@ export function spaceDetails(space: SpaceNode, status: AgentStatus): StateDetail
   };
 }
 
+/** `340 MB` or `1.2 GB` for resident bytes (#971); empty when unknown. */
+export function memoryText(bytes: number | undefined): string | undefined {
+  if (bytes === undefined) return undefined;
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1000 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+}
+
+/** The memory of all terminals of a space that report one; `undefined` when none does. */
+export function spaceMemory(space: SpaceNode | undefined): number | undefined {
+  const known = (space?.rows ?? []).flatMap((r) => r.pane.memory_bytes ?? []);
+  return known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+}
+
 /** Row types whose layout the user configures (`sidebar.rows`). */
 export type RowType = "workspace" | "agent" | "terminal";
 
@@ -219,15 +232,15 @@ const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ toke
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
   workspace: [
     line("state_icon", "name", "state_text"),
-    line("branch", "dir", "dirty", "sync", "pr"),
+    line("branch", "dir", "dirty", "sync", "pr", "memory"),
   ],
   agent: [
     line("state_icon", "name", "state_text"),
-    line("agent", "title", "started_by", "branch", "dir"),
+    line("agent", "title", "started_by", "branch", "dir", "memory"),
   ],
   terminal: [
     line("state_icon", "name", "state_text"),
-    line("agent", "title", "started_by", "branch", "dir"),
+    line("agent", "title", "started_by", "branch", "dir", "memory"),
   ],
 };
 
@@ -246,6 +259,7 @@ export const ROW_TOKENS = [
   "dir",
   "tab",
   "started_by",
+  "memory",
 ] as const;
 
 /** Whether `name` is a built-in token or `$<name>` with a herdr token name. */
@@ -320,6 +334,8 @@ export function renderRow(
         return pane ? paneDetail(pane) : undefined;
       case "tab":
         return pane?.tab;
+      case "memory":
+        return memoryText(pane ? pane.pane.memory_bytes : spaceMemory(space));
       case "started_by":
         return pane?.startedBy ? `↳ ${pane.startedBy}` : undefined;
       case "notification":

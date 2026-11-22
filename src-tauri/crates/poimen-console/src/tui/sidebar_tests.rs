@@ -25,6 +25,7 @@ fn term(id: &str, space: &str, name: &str, cwd: &str) -> Terminal {
         report: None,
         agent_source: None,
         status_history: Vec::new(),
+        memory_bytes: None,
     }
 }
 
