@@ -427,11 +427,12 @@ section.
 ### L-D-9 CLI in the app package and as `poimen-cli`
 
 - **Steps:** after L-D-1 run `dpkg -L poimen | grep /usr/bin/poimen$` and `poimen --version`. On a host without the app
-  run `sudo apt install ./poimen-cli_<version>_amd64.deb`, `dpkg -L poimen-cli` and `poimen --version`. Try to install
+  run `sudo apt install ./poimen-cli_<version>_amd64.deb`, `dpkg -L poimen-cli`, `poimen --version` and `poimen-server --version`, start `poimen-server` and run `poimen doctor`. Try to install
   `poimen-cli` next to the app.
-- **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version. The two
+- **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version. `poimen-cli` also installs `/usr/bin/poimen-server` and
+  `/usr/bin/poimen-pty-host`, and `poimen doctor` finds the server. The two
   packages conflict, so apt refuses to install both.
-- **Source:** #519.
+- **Source:** #519, #1177.
 
 ## Linux: `.rpm`
 
@@ -492,9 +493,10 @@ section on the stable release once it is published.
 ### L-R-9 CLI in the app package and as `poimen-cli`
 
 - **Steps:** after L-R-1 run `rpm -ql poimen | grep /usr/bin/poimen$` and `poimen --version`. On a host without the app
-  run `sudo dnf install ./poimen-cli-<version>-1.x86_64.rpm`, `rpm -ql poimen-cli` and `poimen --version`.
+  run `sudo dnf install ./poimen-cli-<version>-1.x86_64.rpm`, `rpm -ql poimen-cli`, `poimen --version` and `poimen-server --version`, start `poimen-server` and run `poimen doctor`.
 - **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version.
-- **Source:** #519.
+  `poimen-cli` also installs `/usr/bin/poimen-server` and `/usr/bin/poimen-pty-host`.
+- **Source:** #519, #1177.
 
 ## Linux: `.AppImage`
 
