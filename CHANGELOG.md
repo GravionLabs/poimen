@@ -5,6 +5,46 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.33.0] — 2026-11-22
+
+### Bug Fixes
+- **server**: A reattach restores kitty keyboard flags and hyperlinks (#974) (#1188)
+- **terminal-view**: Focus a kept view when it shows again, one layout per split tab (#978)
+- **pane-dialog**: The New pane types as a list of selectable rows (#1185) (#1193)
+- **pane-dialog**: The New pane types as a list of selectable rows (#1185)
+- **pane-dialog**: Double click is handled on the row, not the hidden radio (#1185)
+- **packaging**: The poimen-cli package installs poimen-server and its PTY host (#1177) (#1191)
+- Release/next is red (ci) (#1197) (#1198)
+- **server**: Cut a torn history tail before appending (#973)
+- **server**: Hide the icacls window on Windows (#973)
+- **server**: Cut a torn history tail through a write handle on Windows (#973)
+- **server**: History rebuild survives dropped records and torn output (#1194)
+- **server**: Late output and a reset while off do not touch the history logs (#1196)
+
+
+### Documentation
+- **site**: Add the features of 2026-11-21 to the guide (#1179) (#1192)
+- **server**: TerminalHistory setting and log cleanup (#1196) (#1202)
+
+
+### Features
+- **server**: Memory per terminal tree in the terminal list (#971) (#1187)
+- **server**: Memory per terminal tree in the terminal list (#971)
+- **server**: Interactive output first, a tail for overflowing observers (#976) (#1189)
+- **server**: Terminal history log on disk (ADR, format, writer) (#973) (#1199)
+- **server**: Terminal history log on disk (ADR 0015, format, writer) (#973)
+- **server**: History checkpoints and a rebuild without gap (#1194) (#1200)
+- **server**: History checkpoints and a rebuild without gap (#1194)
+- **server**: Read-only ended terminal from the history after a reboot (#1195) (#1201)
+- **server**: TerminalHistory setting and log cleanup (#1196) (#1202)
+- **server**: TerminalHistory setting and log cleanup (#1196)
+
+
+### Performance
+- **terminal-view**: Keep hidden terminal views for a short time (#978) (#1190)
+- **terminal-view**: Keep hidden terminal views for a short time (#978)
+
+
 ## [0.32.1] — 2026-11-22
 
 ### Bug Fixes
@@ -15,6 +55,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **agents**: A prompt start of Copilot CLI in an untrusted folder (#989) (#1166)
+- Update CHANGELOG.md for v0.32.1 [skip ci]
 
 
 ## [0.32.0] — 2026-11-21
