@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { countTestPatterns, denyExceptionProblems, pathsIn } from "./checks.mjs";
+import { countTestPatterns, denyExceptionProblems, isTrackedPath, pathsIn } from "./checks.mjs";
 import { compare, formatBaseline, parseBaseline, prune } from "./core.mjs";
 import { runRatchet } from "./run.mjs";
 
@@ -85,6 +85,16 @@ test("doc paths: backticked paths and link targets in repository directories onl
   const text =
     "`src/app/a.ts` `src/x/{a,b}.ts` `core/b.ts` `src/app/c.ts:12` [adr](../adr/x.md) `docs/p.md`";
   assert.deepEqual([...pathsIn(text, tops)].sort(), ["docs/p.md", "src/app/a.ts", "src/app/c.ts"]);
+});
+
+test("doc paths: only tracked files and their directories exist, not ignored local ones", () => {
+  const files = ["src/app/a.ts", ".claude/settings.json", "docs/agents/x.md"];
+  assert.equal(isTrackedPath("src/app/a.ts", files), true);
+  assert.equal(isTrackedPath("src/app", files), true);
+  assert.equal(isTrackedPath("src/app/", files), true);
+  assert.equal(isTrackedPath("./src/app", files), true);
+  assert.equal(isTrackedPath("src/ap", files), false);
+  assert.equal(isTrackedPath(".claude/worktrees", files), false);
 });
 
 test("deny exceptions need a reason and a future expiry", () => {
