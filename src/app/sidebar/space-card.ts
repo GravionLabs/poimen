@@ -17,6 +17,8 @@ import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import { silentLabel } from "../core/agent-priority";
 import { Attention, workspaceUnread } from "../core/attention";
 import { Machines } from "../core/machines";
+import { paneKindIcon, paneKindLabel } from "../core/pane-kind";
+import { Icon, type IconName } from "../ui/icon/icon";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
@@ -106,7 +108,7 @@ export interface SpaceOrigin {
  */
 @Component({
   selector: "app-space-card",
-  imports: [HxButton, NgTemplateOutlet, SpaceEditFocus],
+  imports: [HxButton, Icon, NgTemplateOutlet, SpaceEditFocus],
   templateUrl: "./space-card.html",
   styleUrl: "./space-card.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -495,8 +497,12 @@ export class SpaceCard {
     } else refocus(input, this.injector);
   }
 
-  protected glyph(row: PaneRow): string {
-    return row.agent ? row.agent.slice(0, 2) : ">_";
+  protected kindIcon(row: PaneRow): IconName {
+    return paneKindIcon(row.pane);
+  }
+
+  protected kindLabel(row: PaneRow): string {
+    return paneKindLabel(row.pane, false);
   }
 
   protected title(row: PaneRow): string {

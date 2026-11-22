@@ -31,6 +31,7 @@ import {
   type Terminal,
 } from "./core/snapshot";
 import { windowTitle, type Mode } from "./core/backend";
+import { paneKindIcon, paneKindLabel } from "./core/pane-kind";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
@@ -315,7 +316,9 @@ export class App {
       ]),
     );
   });
-  protected readonly groupItems = computed(() => withKindIcons(this.baseItems()));
+  protected readonly groupItems = computed(() =>
+    withKindIcons(this.baseItems(), (id) => paneKindIcon(this.pane(id))),
+  );
   /** The leaf the user focused last per split tab; the server's focus is the fallback. */
   private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
@@ -1001,10 +1004,7 @@ export class App {
     this.editor.openSettings();
   }
 
-  protected tabPane(id: string): Terminal | undefined {
-    return this.pane(id);
-  }
-
+  protected readonly paneKindLabel = paneKindLabel;
   /** The mode a tab asks for; the terminal view falls back to read-only when it is not free. */
   protected wanted(paneId: string): Mode {
     return this.editor.wanted(paneId, this.prefs.settings().autoControl);
