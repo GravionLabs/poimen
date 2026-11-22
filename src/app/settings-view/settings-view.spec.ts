@@ -25,6 +25,7 @@ import {
 import { allPages, SETTINGS_GROUPS } from "./settings-categories";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
+import { ShortcutsEditor } from "./shortcuts-editor";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
@@ -149,6 +150,7 @@ function setup(
     [SettingsImportPanel, "settings-import-panel"],
     [SpaceTemplatesEditor, "space-templates-editor"],
     [SnippetsEditor, "snippets-editor"],
+    [ShortcutsEditor, "shortcuts-editor"],
   ];
   for (const [component, name] of editors) {
     TestBed.overrideComponent(component, {
@@ -620,6 +622,7 @@ describe("SettingsView categories", () => {
       "Templates",
       "Layouts",
       "Snippets",
+      "Keyboard",
       "Trusted projects",
       "Backend",
       "Server",
@@ -833,7 +836,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(14);
+    expect(titles(host)).toHaveLength(15);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -976,23 +979,20 @@ describe("SettingsView categories", () => {
     const html =
       readFileSync("src/app/settings-view/settings-view.html", "utf8") +
       readFileSync("src/app/settings-view/settings-view.ts", "utf8");
-    const templates = readFileSync("src/app/settings-view/space-templates-editor.html", "utf8");
     const layouts =
       readFileSync("src/app/settings-view/layouts-editor.html", "utf8") +
       readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8");
     const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
-    const snippets = readFileSync("src/app/settings-view/snippets-editor.html", "utf8");
+    const read = (name: string) => readFileSync(`src/app/settings-view/${name}.html`, "utf8");
+    const sources: Record<string, string> = {
+      layouts,
+      spaces: read("space-templates-editor"),
+      machines: machinesPage,
+      snippets: read("snippets-editor"),
+      keyboard: read("shortcuts-editor"),
+    };
     for (const page of allPages()) {
-      const source =
-        page.id === "layouts"
-          ? layouts
-          : page.id === "spaces"
-            ? templates
-            : page.id === "machines"
-              ? machinesPage
-              : page.id === "snippets"
-                ? snippets
-                : html;
+      const source = sources[page.id] ?? html;
       for (const label of page.labels) {
         expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
       }

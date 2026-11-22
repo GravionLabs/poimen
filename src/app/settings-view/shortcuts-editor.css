@@ -1,0 +1,24 @@
+/* Keyboard page: one row per action, the shortcut as a key cap string. */
+.shortcut-group + .shortcut-group {
+  margin-top: 16px;
+}
+
+.shortcut-group h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.shortcut-keys {
+  min-width: 9rem;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.shortcut-keys.unbound {
+  color: var(--h-text-muted-color);
+}
+
+.shortcut-title {
+  flex: 1;
+  min-width: 0;
+}
