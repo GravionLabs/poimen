@@ -55,6 +55,7 @@ import {
 } from "../core/ui-font";
 import { MachinesPage } from "../machines-page/machines-page";
 import { LayoutsEditor } from "./layouts-editor";
+import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsTransfer } from "../core/settings-transfer";
@@ -162,6 +163,7 @@ export function withRoot(
     HxTag,
     MachinesPage,
     LayoutsEditor,
+    SnippetsEditor,
     SpaceTemplatesEditor,
     SettingsImportPanel,
     HxInput,

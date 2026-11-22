@@ -172,7 +172,6 @@ impl PoimenBackend {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
-
 fn text(err: ClientError) -> String {
     err.to_string()
 }
@@ -655,9 +654,10 @@ impl Backend for PoimenBackend {
     }
 
     fn send_input(&self, terminal_id: &str, text_: &str) -> Result<(), String> {
-        self.client
-            .input(terminal_id, &format!("{text_}\r"))
-            .map_err(text)
+        self.send_text(terminal_id, &format!("{text_}\r"))
+    }
+    fn send_text(&self, terminal_id: &str, text_: &str) -> Result<(), String> {
+        self.client.input(terminal_id, text_).map_err(text)
     }
 
     /// Runs the agent in the terminal and returns when its `SessionStart` report arrives (30 s); a kind

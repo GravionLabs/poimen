@@ -255,6 +255,10 @@ pub trait Backend: Send + Sync {
     }
     /// Types `text` into the terminal and presses Enter.
     fn send_input(&self, terminal_id: &str, text: &str) -> Result<(), String>;
+    /// Types `text` into the terminal as is, without Enter. Not supported by every backend.
+    fn send_text(&self, _terminal_id: &str, _text: &str) -> Result<(), String> {
+        Err("this backend cannot type into a terminal".into())
+    }
     fn agent_start(
         &self,
         terminal_id: &str,

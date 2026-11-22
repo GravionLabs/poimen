@@ -35,6 +35,8 @@ import { SpaceActions } from "../core/space-actions";
 import { ExternalEditor } from "../core/external-editor";
 import { Machines } from "../core/machines";
 import { resumeUnavailable } from "../core/session-resume";
+import { SnippetRunner } from "../core/snippets";
+import { snippetMenuGroup, snippetOf } from "./snippet-menu";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
 import { SpaceCard } from "./space-card";
 import { WORKSPACE_PREFIX, nestTabs, spaceNodes, type SpaceData } from "./space-nodes";
@@ -112,13 +114,7 @@ export class Sidebar {
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
     const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
-    const row =
-      kind === "pane"
-        ? this.store
-            .spaces()
-            .flatMap((n) => n.rows)
-            .find((r) => r.pane.terminal_id === id)?.pane
-        : undefined;
+    const row = kind === "pane" ? this.paneOf(id) : undefined;
     const older = row !== undefined && olderHost(row) !== null;
     const markable = canMarkUnread(row, this.attn.unread());
     const local =
@@ -144,6 +140,14 @@ export class Sidebar {
     }));
   }
 
+  /** The pane of a row of the sidebar (a pane of a machine too), or `undefined`. */
+  private paneOf(id: string): Terminal | undefined {
+    return this.store
+      .spaces()
+      .flatMap((n) => n.rows)
+      .find((r) => r.pane.terminal_id === id)?.pane;
+  }
+
   /** Whether the space row shows the pin mark (#710). */
   protected isPinned(spaceId: string): boolean {
     return this.store.pinnedSpaces?.().includes(spaceId) ?? false;
@@ -164,7 +168,10 @@ export class Sidebar {
       label: g.label,
       items: g.items.map((i) => ({ id: i.action, label: i.label, disabled: i.disabled })),
     }));
-    if (kind !== "workspace") return groups;
+    if (kind !== "workspace") {
+      const snippets = snippetMenuGroup(this.settings.settings().snippets, this.paneOf(id));
+      return snippets ? [...groups, snippets] : groups;
+    }
     return [...groups, ...cardMenuGroups(id, this.cardMenu)];
   }
 
@@ -188,6 +195,12 @@ export class Sidebar {
     // A disabled entry (offline machine) does nothing, and never reaches another backend.
     if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
+    const snippet =
+      at?.kind === "pane" ? snippetOf(picked, this.settings.settings().snippets) : null;
+    if (at && snippet) {
+      void this.snippets.run(snippet, this.paneOf(at.id));
+      return;
+    }
     if (at && runCardEntry(picked, at.id, this.cardMenu, this.spaceActions)) return;
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
@@ -197,6 +210,7 @@ export class Sidebar {
   protected readonly store = inject(SpacesStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
+  private readonly snippets = inject(SnippetRunner);
 
   protected readonly query = signal("");
 

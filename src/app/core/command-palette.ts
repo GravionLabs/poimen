@@ -2,11 +2,15 @@ import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentActions } from "../github/agent-actions";
 import { IssueTasks } from "../github/issue-task";
 import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
+import { EditorTabs, tabKind } from "./editor-tabs";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
+import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
 import { SettingsStore } from "./settings";
+import { offeredFor, type Snippet } from "./snippets-model";
+import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
@@ -47,6 +51,7 @@ export interface PoimenCommand {
     | "quitAndStopServer"
     | "projectEntry"
     | "agentAction"
+    | "snippet"
     | "prAction";
   title: string;
 }
@@ -114,6 +119,8 @@ export interface PaletteItem {
   agentActionId?: string;
   /** A write on the open pull request (`command` is `prAction`). */
   prAction?: PrAction;
+  /** A saved prompt or command (`command` is `snippet`). */
+  snippet?: Snippet;
   /** The project file is not trusted: running the entry asks first. */
   locked?: boolean;
 }
@@ -136,6 +143,7 @@ export const POIMEN_GROUP = "Poimen";
 export const RECENT_GROUP = "Recent";
 export const PROJECT_GROUP = "Project";
 export const GITHUB_GROUP = "GitHub";
+export const SNIPPET_GROUP = "Snippets";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -149,6 +157,8 @@ export class CommandPalette {
   private readonly agentActions = inject(AgentActions);
   private readonly issueTasks = inject(IssueTasks);
   private readonly pulls = inject(GithubPulls);
+  private readonly tabs = inject(EditorTabs, { optional: true });
+  private readonly store = inject(SpacesStore);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -199,6 +209,7 @@ export class CommandPalette {
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
         c.id === "agentAction" ||
+        c.id === "snippet" ||
         c.id === "startIssueTask" ||
         c.id === "prAction"
           ? ""
@@ -206,6 +217,7 @@ export class CommandPalette {
       command: c.id,
     })),
     ...this.projectItems(),
+    ...this.snippetItems(),
     ...this.issueTaskItems(),
     ...this.agentActions.entries().map((e): PaletteItem => ({
       key: `agentAction:${e.action.id}`,
@@ -239,6 +251,27 @@ export class CommandPalette {
     ];
   }
 
+  /** The pane of the active tab, or `undefined` (no tab, or not a pane). */
+  activePane(): Terminal | undefined {
+    const id = this.tabs?.activeId();
+    return id != null && tabKind(id) === "pane" ? this.store.panes().get(id) : undefined;
+  }
+
+  /** "Snippet: <label>" per saved snippet that suits the active pane (an agent one needs an agent). */
+  private snippetItems(): PaletteItem[] {
+    const pane = this.activePane();
+    return this.settings
+      .settings()
+      .snippets.filter((s) => offeredFor(s, pane))
+      .map((snippet) => ({
+        key: `snippet:${snippet.label}`,
+        title: `Snippet: ${snippet.label}`,
+        shortcut: "",
+        command: "snippet",
+        snippet,
+      }));
+  }
+
   private readonly ranked = computed(() => fuzzyRank(this.all(), this._query(), (i) => i.title));
 
   /** The lines of the list. With an empty query: Recent, then Poimen. */
@@ -266,7 +299,8 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction)],
+      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction && !i.snippet)],
+      [SNIPPET_GROUP, rest.filter((i) => i.snippet)],
       [GITHUB_GROUP, rest.filter((i) => i.agentActionId || i.prAction)],
       [PROJECT_GROUP, rest.filter((i) => i.entry)],
     ];

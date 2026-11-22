@@ -4,6 +4,7 @@ import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { layoutConfig, parseNamedLayouts, type NamedLayout } from "./named-layouts";
 import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
+import { parseSnippets, type Snippet } from "./snippets-model";
 import { TauriBridge } from "./tauri";
 import {
   MAX_TERMINAL_FONT_SIZE,
@@ -283,6 +284,8 @@ export interface Settings {
   tasks: TaskModes;
   /** `machines`: remote machines reached over SSH; invalid entries are settings warnings. */
   machines: Machine[];
+  /** `snippets`: saved prompts and commands for the palette and the pane menu (#1007). */
+  snippets: Snippet[];
   /** `sounds`: what plays when an agent is blocked or done and not viewed. */
   sounds: SoundSettings;
   /** `usage`: which provider limits the status bar asks for (#784). */
@@ -412,6 +415,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
   machines: [],
+  snippets: [],
   sounds: { blocked: false, done: false },
   usage: { claude: true },
   terminalHistory: DEFAULT_TERMINAL_HISTORY,
@@ -526,6 +530,7 @@ export function parseSettings(raw: unknown): Settings {
     machines: Array.isArray(r["machines"])
       ? r["machines"].map(parseMachine).filter((m) => m !== null)
       : [],
+    snippets: parseSnippets(r["snippets"]),
     sounds: parseSounds(r["sounds"]),
     usage: parseUsage(r["usage"]),
     terminalHistory: parseTerminalHistory(r["terminalHistory"]),
@@ -747,6 +752,11 @@ export class SettingsStore {
     return this.write({ spaceTemplates }, "the space templates", "set_space_templates", {
       templates: spaceTemplates.map(templateConfig),
     });
+  }
+
+  /** Writes `snippets` (validated again by the backend); `false` when the write failed. */
+  setSnippets(snippets: Snippet[]): Promise<boolean> {
+    return this.write({ snippets }, "the snippets", "set_snippets", { snippets });
   }
 
   /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */
