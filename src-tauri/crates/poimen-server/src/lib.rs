@@ -7,6 +7,7 @@
 //! adopts the hosts of that list (#604) and drops the leaves whose terminal did not come back.
 
 mod adopt;
+
 mod agent_state;
 mod awake;
 pub mod check;
@@ -18,6 +19,7 @@ mod emulator;
 pub mod gemini;
 mod hex_color;
 mod hibernate;
+pub mod history;
 pub mod hook;
 mod host;
 pub mod integration;
@@ -77,6 +79,7 @@ const SETTINGS_REREAD: Duration = Duration::from_secs(30);
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+use adopt::{exit_to, new_stream, output_to};
 use poimen_client::transport::{self, Conn, Entry, Listener};
 
 /// Where the server listens and keeps its spaces.
@@ -84,6 +87,8 @@ use poimen_client::transport::{self, Conn, Entry, Listener};
 pub struct Config {
     pub socket: PathBuf,
     pub state_file: PathBuf,
+    /// The terminal history logs, one file per terminal (#973); default next to `state_file`.
+    pub history_dir: PathBuf,
     /// Lines of scrollback kept per terminal for the attach snapshot.
     pub scrollback: usize,
     /// The user's home: its `~/.config/poimen/config.json` gives `space.create` the `trustedProjects`,
@@ -100,6 +105,7 @@ impl Config {
         Self {
             socket: proto::socket_path(),
             state_file: state_file_path(),
+            history_dir: state_file_path().with_file_name("history"),
             scrollback: std::env::var("POIMEN_SCROLLBACK")
                 .ok()
                 .and_then(|v| v.trim().parse().ok())
@@ -375,6 +381,8 @@ pub(crate) struct Shared {
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
+    /// Writes the history logs of the terminals (#973).
+    history: Arc<history::History>,
     scrollback: usize,
     home: Option<PathBuf>,
     /// The sleep inhibitor of `agents.keepAwake` (#987).
@@ -814,6 +822,11 @@ impl Server {
             confirms: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
+            history: Arc::new(history::History::start(
+                config.history_dir,
+                history::Limits::default(),
+                log::path(&config.state_file),
+            )),
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
@@ -2035,51 +2048,6 @@ fn spawn_terminal(
         terminal: info.clone(),
     });
     Ok(info)
-}
-
-/// The screen and attachments of a new or adopted terminal.
-fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermStream> {
-    let stream = Arc::new(TermStream::new(
-        id,
-        cols,
-        rows,
-        shared.scrollback,
-        Arc::clone(&shared.colors),
-        {
-            let weak = Arc::downgrade(shared);
-            Arc::new(move |event| {
-                if let Some(shared) = weak.upgrade() {
-                    shared.publish(event);
-                }
-            })
-        },
-    ));
-    let (weak, id) = (Arc::downgrade(shared), id.to_string());
-    stream.set_signal_sink(Arc::new(move |signals| {
-        if let Some(shared) = weak.upgrade() {
-            shared.output_signals(&id, signals);
-        }
-    }));
-    stream
-}
-
-/// Where a host's output goes: the grid and the clients; a replay answers no query.
-fn output_to(stream: &Arc<TermStream>) -> impl FnMut(&[u8], bool) + Send + 'static {
-    let stream = Arc::clone(stream);
-    move |bytes, live| {
-        if live {
-            stream.output(bytes);
-        } else {
-            stream.replay(bytes);
-        }
-    }
-}
-
-/// The host's reader reports the exit through the shared state.
-fn exit_to(shared: &Arc<Shared>, id: &str) -> impl FnOnce(Option<u32>) + Send + 'static {
-    let id = id.to_string();
-    let shared = Arc::clone(shared);
-    move |code| shared.terminal_exited(&id, code)
 }
 
 /// The version of the host this server ships with. While the server and the host ship together

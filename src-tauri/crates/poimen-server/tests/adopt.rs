@@ -44,6 +44,7 @@ impl Env {
         Config {
             socket: self.dir.join(format!("run{n}")).join("server.sock"),
             state_file: self.state_file(),
+            history_dir: self.state_file().with_file_name("history"),
             scrollback: 100,
             home: None,
             pty_host,

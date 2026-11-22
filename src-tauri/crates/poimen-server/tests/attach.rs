@@ -47,6 +47,11 @@ fn fixture(name: &str) -> Fixture {
     let config = Config {
         socket: env.dir.join("run").join("server.sock"),
         state_file: env.dir.join("state").join("server.json"),
+        history_dir: env
+            .dir
+            .join("state")
+            .join("server.json")
+            .with_file_name("history"),
         scrollback: 1000,
         home: None,
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),

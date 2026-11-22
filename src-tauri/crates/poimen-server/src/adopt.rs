@@ -148,3 +148,49 @@ fn adopted(
         last_input_ms: None,
     }
 }
+
+/// The screen and attachments of a new or adopted terminal.
+pub(crate) fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermStream> {
+    let stream = Arc::new(TermStream::new(
+        id,
+        cols,
+        rows,
+        shared.scrollback,
+        Arc::clone(&shared.colors),
+        {
+            let weak = Arc::downgrade(shared);
+            Arc::new(move |event| {
+                if let Some(shared) = weak.upgrade() {
+                    shared.publish(event);
+                }
+            })
+        },
+    ));
+    stream.set_history(Arc::clone(&shared.history));
+    let (weak, id) = (Arc::downgrade(shared), id.to_string());
+    stream.set_signal_sink(Arc::new(move |signals| {
+        if let Some(shared) = weak.upgrade() {
+            shared.output_signals(&id, signals);
+        }
+    }));
+    stream
+}
+
+/// Where a host's output goes: the grid and the clients; a replay answers no query.
+pub(crate) fn output_to(stream: &Arc<TermStream>) -> impl FnMut(&[u8], bool) + Send + 'static {
+    let stream = Arc::clone(stream);
+    move |bytes, live| {
+        if live {
+            stream.output(bytes);
+        } else {
+            stream.replay(bytes);
+        }
+    }
+}
+
+/// The host's reader reports the exit through the shared state.
+pub(crate) fn exit_to(shared: &Arc<Shared>, id: &str) -> impl FnOnce(Option<u32>) + Send + 'static {
+    let id = id.to_string();
+    let shared = Arc::clone(shared);
+    move |code| shared.terminal_exited(&id, code)
+}

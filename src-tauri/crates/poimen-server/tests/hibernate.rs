@@ -56,6 +56,10 @@ impl Env {
         let config = Config {
             socket: dir.join("run").join("server.sock"),
             state_file: dir.join("state").join("server.json"),
+            history_dir: dir
+                .join("state")
+                .join("server.json")
+                .with_file_name("history"),
             scrollback: 1000,
             home: Some(home),
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
@@ -290,6 +294,11 @@ fn hibernated_survives_a_server_restart() {
     let config = Config {
         socket: env.dir.join("run2").join("server.sock"),
         state_file: env.dir.join("state").join("server.json"),
+        history_dir: env
+            .dir
+            .join("state")
+            .join("server.json")
+            .with_file_name("history"),
         scrollback: 1000,
         home: Some(env.dir.join("home")),
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
