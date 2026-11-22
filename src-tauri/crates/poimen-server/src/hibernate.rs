@@ -90,6 +90,10 @@ impl Shared {
                 if now_ms.saturating_sub(since) < after_ms {
                     continue;
                 }
+                // Typed after `done` (a draft in the input box): the exit input would land in it.
+                if entry.last_input_ms.is_some_and(|input| input > since) {
+                    continue;
+                }
                 let Some(h) = harnesses.iter().find(|h| h.id == kind) else {
                     continue;
                 };
