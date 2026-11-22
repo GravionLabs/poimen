@@ -110,7 +110,7 @@ const KIND_ICONS: Partial<Record<TabKind, IconName>> = {
   space: "space",
 };
 
-/** The icon of a tab kind (#1033); a pane tab has none, it shows its agent status instead. */
+/** The icon of a tab kind (#1033); a pane tab has none here: `withKindIcons` takes it from the pane's agent kind (#1215). */
 export function tabKindIcon(id: string): IconName | undefined {
   return KIND_ICONS[tabKind(id)];
 }
@@ -118,11 +118,12 @@ export function tabKindIcon(id: string): IconName | undefined {
 /** `groups` (tabs by group id) with the icon of each tab's kind set. */
 export function withKindIcons<T extends { id: string; icon?: IconName }>(
   groups: Map<number, T[]>,
+  paneIcon?: (id: string) => IconName | undefined,
 ): Map<number, T[]> {
   return new Map(
     [...groups].map(([id, items]) => [
       id,
-      items.map((item) => ({ ...item, icon: tabKindIcon(item.id) })),
+      items.map((item) => ({ ...item, icon: tabKindIcon(item.id) ?? paneIcon?.(item.id) })),
     ]),
   );
 }

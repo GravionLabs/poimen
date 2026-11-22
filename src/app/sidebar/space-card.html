@@ -139,12 +139,7 @@
     (keydown.space)="onSpace($event, () => picked.emit(d.row.pane.terminal_id))"
     (contextmenu)="askMenu($event, 'pane', d.row.pane.terminal_id)"
   >
-    <span
-      class="icon"
-      [class.agent]="d.row.agent"
-      [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
-      >{{ glyph(d.row) }}</span
-    >
+    <app-icon class="icon" [name]="kindIcon(d.row)" [size]="16" [label]="kindLabel(d.row)" />
     <span class="main">
       @for (line of d.lines; track $index) {
         <span class="line">
