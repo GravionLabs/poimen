@@ -3,15 +3,23 @@
     <app-dialog-shell heading="New pane" label="New pane" (cancelled)="cancel()">
       <form (submit)="$event.preventDefault(); create($any($event.target))">
         <fieldset class="types">
-          <legend>Type</legend>
+          <legend class="sr-only">Type</legend>
           <label class="type">
-            <input type="radio" name="type" value="terminal" checked />
-            Terminal
+            <input type="radio" name="type" value="terminal" checked (dblclick)="submit($event)" />
+            <app-icon name="terminal" />
+            <span class="text">
+              <span class="name">Terminal</span>
+              <span class="detail">Shell in the space's directory</span>
+            </span>
           </label>
           @for (agent of agents(); track agent.id) {
             <label class="type">
-              <input type="radio" name="type" [value]="agent.id" />
-              {{ agent.id }}{{ note(agent.id) }}
+              <input type="radio" name="type" [value]="agent.id" (dblclick)="submit($event)" />
+              <app-icon name="agent" />
+              <span class="text">
+                <span class="name">{{ agent.id }}</span>
+                <span class="detail">{{ detail(agent) }}</span>
+              </span>
             </label>
           }
         </fieldset>

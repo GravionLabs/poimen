@@ -145,4 +145,68 @@ describe("PaneDialog start agent (#410)", () => {
     );
     fixture.detectChanges();
   });
+
+  it("new pane: each type is a row with its icon, name and what it starts (#1185)", async () => {
+    const { root } = await setup(
+      [
+        { id: "claude", command: ["claude"], available: true },
+        { id: "aider", command: ["aider-bin", "--no-auto-commits"], available: true },
+      ],
+      (a) => a.askNew("w1"),
+    );
+    const rows = [...root.querySelectorAll<HTMLElement>("label.type")];
+    expect(rows.map((r) => r.querySelector(".name")?.textContent)).toEqual([
+      "Terminal",
+      "claude",
+      "aider",
+    ]);
+    expect(rows.map((r) => r.querySelector(".detail")?.textContent)).toEqual([
+      "Shell in the space's directory",
+      "claude",
+      "aider-bin --no-auto-commits (no status)",
+    ]);
+    expect(rows.every((r) => r.querySelector("app-icon") && r.querySelector("input"))).toBe(true);
+    expect(root.querySelector("legend")?.textContent).toBe("Type");
+    expect(root.querySelector("legend")?.classList.contains("sr-only")).toBe(true);
+  });
+
+  it("new pane: choosing a radio changes the selected row (arrow keys move it natively)", async () => {
+    const { root } = await setup([{ id: "claude", command: ["claude"], available: true }], (a) =>
+      a.askNew("w1"),
+    );
+    const radios = [...root.querySelectorAll<HTMLInputElement>("input[name='type']")];
+    expect(radios.map((r) => r.checked)).toEqual([true, false]);
+    radios[1]!.click();
+    expect(radios.map((r) => r.checked)).toEqual([false, true]);
+    expect(root.querySelector("input[name='type']:checked")?.getAttribute("value")).toBe("claude");
+  });
+
+  it("new pane: a double click on a row creates the pane (#1185)", async () => {
+    const { root, bridge } = await setup(
+      [{ id: "claude", command: ["claude"], available: true }],
+      (a) => a.askNew("w1"),
+    );
+    bridge.invoke.mockImplementation(async (command: string): Promise<unknown> =>
+      command === "terminal_create" ? "p9" : undefined,
+    );
+    const radio = root.querySelectorAll<HTMLInputElement>("input[name='type']")[1]!;
+    radio.click();
+    radio.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        "agent_start",
+        expect.objectContaining({ kind: "claude" }),
+      ),
+    );
+  });
+
+  it("new pane: Escape cancels and the focus goes back (#1185)", async () => {
+    const opener = focusOpener();
+    const { root, actions, fixture } = await setup([], (a) => a.askNew("w1"));
+    expectFocusInside(root);
+    press("Escape");
+    fixture.detectChanges();
+    expect(actions.dialog()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
 });

@@ -297,7 +297,8 @@ dialog.dialog label {
   gap: 4px;
 }
 
-dialog.dialog label:has(> input[type="checkbox"]) {
+dialog.dialog label:has(> input[type="checkbox"]),
+dialog.dialog label:has(> input[type="radio"]) {
   flex-direction: row;
   align-items: center;
 }
