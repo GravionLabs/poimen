@@ -303,7 +303,11 @@ impl Worker {
                 // A torn or damaged tail of an earlier run would hide what is appended after it.
                 let valid = scan(&std::fs::read(self.dir.join(id))?).1 as u64;
                 if valid < len {
-                    file.set_len(valid)?;
+                    // An append handle cannot be cut on Windows: use a write handle.
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(self.dir.join(id))?
+                        .set_len(valid)?;
                     len = valid;
                 }
             }
@@ -323,7 +327,10 @@ impl Worker {
         data.extend_from_slice(frame);
         if let Err(e) = file.write_all(&data) {
             // Cut a partial write, so the records after it stay readable.
-            let _ = file.set_len(size);
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .open(self.dir.join(id))
+                .and_then(|f| f.set_len(size));
             self.open.remove(id);
             return Err(e);
         }
