@@ -107,6 +107,15 @@ describe("ExternalEditor entries", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("remote support"), "error");
   });
 
+  it("keeps why the editor cannot open a remote space (#1005)", async () => {
+    const editor = service();
+    invoke.mockRejectedValueOnce("the editor in config.json cannot open a remote space");
+    await editor.refreshRemote();
+    expect(editor.remoteBlock()).toContain("cannot open a remote space");
+    await editor.refreshRemote();
+    expect(editor.remoteBlock()).toBeNull();
+  });
+
   it("says so when the palette command has no active tab", () => {
     service().openDir(undefined);
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("no active tab"));

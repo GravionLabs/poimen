@@ -32,6 +32,7 @@ import { filterValues } from "./spaces";
 import { SettingsStore } from "../core/settings";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
+import { ExternalEditor } from "../core/external-editor";
 import { Machines } from "../core/machines";
 import { resumeUnavailable } from "../core/session-resume";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
@@ -88,6 +89,7 @@ export function isDoubleClick(
 })
 export class Sidebar {
   protected readonly machines = inject(Machines);
+  private readonly editor = inject(ExternalEditor);
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */
@@ -122,7 +124,7 @@ export class Sidebar {
     const local =
       kind === "workspace" && this.store.snapshot().spaces.some((s) => s.space_id === id);
     const pinned = local ? this.isPinned(id) : null;
-    return sidebarMenuItems(
+    const groups = sidebarMenuItems(
       kind,
       repo,
       older,
@@ -131,6 +133,15 @@ export class Sidebar {
       pinned,
       resumeUnavailable(id),
     );
+    // A remote space opens over ssh: an editor without remote support is not offered (#1005).
+    const noRemote = kind === "workspace" && !local ? this.editor.remoteBlock() : null;
+    if (!noRemote) return groups;
+    return groups.map((g) => ({
+      ...g,
+      items: g.items.map((i) =>
+        i.action === "open-in-editor" && !i.disabled ? { ...i, disabled: noRemote } : i,
+      ),
+    }));
   }
 
   /** Whether the space row shows the pin mark (#710). */
@@ -142,6 +153,7 @@ export class Sidebar {
     event.preventDefault();
     event.stopPropagation();
     if (kind === "workspace" && this.isClosing(id)) return;
+    if (kind === "workspace") void this.editor.refreshRemote();
     this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
   }
 

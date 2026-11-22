@@ -216,7 +216,8 @@ pub fn launch(
 }
 
 /// Opens `path` (at `line` and `column`) in the editor. With `machine` the path is on that machine
-/// (#1005, connected now) and opens over ssh in VS Code Remote-SSH or Zed.
+/// (#1005, connected now) and opens over ssh in VS Code Remote-SSH or Zed; with `probe` nothing
+/// starts and the error says why a remote space cannot be opened.
 #[tauri::command]
 pub fn open_in_editor(
     machines: tauri::State<'_, std::sync::Arc<crate::machines::Machines>>,
@@ -224,8 +225,13 @@ pub fn open_in_editor(
     line: Option<u32>,
     column: Option<u32>,
     machine: Option<String>,
+    probe: Option<bool>,
 ) -> Result<(), String> {
     let search_path = gui_path::child_path();
+    if probe == Some(true) {
+        // Only whether a remote space can be opened with the editor of the setting.
+        return launch_remote(&read_config(), &search_path, "probe", "/").map(|_| ());
+    }
     if let Some(machine) = machine {
         machines.connected_backend(&machine)?;
         let ssh = machines.config(&machine)?.ssh;
