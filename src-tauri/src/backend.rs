@@ -77,6 +77,8 @@ pub struct LayoutRequest<'a> {
     pub decision: Option<&'a crate::trust::Decision>,
     /// Replaces the command of the layout's root pane (a task's command).
     pub command: Option<&'a str>,
+    /// Extra environment of the new terminals (a task's `POIMEN_ISSUE` and `POIMEN_BRANCH`).
+    pub env: Option<&'a std::collections::BTreeMap<String, String>>,
 }
 
 /// A layout the backend builds into an existing space itself (poimen-server's

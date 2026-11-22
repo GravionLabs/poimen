@@ -33,6 +33,14 @@ export interface TaskWorktree {
   created: boolean;
 }
 
+/** The environment of a task's terminals: the issue number and the branch of its worktree. */
+export function taskEnv(issue: number, branch: string | undefined): Record<string, string> {
+  return {
+    POIMEN_ISSUE: String(issue),
+    ...(branch ? { POIMEN_BRANCH: branch } : {}),
+  };
+}
+
 /** The message of a failed step: names the step and gives the reason. */
 export function stepFailure(step: TaskStep, reason: unknown): string {
   const text =
@@ -72,7 +80,11 @@ export class TaskStarter {
 
   /** Runs the steps for a choice already made. */
   async run(dir: string, choice: TaskChoice): Promise<boolean> {
-    const issue = { nr: choice.number, title: choice.title ?? "", url: choice.url ?? "" };
+    const issue = {
+      nr: choice.number,
+      title: choice.title ?? "",
+      url: choice.url ?? "",
+    };
     let plan: TaskPlan;
     try {
       plan = await this.bridge.invoke<TaskPlan>("task_plan", {
@@ -107,7 +119,10 @@ export class TaskStarter {
     };
     let cwd: string;
     try {
-      const repo = await this.bridge.invoke<{ owner: string; name: string } | null>("github_repo", {
+      const repo = await this.bridge.invoke<{
+        owner: string;
+        name: string;
+      } | null>("github_repo", {
         dir,
       });
       if (!repo) throw new Error("the repository has no GitHub origin to clone from");
@@ -120,6 +135,7 @@ export class TaskStarter {
     } catch (err) {
       return fail("clone", err);
     }
+    let branch: string | undefined;
     if (plan.worktree) {
       try {
         const worktree = await this.bridge.invoke<TaskWorktree>("machine_worktree_create", {
@@ -129,6 +145,7 @@ export class TaskStarter {
           mode,
         });
         cwd = worktree.path;
+        branch = worktree.branch;
       } catch (err) {
         return fail("worktree", err);
       }
@@ -140,6 +157,7 @@ export class TaskStarter {
         cwd,
         label: plan.worktree ? plan.label : null,
         command: plan.worktree ? plan.command : null,
+        ...(plan.worktree ? { env: taskEnv(issue.nr, branch) } : {}),
       });
     } catch (err) {
       return fail("space", err);
@@ -200,7 +218,14 @@ export class TaskStarter {
     }
     // One call creates the space, runs the project's setup and starts the agent's command.
     this._steps.set(stepsAt("setup"));
-    const outcome = await this.spaces.create(worktree.path, plan.label, null, plan.command);
+    const outcome = await this.spaces.create(
+      worktree.path,
+      plan.label,
+      null,
+      plan.command,
+      undefined,
+      taskEnv(issue.nr, worktree.branch),
+    );
     if (outcome) return true;
     // Held for the trust question: the answer creates the space with the same command.
     if (this.spaces.trust()) return true;
