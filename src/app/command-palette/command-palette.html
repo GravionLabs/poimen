@@ -32,6 +32,20 @@
         (keydown)="key($event)"
       />
     </div>
+    <div class="tabs" role="tablist" aria-label="Sources">
+      @for (tab of palette.sourceTabs(); track tab.id) {
+        <button
+          type="button"
+          role="tab"
+          tabindex="-1"
+          [attr.aria-selected]="tab.id === palette.tab()"
+          [class.active]="tab.id === palette.tab()"
+          (click)="palette.selectTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      }
+    </div>
     <ul id="palette-list" role="listbox">
       @for (row of palette.rows(); track row.key) {
         @if (row.type === "heading") {
@@ -57,6 +71,9 @@
                   }
                 }
               </span>
+              @if (palette.tab() === "all" && palette.query().trim() !== "") {
+                <hx-tag class="source">{{ palette.sourceLabel(row.item) }}</hx-tag>
+              }
               @if (row.item.locked) {
                 <svg class="lock" viewBox="0 0 16 16" role="img" aria-label="Not trusted">
                   <rect x="3.5" y="7" width="9" height="6.5" rx="1" />

@@ -100,6 +100,80 @@ describe("CommandPalette", () => {
     expect(titles()).toEqual([]);
   });
 
+  describe("tabs", () => {
+    const entries = (commands: string[], presets: string[] = []) => {
+      tauri.answer("project_entries", () => ({
+        commands: commands.map((name) => ({ name })),
+        presets,
+        locked: false,
+      }));
+      project.setDir("/a");
+    };
+    const ids = () => palette.sourceTabs().map((t) => t.id);
+
+    it("hides a tab without entries; All is always there", async () => {
+      entries([]);
+      await project.reload();
+      palette.open();
+      expect(ids()).toEqual(["all", "commands"]);
+      entries(["build"]);
+      await project.reload();
+      expect(ids()).toEqual(["all", "commands", "project"]);
+    });
+
+    it("filters the list by tab and keeps the query when the tab changes", async () => {
+      entries(["build"], ["duo"]);
+      await project.reload();
+      palette.open();
+      palette.selectTab("project");
+      expect(palette.items().map((i) => i.title)).toEqual(["Project: build", "Preset: duo"]);
+      palette.setQuery("duo");
+      expect(palette.items().map((i) => i.title)).toEqual(["Preset: duo"]);
+      palette.stepTab(-1);
+      expect(palette.tab()).toBe("commands");
+      expect(palette.query()).toBe("duo");
+      expect(palette.items().every((i) => i.source !== "project")).toBe(true);
+    });
+
+    it("cycles with step, wrapping around", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      const seen = [palette.tab()];
+      for (let n = 0; n < 3; n++) {
+        palette.stepTab(1);
+        seen.push(palette.tab());
+      }
+      expect(seen).toEqual(["all", "commands", "project", "all"]);
+      palette.stepTab(-1);
+      expect(palette.tab()).toBe("project");
+    });
+
+    it("remembers the last tab, and opens on All while it is hidden", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      palette.selectTab("project");
+      palette.close();
+      palette.open();
+      expect(palette.tab()).toBe("project");
+      palette.close();
+      entries([]);
+      await project.reload();
+      palette.open();
+      expect(palette.tab()).toBe("all");
+    });
+
+    it("labels each entry with its source", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      const source = (title: string) => palette.items().find((i) => i.title === title);
+      expect(palette.sourceLabel(source("Project: build")!)).toBe("Project");
+      expect(palette.sourceLabel(source("Open Settings")!)).toBe("Poimen");
+    });
+  });
+
   it("lists the poimen commands in order and nothing else", () => {
     palette.open();
     const items = palette.items();

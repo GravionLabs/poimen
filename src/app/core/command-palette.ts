@@ -9,6 +9,16 @@ import { ProjectEntries, type ProjectEntry } from "./project-entries";
 import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
 import { SettingsStore } from "./settings";
+import {
+  ALL_TAB,
+  PALETTE_TABS,
+  SOURCE_LABELS,
+  inTab,
+  stepTab,
+  visibleTabs,
+  type PaletteSource,
+  type PaletteTab,
+} from "./palette-tabs";
 import { offeredFor, type Snippet } from "./snippets-model";
 import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
@@ -113,6 +123,8 @@ export interface PaletteItem {
   title: string;
   shortcut: string;
   command: PoimenCommand["id"];
+  /** Where the entry comes from (the tab it belongs to, its tag in All). */
+  source: PaletteSource;
   /** A command or preset of the project file (`command` is `projectEntry`). */
   entry?: ProjectEntry;
   /** An agent action of the GitHub view (`command` is `agentAction`). */
@@ -163,6 +175,8 @@ export class CommandPalette {
   private readonly _open = signal(false);
   private readonly _query = signal("");
   private readonly _selected = signal(0);
+  /** The last tab picked; lives as long as the app session, not saved. */
+  private readonly _tab = signal(ALL_TAB);
 
   readonly isOpen = this._open.asReadonly();
   readonly query = this._query.asReadonly();
@@ -215,6 +229,7 @@ export class CommandPalette {
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
+      source: "poimen",
     })),
     ...this.projectItems(),
     ...this.snippetItems(),
@@ -224,6 +239,7 @@ export class CommandPalette {
       title: e.title,
       shortcut: "",
       command: "agentAction",
+      source: "github",
       agentActionId: e.action.id,
     })),
     ...this.pulls.actions().map((a): PaletteItem => ({
@@ -231,6 +247,7 @@ export class CommandPalette {
       title: `GitHub: ${PR_ACTION_LABELS[a]} #${this.pulls.detailRow()?.number}`,
       shortcut: "",
       command: "prAction",
+      source: "github",
       prAction: a,
     })),
   ]);
@@ -242,6 +259,7 @@ export class CommandPalette {
       title,
       shortcut: "",
       command: "projectEntry",
+      source: "project",
       entry,
       locked,
     });
@@ -268,11 +286,27 @@ export class CommandPalette {
         title: `Snippet: ${snippet.label}`,
         shortcut: "",
         command: "snippet",
+        source: "snippet",
         snippet,
       }));
   }
 
-  private readonly ranked = computed(() => fuzzyRank(this.all(), this._query(), (i) => i.title));
+  /** The tabs with entries for the focused space; All is always there. */
+  readonly sourceTabs = computed<PaletteTab[]>(() =>
+    visibleTabs(new Set(this.all().map((i) => i.source))),
+  );
+
+  /** The tab shown: the remembered one, or All while that one has no entries. */
+  readonly tab = computed(() => {
+    const id = this._tab();
+    return this.sourceTabs().some((t) => t.id === id) ? id : ALL_TAB;
+  });
+
+  private readonly ranked = computed(() => {
+    const tab = PALETTE_TABS.find((t) => t.id === this.tab());
+    const items = tab ? this.all().filter((i) => inTab(tab, i.source)) : this.all();
+    return fuzzyRank(items, this._query(), (i) => i.title);
+  });
 
   /** The lines of the list. With an empty query: Recent, then Poimen. */
   readonly rows = computed<PaletteRow[]>(() => {
@@ -299,10 +333,10 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction && !i.snippet)],
-      [SNIPPET_GROUP, rest.filter((i) => i.snippet)],
-      [GITHUB_GROUP, rest.filter((i) => i.agentActionId || i.prAction)],
-      [PROJECT_GROUP, rest.filter((i) => i.entry)],
+      [POIMEN_GROUP, rest.filter((i) => i.source === "poimen")],
+      [SNIPPET_GROUP, rest.filter((i) => i.source === "snippet")],
+      [GITHUB_GROUP, rest.filter((i) => i.source === "github")],
+      [PROJECT_GROUP, rest.filter((i) => i.source === "project")],
     ];
     for (const [label, members] of groups) {
       if (members.length === 0) continue;
@@ -330,6 +364,7 @@ export class CommandPalette {
         title: `GitHub: ${this.issueTasks.label(t.root, t.number)} #${t.number}`,
         shortcut: "",
         command: "startIssueTask",
+        source: "poimen",
       },
     ];
   }
@@ -350,6 +385,23 @@ export class CommandPalette {
   toggle(): void {
     if (this._open()) this.close();
     else this.open();
+  }
+
+  /** Shows tab `id` (the query stays) and remembers it for the session. */
+  selectTab(id: string): void {
+    if (!this.sourceTabs().some((t) => t.id === id)) return;
+    this._tab.set(id);
+    this._selected.set(0);
+  }
+
+  /** Switches to the next (`1`) or previous (`-1`) visible tab, wrapping around. */
+  stepTab(delta: number): void {
+    this.selectTab(stepTab(this.sourceTabs(), this.tab(), delta));
+  }
+
+  /** The label of the source of `item`, for the tag in All with a query. */
+  sourceLabel(item: PaletteItem): string {
+    return SOURCE_LABELS[item.source];
   }
 
   setQuery(query: string): void {
