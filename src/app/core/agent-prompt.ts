@@ -53,4 +53,17 @@ export class AgentPrompts {
       return { kind: "failed", message: String(err) };
     }
   }
+
+  /**
+   * Tells the backend that the prompt bar of `target` holds unsent text (or no longer does), so the
+   * server does not hibernate its agent (#1163). A failure (an older server) is ignored: the draft
+   * is only a guard.
+   */
+  async draft(target: string, draft: boolean): Promise<void> {
+    try {
+      await this.bridge.invoke("terminal_draft", { target, draft });
+    } catch {
+      // Nothing to undo.
+    }
+  }
 }

@@ -434,6 +434,111 @@ fn input_after_done_blocks_hibernation_until_the_next_done() {
     assert!(env.terminal(&id).hibernated.is_some(), "hibernated again");
 }
 
+/// A connection that attaches by hand, so a test can wait for the answer of a request the client
+/// API does not wait for: requests of one connection are handled in order.
+struct Raw {
+    writer: std::os::unix::net::UnixStream,
+    reader: std::io::BufReader<std::os::unix::net::UnixStream>,
+    next: u32,
+}
+
+impl Raw {
+    fn attached(env: &Env, terminal_id: &str) -> Self {
+        use std::os::unix::net::UnixStream;
+        let socket = UnixStream::connect(env.dir.join("run").join("server.sock")).unwrap();
+        let reader = std::io::BufReader::new(socket.try_clone().unwrap());
+        let mut raw = Self {
+            writer: socket,
+            reader,
+            next: 0,
+        };
+        let result = raw.call(
+            "terminal.attach",
+            serde_json::json!({"terminal_id": terminal_id, "mode": "observe"}),
+        );
+        assert!(result.get("error").is_none(), "{result}");
+        raw
+    }
+
+    /// Sends the request and reads until its response (stream records are skipped).
+    fn call(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        use std::io::{BufRead, Write};
+        self.next += 1;
+        let id = format!("r{}", self.next);
+        let line = serde_json::json!({"id": id, "method": method, "params": params});
+        writeln!(self.writer, "{line}").unwrap();
+        loop {
+            let mut text = String::new();
+            assert!(self.reader.read_line(&mut text).unwrap() > 0, "closed");
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if value["id"] == id.as_str() {
+                return value;
+            }
+        }
+    }
+
+    fn set_draft(&mut self, terminal_id: &str, draft: bool) {
+        let answer = self.call(
+            "terminal.set_draft",
+            serde_json::json!({"terminal_id": terminal_id, "draft": draft}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+    }
+}
+
+#[test]
+fn a_prompt_draft_blocks_hibernation_until_it_is_cleared() {
+    let env = Env::new("draft", Some(ON));
+    let id = env.done_agent();
+    let mut raw = Raw::attached(&env, &id);
+    raw.set_draft(&id, true);
+    (env.sweep)(now_ms() + 600 * MINUTE_MS);
+    assert_eq!(env.terminal(&id).hibernated, None, "a draft is held");
+    assert_eq!(env.typed(), "work\n");
+
+    // Cleared: the idle time counts as for any `done` terminal (it never restarted).
+    raw.set_draft(&id, false);
+    (env.sweep)(now_ms() + 31 * MINUTE_MS);
+    assert!(env.terminal(&id).hibernated.is_some(), "hibernated");
+}
+
+#[test]
+fn a_prompt_draft_needs_an_attachment_and_ends_with_the_connection_that_set_it() {
+    let env = Env::new("draft-gone", Some(ON));
+    let id = env.done_agent();
+    // A request for another terminal is refused.
+    let mut raw = Raw::attached(&env, &id);
+    let wrong = raw.call(
+        "terminal.set_draft",
+        serde_json::json!({"terminal_id": "other", "draft": true}),
+    );
+    assert_eq!(wrong["error"]["code"], "invalid_request", "{wrong}");
+
+    raw.set_draft(&id, true);
+    (env.sweep)(now_ms() + 600 * MINUTE_MS);
+    assert_eq!(env.terminal(&id).hibernated, None);
+    drop(raw);
+    wait_until("hibernated after the client left", || {
+        (env.sweep)(now_ms() + 600 * MINUTE_MS);
+        env.terminal(&id).hibernated.is_some()
+    });
+}
+
+#[test]
+fn drafts_of_two_clients_are_held_apart() {
+    let env = Env::new("draft-two", Some(ON));
+    let id = env.done_agent();
+    let (mut a, mut b) = (Raw::attached(&env, &id), Raw::attached(&env, &id));
+    a.set_draft(&id, true);
+    b.set_draft(&id, true);
+    a.set_draft(&id, false);
+    (env.sweep)(now_ms() + 600 * MINUTE_MS);
+    assert_eq!(env.terminal(&id).hibernated, None, "b still holds one");
+    b.set_draft(&id, false);
+    (env.sweep)(now_ms() + 600 * MINUTE_MS);
+    assert!(env.terminal(&id).hibernated.is_some());
+}
+
 #[test]
 fn a_repeated_done_keeps_the_idle_time() {
     let env = Env::new("repeat", Some(ON));

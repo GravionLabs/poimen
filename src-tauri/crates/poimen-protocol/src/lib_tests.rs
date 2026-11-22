@@ -468,6 +468,10 @@ fn attach_wire_shapes() {
         serde_json::from_value(serde_json::json!({"terminal_id":"t1"})).unwrap();
     assert_eq!(d.terminal_id, "t1");
     assert!(serde_json::from_value::<TerminalDetach>(json!({})).is_err());
+    let d: TerminalSetDraft =
+        serde_json::from_value(serde_json::json!({"terminal_id":"t1","draft":true})).unwrap();
+    assert_eq!((d.terminal_id.as_str(), d.draft), ("t1", true));
+    assert!(serde_json::from_value::<TerminalSetDraft>(json!({"terminal_id":"t1"})).is_err());
 
     let e = Event::TerminalDetached {
         terminal_id: "t1".into(),

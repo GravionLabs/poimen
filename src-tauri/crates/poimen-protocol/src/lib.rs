@@ -15,7 +15,7 @@ pub mod files;
 pub mod host;
 pub mod report;
 pub mod status;
-pub use attach::{AttachMode, AttachResult, DetachReason};
+pub use attach::{AttachMode, AttachResult, DetachReason, TerminalSetDraft};
 pub use files::windows_dir_from;
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 

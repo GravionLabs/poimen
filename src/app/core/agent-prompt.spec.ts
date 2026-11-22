@@ -32,6 +32,16 @@ describe("AgentPrompts", () => {
     expect(await prompts.send("w1:p2", "x")).toEqual({ kind: "timeout" });
   });
 
+  it("tells the backend about a draft and ignores a refusal", async () => {
+    tauri.answer("terminal_draft", () => undefined);
+    await prompts.draft("w1:p2", true);
+    expect(tauri.calls("terminal_draft")).toEqual([{ target: "w1:p2", draft: true }]);
+    tauri.answer("terminal_draft", () => {
+      throw "unknown method terminal.set_draft";
+    });
+    await expect(prompts.draft("w1:p2", false)).resolves.toBeUndefined();
+  });
+
   it("turns a rejected call into a failed outcome", async () => {
     tauri.answer("agent_prompt", () => {
       throw "herdr socket: gone";

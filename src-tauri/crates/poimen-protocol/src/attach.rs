@@ -40,3 +40,13 @@ pub enum DetachReason {
     /// The terminal was closed.
     Closed,
 }
+
+/// `terminal.set_draft` (#1163): the app's prompt bar for this terminal holds (or no longer holds)
+/// unsent text. Sent on the attached connection: the draft belongs to it and ends with it. While a
+/// draft is set the server does not hibernate the terminal's agent. Needs an attachment to the
+/// terminal (`invalid_request` otherwise); an older server answers `unknown_method`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalSetDraft {
+    pub terminal_id: String,
+    pub draft: bool,
+}
