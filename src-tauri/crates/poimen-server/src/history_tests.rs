@@ -221,3 +221,21 @@ fn a_disabled_history_writes_nothing() {
     h.resize("t1", 1, 1);
     h.flush();
 }
+
+#[test]
+fn appends_after_a_torn_tail_of_an_earlier_run_stay_readable() {
+    let dir = temp("resume");
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"one");
+    h.output("t1", b"two");
+    h.flush();
+    drop(h);
+    let path = dir.join("history").join("t1");
+    let data = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &data[..data.len() - 2]).unwrap();
+    let h = history(&dir, DEFAULT_PER_TERMINAL, DEFAULT_TOTAL);
+    h.output("t1", b"three");
+    h.flush();
+    assert_eq!(read(&path), vec![out("one"), out("three")]);
+    let _ = std::fs::remove_dir_all(dir);
+}

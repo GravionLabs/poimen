@@ -298,7 +298,15 @@ impl Worker {
         }
         if !self.open.contains_key(id) {
             let file = open_private(&self.dir.join(id))?;
-            let len = file.metadata()?.len();
+            let mut len = file.metadata()?.len();
+            if len > 0 {
+                // A torn or damaged tail of an earlier run would hide what is appended after it.
+                let valid = scan(&std::fs::read(self.dir.join(id))?).1 as u64;
+                if valid < len {
+                    file.set_len(valid)?;
+                    len = valid;
+                }
+            }
             // A log found at start is counted already.
             if let Some(old) = self.sizes.insert(id.to_string(), len) {
                 self.total = self.total.saturating_sub(old);
