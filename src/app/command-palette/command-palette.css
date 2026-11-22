@@ -103,6 +103,16 @@ li.selected {
   white-space: pre;
 }
 
+.description {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 mark {
   background: transparent;
   color: var(--h-primary-color);

@@ -16,7 +16,7 @@ import {
 import type { PrAction } from "../github/pulls";
 import { EditorTabs } from "../core/editor-tabs";
 import { SnippetRunner } from "../core/snippets";
-import type { ProjectEntry } from "../core/project-entries";
+import type { PaletteEntry } from "../core/project-entries";
 import { HxTag } from "@gravionlabs/helix-ui";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
@@ -37,7 +37,7 @@ export class CommandPalette {
   /** A poimen command was chosen; the host runs it. */
   readonly commandChosen = output<PoimenCommand["id"]>();
   /** A command or preset of the project file was chosen. */
-  readonly entryChosen = output<ProjectEntry>();
+  readonly entryChosen = output<PaletteEntry>();
   /** An agent action of the GitHub view was chosen (its id). */
   readonly agentActionChosen = output<string>();
   /** A write on the open pull request was chosen. */
@@ -117,6 +117,7 @@ export class CommandPalette {
     else if (item.prAction) this.prActionChosen.emit(item.prAction);
     else if (item.agentActionId) this.agentActionChosen.emit(item.agentActionId);
     else if (item.entry) this.entryChosen.emit(item.entry);
+    else if (item.detected) this.entryChosen.emit(item.detected);
     else this.commandChosen.emit(item.command);
   }
 }

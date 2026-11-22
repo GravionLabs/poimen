@@ -122,7 +122,7 @@ import { IssueTasks } from "./github/issue-task";
 import { GithubPulls } from "./github/pulls";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
-import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
+import { ProjectEntries, type PaletteEntry } from "./core/project-entries";
 import { AgentPicker as AgentPickerView } from "./agent-picker/agent-picker";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
@@ -732,11 +732,11 @@ export class App {
   }
 
   /** A command or preset of the project file, run in the space of the active pane. */
-  protected runEntry(entry: ProjectEntry): void {
+  protected runEntry(entry: PaletteEntry): void {
     const id = this.activePaneId();
     const pane = id ? this.pane(id) : undefined;
     const dir = pane ? paneDir(pane) : undefined;
-    if (pane && dir) void this.projectEntries.run(entry, pane.space_id, dir);
+    if (pane && dir) void this.projectEntries.start(entry, pane.space_id, dir);
     else this.spaceActions.notify(`Project: ${entry.name}: there is no focused space`);
   }
 

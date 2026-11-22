@@ -13,8 +13,19 @@ export interface ProjectEntryList {
   locked: boolean;
 }
 
+/** Wire shape of `DetectedEntry` (`poimen_core::detect`): a command found in the repository. */
+export interface DetectedEntry {
+  source: string;
+  name: string;
+  /** The command line of the script, for the user. */
+  description: string;
+}
+
 /** An entry of the project file picked in the palette (wire shape of `Entry`). */
 export type ProjectEntry = { kind: "command"; name: string } | { kind: "preset"; name: string };
+
+/** What the palette runs: an entry of the project file or a detected script. */
+export type PaletteEntry = ProjectEntry | DetectedEntry;
 
 /** Wire shape of `EntryOutcome` (`project.rs`). */
 export type EntryOutcome =
@@ -41,6 +52,9 @@ export class ProjectEntries {
 
   private readonly _entries = signal<ProjectEntryList>(NONE);
   readonly entries = this._entries.asReadonly();
+  private readonly _detected = signal<DetectedEntry[]>([]);
+  /** The commands detected in the repository (`package.json` scripts), for the Scripts tab. */
+  readonly detected = this._detected.asReadonly();
   private dir: string | undefined;
   private seq = 0;
 
@@ -57,15 +71,54 @@ export class ProjectEntries {
     const seq = ++this.seq;
     if (!dir) {
       this._entries.set(NONE);
+      this._detected.set([]);
       return;
     }
-    let list: ProjectEntryList;
+    const [list, detected] = await Promise.all([
+      this.bridge.invoke<ProjectEntryList>("project_entries", { dir }).then(
+        (l) => l ?? NONE,
+        () => NONE,
+      ),
+      this.bridge.invoke<DetectedEntry[]>("detected_entries", { dir }).then(
+        (d) => d ?? [],
+        () => [],
+      ),
+    ]);
+    if (seq !== this.seq) return;
+    this._entries.set(list);
+    this._detected.set(detected);
+  }
+
+  /**
+   * Runs the detected `entry` in space `workspaceId` at `dir`: a tab named after it with the
+   * command typed. An explicit pick only; the backend builds the argv, no hash trust.
+   */
+  async runDetected(entry: DetectedEntry, workspaceId: string, dir: string): Promise<void> {
+    const label = `Script: ${entry.name}`;
     try {
-      list = (await this.bridge.invoke<ProjectEntryList>("project_entries", { dir })) ?? NONE;
-    } catch {
-      list = NONE;
+      const ran = await this.bridge.invoke<boolean>("detected_run", {
+        spaceId: workspaceId,
+        dir,
+        source: entry.source,
+        name: entry.name,
+      });
+      if (ran) {
+        await this.store.refresh();
+        return;
+      }
+      this.spaces.notify(`${label}: the script no longer exists`);
+      await this.reload();
+    } catch (err) {
+      const reason = err && typeof err === "object" && "message" in err ? err.message : err;
+      this.spaces.fail(`${label} failed: ${String(reason)}`);
     }
-    if (seq === this.seq) this._entries.set(list);
+  }
+
+  /** Runs a picked palette entry in space `workspaceId` at `dir`. */
+  start(entry: PaletteEntry, workspaceId: string, dir: string): Promise<void> {
+    return "source" in entry
+      ? this.runDetected(entry, workspaceId, dir)
+      : this.run(entry, workspaceId, dir);
   }
 
   /** Runs `entry` in space `workspaceId` at `dir`; an untrusted file asks first. */

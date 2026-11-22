@@ -5,7 +5,7 @@ import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
 import { EditorTabs, tabKind } from "./editor-tabs";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
-import { ProjectEntries, type ProjectEntry } from "./project-entries";
+import { ProjectEntries, type DetectedEntry, type ProjectEntry } from "./project-entries";
 import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
 import { SettingsStore } from "./settings";
@@ -60,6 +60,7 @@ export interface PoimenCommand {
     | "projectTeardown"
     | "quitAndStopServer"
     | "projectEntry"
+    | "detectedEntry"
     | "agentAction"
     | "snippet"
     | "prAction";
@@ -127,6 +128,10 @@ export interface PaletteItem {
   source: PaletteSource;
   /** A command or preset of the project file (`command` is `projectEntry`). */
   entry?: ProjectEntry;
+  /** A detected script (`command` is `detectedEntry`). */
+  detected?: DetectedEntry;
+  /** The line under the title: the command line a detected entry runs. */
+  description?: string;
   /** An agent action of the GitHub view (`command` is `agentAction`). */
   agentActionId?: string;
   /** A write on the open pull request (`command` is `prAction`). */
@@ -156,6 +161,7 @@ export const RECENT_GROUP = "Recent";
 export const PROJECT_GROUP = "Project";
 export const GITHUB_GROUP = "GitHub";
 export const SNIPPET_GROUP = "Snippets";
+export const SCRIPTS_GROUP = "Scripts";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -222,6 +228,7 @@ export class CommandPalette {
         c.id === "projectTeardown" ||
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
+        c.id === "detectedEntry" ||
         c.id === "agentAction" ||
         c.id === "snippet" ||
         c.id === "startIssueTask" ||
@@ -232,6 +239,7 @@ export class CommandPalette {
       source: "poimen",
     })),
     ...this.projectItems(),
+    ...this.detectedItems(),
     ...this.snippetItems(),
     ...this.issueTaskItems(),
     ...this.agentActions.entries().map((e): PaletteItem => ({
@@ -267,6 +275,23 @@ export class CommandPalette {
       ...commands.map((c) => item({ kind: "command", name: c.name }, `Project: ${c.name}`)),
       ...presets.map((name) => item({ kind: "preset", name }, `Preset: ${name}`)),
     ];
+  }
+
+  /** The detected scripts; a `commands[]` entry of the same name wins and hides the detected one. */
+  private detectedItems(): PaletteItem[] {
+    const own = new Set(this.project.entries().commands.map((c) => c.name));
+    return this.project
+      .detected()
+      .filter((d) => !own.has(d.name))
+      .map((d) => ({
+        key: `detected:${d.source}:${d.name}`,
+        title: `Script: ${d.name}`,
+        shortcut: "",
+        command: "detectedEntry",
+        source: "scripts",
+        detected: d,
+        description: d.description,
+      }));
   }
 
   /** The pane of the active tab, or `undefined` (no tab, or not a pane). */
@@ -337,6 +362,7 @@ export class CommandPalette {
       [SNIPPET_GROUP, rest.filter((i) => i.source === "snippet")],
       [GITHUB_GROUP, rest.filter((i) => i.source === "github")],
       [PROJECT_GROUP, rest.filter((i) => i.source === "project")],
+      [SCRIPTS_GROUP, rest.filter((i) => i.source === "scripts")],
     ];
     for (const [label, members] of groups) {
       if (members.length === 0) continue;

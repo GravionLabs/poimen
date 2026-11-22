@@ -299,6 +299,53 @@ describe("CommandPalette", () => {
     expect(palette.selected()).toBe(0);
   });
 
+  describe("detected scripts", () => {
+    const scripts = [
+      { source: "npm", name: "build", description: "tsc -p ." },
+      { source: "npm", name: "test", description: "vitest" },
+    ];
+    async function load(commands: string[] = []) {
+      tauri.answer("project_entries", () => ({
+        commands: commands.map((name) => ({ name, target: "terminal" })),
+        presets: [],
+        locked: false,
+      }));
+      tauri.answer("detected_entries", () => scripts);
+      project.setDir("/a");
+      await project.reload();
+      palette.open();
+    }
+
+    it("shows a Scripts tab with the command line of each script as its description", async () => {
+      await load();
+      expect(palette.sourceTabs().map((t) => t.id)).toContain("scripts");
+      palette.selectTab("scripts");
+      expect(palette.items().map((i) => [i.title, i.description])).toEqual([
+        ["Script: build", "tsc -p ."],
+        ["Script: test", "vitest"],
+      ]);
+      expect(palette.items()[0].command).toBe("detectedEntry");
+      expect(palette.items()[0].detected).toEqual(scripts[0]);
+    });
+
+    it("has no Scripts tab without detected scripts", async () => {
+      tauri.answer("detected_entries", () => []);
+      project.setDir("/a");
+      await project.reload();
+      expect(palette.sourceTabs().map((t) => t.id)).not.toContain("scripts");
+    });
+
+    it("hides a script whose name a commands[] entry of the project file has", async () => {
+      await load(["test"]);
+      palette.selectTab("scripts");
+      expect(palette.items().map((i) => i.title)).toEqual(["Script: build"]);
+      palette.selectTab("all");
+      const titles = palette.items().map((i) => i.title);
+      expect(titles).toContain("Project: test");
+      expect(titles).not.toContain("Script: test");
+    });
+  });
+
   describe("project entries", () => {
     const list = (locked: boolean) => ({
       commands: [

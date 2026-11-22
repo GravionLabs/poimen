@@ -9,6 +9,7 @@ pub mod agent_events;
 pub mod agent_sessions;
 pub mod check_log;
 pub mod copilot;
+pub mod detect;
 pub mod git;
 pub mod github;
 pub mod gui_path;

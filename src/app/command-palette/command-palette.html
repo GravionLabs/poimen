@@ -72,6 +72,9 @@
                   }
                 }
               </span>
+              @if (row.item.description) {
+                <span class="description">{{ row.item.description }}</span>
+              }
               @if (palette.tab() === "all" && palette.query().trim() !== "") {
                 <hx-tag class="source">{{ palette.sourceLabel(row.item) }}</hx-tag>
               }

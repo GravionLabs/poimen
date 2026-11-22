@@ -1,6 +1,7 @@
 //! The project file `.poimen/config.json`: parsing, entries and teardown live in
 //! `poimen_core::project`; what needs a `Backend` (palette entries) is here.
 
+pub use poimen_core::detect::{DetectedEntry, detect_all};
 pub use poimen_core::project::*;
 
 /// Opens a tab named `name` in a space, in `cwd`, and types `command` into it.
@@ -17,6 +18,28 @@ pub fn start_tab(
     backend.rename_terminal(&pane, Some(name))?;
     backend.send_input(&pane, command)?;
     Ok(())
+}
+
+/// Runs the detected entry `name` of `source` (`poimen_core::detect`) in a tab named after it in
+/// `dir`. The entry is detected again at `root`, so the frontend never supplies a command; there
+/// is no hash trust, a call is an explicit pick. Returns `false` when the file no longer lists it.
+pub fn run_detected(
+    backend: &dyn crate::backend::Backend,
+    root: &str,
+    space_id: &str,
+    dir: &str,
+    source: &str,
+    name: &str,
+) -> Result<bool, String> {
+    let found = poimen_core::detect::detect_all(std::path::Path::new(root))
+        .into_iter()
+        .find(|e| e.source == source && e.name == name);
+    let Some(entry) = found else {
+        return Ok(false);
+    };
+    let line = poimen_core::detect::command_line(&entry.argv);
+    start_tab(backend, space_id, dir, &entry.name, &line)?;
+    Ok(true)
 }
 
 /// Runs a palette entry of the project file in `sources` through `trust::gate`. A `terminal`
@@ -94,6 +117,138 @@ pub fn run_entry(
         }
         // A preset is built by the backend above, or declined with the gate.
         Found::Preset(_) => Ok(EntryOutcome::Declined),
+    }
+}
+
+/// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
+/// palette (names only), and whether the file still needs the user's trust.
+#[tauri::command]
+pub async fn project_entries(dir: String) -> Entries {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = poimen_core::git::toplevel(&dir).unwrap_or(dir);
+        let sources = crate::trust::Sources::read(&root);
+        entries(&sources, &crate::get_settings().trusted_projects)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The commands detected in the repository of `dir` (`package.json` scripts), for the Scripts tab
+/// of the palette: no project file and no trust involved, the entries only list. Local disk only.
+#[tauri::command]
+pub async fn detected_entries(dir: String) -> Vec<DetectedEntry> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = poimen_core::git::toplevel(&dir).unwrap_or(dir);
+        detect_all(std::path::Path::new(&root))
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Runs the detected entry `name` of `source` in a tab of the space `space_id` (an explicit pick,
+/// no hash trust). The argv is built here from the repository, never taken from the frontend;
+/// `false` when the entry is gone.
+#[tauri::command]
+pub async fn detected_run(
+    backend: tauri::State<'_, crate::Shared>,
+    space_id: String,
+    dir: String,
+    source: String,
+    name: String,
+) -> Result<bool, String> {
+    crate::on_backend(backend.inner(), move |b| {
+        let root = poimen_core::git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+        run_detected(b, &root, &space_id, &dir, &source, &name)
+    })
+    .await
+}
+
+/// Runs a palette entry of the project file in the space `space_id` (a user action). Goes
+/// through `crate::trust::gate` with the one read of the file; an untrusted file answers `ask`.
+#[tauri::command]
+pub async fn project_run(
+    backend: tauri::State<'_, crate::Shared>,
+    space_id: String,
+    dir: String,
+    entry: Entry,
+    decision: Option<crate::trust::Decision>,
+) -> Result<EntryOutcome, String> {
+    crate::on_backend(backend.inner(), move |b| {
+        let root = poimen_core::git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+        let sources = crate::trust::Sources::read(&root);
+        let home = crate::home_dir();
+        let trusted = crate::get_settings().trusted_projects;
+        let persist = |hash: &str| -> Result<(), String> {
+            let home = home.as_deref().ok_or("the home directory is not known")?;
+            crate::settings::trust_project(home, &sources.root, hash)
+        };
+        run_entry(
+            b,
+            &sources,
+            &trusted,
+            decision.as_ref(),
+            &persist,
+            &space_id,
+            &dir,
+            &entry,
+        )
+    })
+    .await
+}
+
+#[cfg(test)]
+mod detected {
+    use super::*;
+    use crate::backend_fake::FakeBackend;
+
+    fn repo(pkg: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("poimen-run-detected-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), pkg).unwrap();
+        std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_pick_opens_a_named_tab_and_types_the_argv() {
+        let root = repo(r#"{"scripts": {"build": "tsc", "a b": "x"}}"#);
+        let fake = FakeBackend::default();
+        assert_eq!(
+            run_detected(&fake, &root, "w1", &root, "npm", "build"),
+            Ok(true)
+        );
+        let calls = fake.calls();
+        assert!(calls[0].starts_with("create_terminal w1 "), "{calls:?}");
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("build") && c.starts_with("rename"))
+        );
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.ends_with("pnpm run build") && c.starts_with("input"))
+        );
+        assert_eq!(
+            run_detected(&fake, &root, "w1", &root, "npm", "a b"),
+            Ok(true)
+        );
+        assert!(fake.calls().iter().any(|c| c.ends_with("pnpm run 'a b'")));
+    }
+
+    #[test]
+    fn an_unknown_name_runs_nothing() {
+        let root = repo(r#"{"scripts": {"build": "tsc"}}"#);
+        let fake = FakeBackend::default();
+        assert_eq!(
+            run_detected(&fake, &root, "w1", &root, "npm", "rm -rf"),
+            Ok(false)
+        );
+        assert_eq!(
+            run_detected(&fake, &root, "w1", &root, "cargo", "build"),
+            Ok(false)
+        );
+        assert!(fake.calls().is_empty());
     }
 }
 

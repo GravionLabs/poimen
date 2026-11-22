@@ -78,6 +78,26 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 The entries are read for the focused space and again when the palette opens. While the project
 file is not trusted they show a lock; running one opens the trust dialog (see Trust).
 
+## Detected scripts
+
+A repository without a project file still gets palette entries from what it already declares.
+Detectors live in `poimen_core::detect` (one per source; `package.json` is the first, `Cargo.toml`,
+`justfile` and others can follow). The entries are tagged "Scripts" in the palette and have their
+own Scripts tab; each is `Script: <name>` with the command line of the script as its description.
+
+- Source: the `package.json` at the repository root of the focused space (as `commands[]` is read).
+  A missing or invalid file yields no entries and no error. Scripts of workspace packages are not
+  listed.
+- Package manager: the `packageManager` field, else the lock file (`pnpm-lock.yaml`,
+  `package-lock.json`, `yarn.lock`, `bun.lock`/`bun.lockb`), else npm. The command is
+  `<pm> run <name>`.
+- Running: opens a tab named after the script in the directory of the focused space and types the
+  command. The backend builds it from the repository; the frontend only names the entry.
+- Trust: there is no hash trust. A detected entry runs only on an explicit pick in the palette and
+  nothing runs automatically; the entry shows the command line that will run.
+- A `commands[]` entry with the name of a detected script wins; the detected one is not shown.
+- Local spaces only; a remote space shows no detected entries.
+
 ## Commands
 
 A command is a string typed into the user's shell, or an object
