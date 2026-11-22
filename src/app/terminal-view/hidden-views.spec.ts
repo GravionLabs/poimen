@@ -4,7 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorTabs, SETTINGS_TAB, type EditorGroup } from "../core/editor-tabs";
-import { HIDDEN_VIEW_LIMIT, HIDDEN_VIEW_MS, HiddenViews } from "./hidden-views";
+import { HIDDEN_VIEW_LIMIT, HIDDEN_VIEW_MS, HiddenViews, onePerTab } from "./hidden-views";
 
 beforeAll(() => {
   try {
@@ -83,5 +83,12 @@ describe("HiddenViews (#978)", () => {
     show([group("w1:p2", ["w1:p1", "w1:p2"])]);
     show([group("w1:p2", ["w1:p2"])]);
     expect(views.of(1)).toEqual(["w1:p2"]);
+  });
+});
+
+describe("onePerTab", () => {
+  it("renders a split tab once and leaves single panes alone", () => {
+    const tabs: Record<string, string> = { a: "t1", b: "t1" };
+    expect(onePerTab(["a", "c", "b"], (id) => tabs[id])).toEqual(["a", "c"]);
   });
 });

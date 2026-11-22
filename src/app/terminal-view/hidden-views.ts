@@ -99,3 +99,18 @@ export class HiddenViews {
     return new Map([...m].map(([group, ids]) => [group, ids.filter((i) => i !== id)]));
   }
 }
+
+/** The ids with only the first of those that share a split tab (`tabOf`), so a layout renders once. */
+export function onePerTab(
+  ids: readonly string[],
+  tabOf: (id: string) => string | undefined,
+): readonly string[] {
+  const seen = new Set<string>();
+  return ids.filter((id) => {
+    const tab = tabOf(id);
+    if (!tab) return true;
+    if (seen.has(tab)) return false;
+    seen.add(tab);
+    return true;
+  });
+}

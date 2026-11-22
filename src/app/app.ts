@@ -59,7 +59,7 @@ import { RecentTabs } from "./recent-tabs/recent-tabs";
 import { Toasts } from "./ui/toasts/toasts";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
-import { HiddenViews } from "./terminal-view/hidden-views";
+import { HiddenViews, onePerTab } from "./terminal-view/hidden-views";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
@@ -899,9 +899,9 @@ export class App {
       this.paneAction(id, action.slice("pane-".length));
   }
 
-  /** The panes a group keeps mounted: its active one and the recently hidden (#978). */
+  /** The panes a group keeps mounted (#978). */
   protected viewIds(group: EditorGroup): readonly string[] {
-    return this.hiddenViews.of(group.id);
+    return onePerTab(this.hiddenViews.of(group.id), (id) => this.paneLayout(id)?.tab_id);
   }
 
   /** The tab of a pane when it is split (more than one leaf), else `undefined`. */
