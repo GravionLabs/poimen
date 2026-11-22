@@ -22,7 +22,8 @@
     "ratchets:test": "node --test scripts/ratchets/core.test.mjs",
     "fixtures:list": "node scripts/fixtures.mjs list",
     "fixtures:shot": "node scripts/fixtures.mjs shot",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@angular/cdk": "^22.2.7",
@@ -62,6 +63,7 @@
     "@angular/build": "^22.2.7",
     "@angular/cli": "^22.2.7",
     "@angular/compiler-cli": "^22.2.6",
+    "@playwright/test": "^1.65.1",
     "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^26.6.6",
     "@xterm/headless": "6.0.0",

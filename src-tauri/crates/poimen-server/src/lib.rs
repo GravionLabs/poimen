@@ -160,6 +160,9 @@ struct TerminalEntry {
     tokens: Vec<TokenEntry>,
     /// A resume of the hibernated agent is under way (#904); not persisted, never two at once.
     resuming: bool,
+    /// When input last reached the terminal through `terminal.input` (#988), in ms; in memory,
+    /// not persisted. Hibernation skips an agent that got input after its `done`.
+    last_input_ms: Option<u64>,
 }
 
 struct TokenEntry {
@@ -2054,6 +2057,7 @@ fn spawn_terminal(
         records: records::Records::default(),
         tokens: Vec::new(),
         resuming: false,
+        last_input_ms: None,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -2654,6 +2658,7 @@ fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -
         let entry = terminal_mut(&mut inner, &p.terminal_id)?;
         authorize(&entry.stream, ctx, &p.terminal_id, false)?;
         let writer = running_host(entry, &p.terminal_id)?.writer();
+        entry.last_input_ms = Some(now_millis());
         reset_error_on_input(shared, &mut inner, &p.terminal_id, &p.data);
         writer
     };
