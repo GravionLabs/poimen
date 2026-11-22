@@ -23,8 +23,8 @@ On the first start poimen offers to install the hooks. Later, **Settings > Backe
 
 - **Start agent...** in a pane's menu starts one of your `harnesses` in a shell pane.
 - A read-only agent tab has a prompt bar above the terminal that sends a prompt without taking the controller. It waits for the agent and refuses while it works or waits at an approval.
-- From a shell, `poimen prompt <terminal> <text>` does the same, see [Console and MCP](/guide/console).
-- Agents can start and prompt other agents themselves through the [MCP server](/guide/console#mcp-server-for-agents). The sidebar then shows which agent started which, and the Flow shows the agents an agent started.
+- From a shell, `poimen prompt <terminal> <text>` does the same, see [Console](/guide/console#poimen-prompt).
+- Agents can start and prompt other agents themselves through the [MCP server](/guide/mcp). The sidebar then shows which agent started which, and the Flow shows the agents an agent started.
 
 ## Subagents and the Flow tab
 
