@@ -1,12 +1,21 @@
 // The status bar popovers (#1168): the bar must not clip them on the block axis.
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { startup } from "./fake-base";
 import { expectNoFailures, openFake } from "./support";
 
 test.describe("status bar", () => {
-  test("the Update available popover is visible above the bar, inside the window", async ({
-    page,
-  }) => {
+  for (const width of [1280, 700]) {
+    test(`the Update available popover is visible above the bar, inside a ${width}px window`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await checkPopover(page);
+    });
+  }
+});
+
+async function checkPopover(page: Page): Promise<void> {
+  {
     const errors = await openFake(page, {
       ...startup(),
       update_check: {
@@ -41,5 +50,5 @@ test.describe("status bar", () => {
     expect(hit).toBe(true);
     await expectNoFailures(page);
     expect(errors()).toEqual([]);
-  });
-});
+  }
+}
