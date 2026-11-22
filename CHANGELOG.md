@@ -5,11 +5,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.32.1] — 2026-11-22
+
+### Bug Fixes
+- **server**: Do not hibernate an agent with typed input or a prompt draft (#988) (#1164)
+- **status-bar**: Do not clip the popovers of the status items (#1168) (#1169)
+- **status-bar**: Do not clip the popovers of the status items (#1168)
+
+
+### Documentation
+- **agents**: A prompt start of Copilot CLI in an untrusted folder (#989) (#1166)
+
+
 ## [0.32.0] — 2026-11-21
 
 ### Bug Fixes
 - **github**: Keep the pending state across a failed pull request read (#995)
 - **tabs**: Show a silent agent as a hollow status dot with the time in the tooltip (#1149) (#1159)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.32.0 [skip ci]
 
 
 ### Features
