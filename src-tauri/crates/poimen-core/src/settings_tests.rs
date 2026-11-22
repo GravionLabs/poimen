@@ -91,8 +91,14 @@ fn save_with_does_not_rewrite_an_unchanged_file() {
     let path = config_path(&dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "{ }").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
     let before = std::fs::metadata(&path).unwrap().modified().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
     save_with(&dir, |t| Ok(t.to_owned())).unwrap();
     assert_eq!(
         std::fs::metadata(&path).unwrap().modified().unwrap(),
