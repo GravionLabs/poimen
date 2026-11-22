@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, inject, input, signal } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  effect,
+  inject,
+  input,
+  signal,
+} from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { AgentPrompts, promptMessage, promptSucceeded } from "../core/agent-prompt";
 import type { Terminal } from "../core/snapshot";
@@ -17,6 +25,21 @@ export class PromptBar {
   protected readonly sending = signal(false);
   protected readonly result = signal<{ message: string; ok: boolean } | null>(null);
   private readonly prompts = inject(AgentPrompts);
+  /** Whether the backend was told that the bar holds text (#1163). */
+  private told = false;
+
+  constructor() {
+    // Text in the bar is not input to the terminal, so the server is told, or it would hibernate
+    // the agent under it. Sending, discarding and closing the view clear it.
+    effect(() => this.tell(this.text().trim() !== ""));
+    inject(DestroyRef).onDestroy(() => this.tell(false));
+  }
+
+  private tell(draft: boolean): void {
+    if (draft === this.told) return;
+    this.told = draft;
+    void this.prompts.draft(this.pane().terminal_id, draft);
+  }
 
   protected type(event: Event): void {
     this.text.set((event.target as HTMLInputElement).value);

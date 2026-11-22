@@ -19,7 +19,10 @@ const pane: Terminal = {
 
 async function mount(outcome: PromptOutcome) {
   const send = vi.fn(async () => outcome);
-  TestBed.configureTestingModule({ providers: [{ provide: AgentPrompts, useValue: { send } }] });
+  const draft = vi.fn(async () => undefined);
+  TestBed.configureTestingModule({
+    providers: [{ provide: AgentPrompts, useValue: { send, draft } }],
+  });
   TestBed.overrideComponent(PromptBar, {
     set: {
       templateUrl: undefined,
@@ -42,7 +45,13 @@ async function mount(outcome: PromptOutcome) {
     await fixture.whenStable();
     fixture.detectChanges();
   };
-  return { send, el, input, submit };
+  const type = async (text: string) => {
+    input.value = text;
+    input.dispatchEvent(new Event("input"));
+    fixture.detectChanges();
+    await fixture.whenStable();
+  };
+  return { send, draft, el, input, submit, type, fixture };
 }
 
 describe("PromptBar", () => {
@@ -79,5 +88,49 @@ describe("PromptBar", () => {
     const { send, submit } = await mount({ kind: "stalled" });
     await submit("   ");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("tells the backend while the bar holds text and clears it when the text is gone", async () => {
+    const { draft, type } = await mount({ kind: "stalled" });
+    expect(draft).not.toHaveBeenCalled();
+    await type("fix");
+    await type("fix the");
+    expect(draft.mock.calls).toEqual([["w1:p2", true]]);
+    await type("  ");
+    expect(draft.mock.calls).toEqual([
+      ["w1:p2", true],
+      ["w1:p2", false],
+    ]);
+  });
+
+  it("clears the draft when the prompt is sent", async () => {
+    const { draft, submit } = await mount({ kind: "started", status: "working" });
+    await submit("go");
+    expect(draft.mock.calls).toEqual([
+      ["w1:p2", true],
+      ["w1:p2", false],
+    ]);
+  });
+
+  it("keeps the draft after a failed send", async () => {
+    const { draft, submit } = await mount({ kind: "timeout" });
+    await submit("go");
+    expect(draft.mock.calls).toEqual([["w1:p2", true]]);
+  });
+
+  it("clears the draft when the view closes", async () => {
+    const { draft, type, fixture } = await mount({ kind: "stalled" });
+    await type("later");
+    fixture.destroy();
+    expect(draft.mock.calls).toEqual([
+      ["w1:p2", true],
+      ["w1:p2", false],
+    ]);
+  });
+
+  it("tells nothing on close when it holds no text", async () => {
+    const { draft, fixture } = await mount({ kind: "stalled" });
+    fixture.destroy();
+    expect(draft).not.toHaveBeenCalled();
   });
 });

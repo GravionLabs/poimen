@@ -19,7 +19,7 @@ use poimen_client::protocol::{
     Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceCreate, SpaceCreateResult, SpaceCreated,
     SpaceList, Tab, TabSplit, Terminal, TerminalCreate, TrustAnswer, TrustRequired,
 };
-use poimen_client::{AttachmentWriter, Client, ClientError};
+use poimen_client::{Client, ClientError};
 use serde_json::{Value, json};
 
 use crate::agent_session::{AgentSession, PromptOutcome};
@@ -29,15 +29,12 @@ use crate::backend::{
     StreamRequest,
 };
 use stream_closed::{closed_silently, controller_held, history_ended, lost};
+use streams::Stream;
 mod stream_closed;
+mod streams;
 use crate::poimen_server;
 use crate::trust;
 use poimen_core::snapshot as snap;
-
-/// One open stream: the write half of its attachment.
-struct Stream {
-    writer: Mutex<AttachmentWriter>,
-}
 
 pub struct PoimenBackend {
     client: Client,
@@ -47,6 +44,8 @@ pub struct PoimenBackend {
     unreported: Mutex<HashSet<String>>,
     next_id: AtomicU32,
     streams: Arc<Mutex<HashMap<u32, Arc<Stream>>>>,
+    /// Terminals whose prompt bar holds text (#1163).
+    drafts: streams::Drafts,
     /// `agents.claude.classicRenderer`: see [`PoimenBackend::terminal_env`].
     classic_renderer: AtomicBool,
 }
@@ -72,6 +71,7 @@ impl PoimenBackend {
             unreported: Mutex::default(),
             next_id: AtomicU32::new(0),
             streams: Arc::default(),
+            drafts: Mutex::default(),
             classic_renderer: AtomicBool::new(false),
         }
     }
@@ -139,13 +139,6 @@ impl PoimenBackend {
             ));
         }
         Ok(())
-    }
-
-    fn stream(&self, id: u32) -> Result<Arc<Stream>, String> {
-        lock(&self.streams)
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| "the terminal stream is closed".to_owned())
     }
 
     fn terminal(&self, terminal_id: &str) -> Result<Terminal, String> {
@@ -775,12 +768,12 @@ impl Backend for PoimenBackend {
             Err(err) => return Err(text(err)),
         };
         let writer = attachment.writer().map_err(text)?;
-        lock(&self.streams).insert(
-            id,
-            Arc::new(Stream {
-                writer: Mutex::new(writer),
-            }),
-        );
+        let stream = Arc::new(Stream {
+            terminal_id: request.target.to_owned(),
+            writer: Mutex::new(writer),
+        });
+        lock(&self.streams).insert(id, Arc::clone(&stream));
+        streams::restore(self, &stream);
         let streams = Arc::clone(&self.streams);
         let info = attachment.info.clone();
         let controls = request.mode == Mode::Control;
@@ -822,6 +815,10 @@ impl Backend for PoimenBackend {
     fn stream_input(&self, id: u32, text_: &str) -> Result<(), String> {
         let stream = self.stream(id)?;
         lock(&stream.writer).input(text_).map_err(text)
+    }
+
+    fn terminal_draft(&self, terminal_id: &str, draft: bool) -> Result<(), String> {
+        streams::set(self, terminal_id, draft)
     }
 
     fn stream_resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {

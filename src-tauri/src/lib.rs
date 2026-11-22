@@ -39,6 +39,7 @@ mod settings_transfer;
 mod settings_write;
 mod snippets;
 mod spaces;
+mod stream_commands;
 mod task_start;
 mod terminal_colors;
 mod updater;
@@ -2491,29 +2492,6 @@ fn stream_of(backend: &Shared, remote: &machines::RemoteStreams, id: u32) -> (Sh
 }
 
 #[tauri::command]
-fn terminal_input(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    text: String,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_input(id, &text)
-}
-
-#[tauri::command]
-fn terminal_resize(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_resize(id, cols, rows)
-}
-
-#[tauri::command]
 fn close_terminal(
     backend: State<'_, Shared>,
     remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
@@ -2894,6 +2872,7 @@ pub fn run() {
             settings_write::set_shortcut,
             snippets::set_snippets,
             snippets::terminal_type,
+            stream_commands::terminal_draft,
             settings_write::set_space_templates,
             resolve_space_template,
             settings_write::revoke_project,
@@ -2920,8 +2899,8 @@ pub fn run() {
             file_preview::preview_watch,
             file_preview::preview_unwatch,
             open_terminal,
-            terminal_input,
-            terminal_resize,
+            stream_commands::terminal_input,
+            stream_commands::terminal_resize,
             close_terminal
         ])
         .build(tauri::generate_context!())

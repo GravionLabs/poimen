@@ -6,9 +6,9 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use poimen_protocol::{AgentInfo, AgentStatus, Terminal, TerminalStatus};
+use poimen_protocol::{AgentInfo, AgentStatus, Terminal, TerminalSetDraft, TerminalStatus};
 
-use crate::{Client, ClientError};
+use crate::{AttachmentWriter, Client, ClientError, to_value};
 
 /// How long `start_agent` waits for the `SessionStart` report of the agent.
 pub const START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -242,6 +242,19 @@ impl Client {
                 _ => std::thread::sleep(POLL),
             }
         }
+    }
+}
+
+impl AttachmentWriter {
+    /// Tells the server that this client holds an unsent prompt draft for the terminal (or no
+    /// longer does); the server does not hibernate the terminal's agent meanwhile. The draft ends
+    /// with the attachment.
+    pub fn set_draft(&mut self, draft: bool) -> Result<(), ClientError> {
+        let params = to_value(&TerminalSetDraft {
+            terminal_id: self.terminal_id.clone(),
+            draft,
+        });
+        self.send("terminal.set_draft", params)
     }
 }
 

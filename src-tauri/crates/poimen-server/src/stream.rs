@@ -92,6 +92,9 @@ struct State {
     since_checkpoint: usize,
     /// A batch is being fed chunk by chunk: the grid is between two records.
     mid_batch: bool,
+    /// The attached clients that hold an unsent prompt draft (#1163); a client leaves it when it
+    /// detaches.
+    drafts: Vec<u64>,
 }
 
 pub(crate) struct TermStream {
@@ -147,6 +150,7 @@ impl TermStream {
                 clients: Vec::new(),
                 next_client: 1,
                 controller: None,
+                drafts: Vec::new(),
                 exited: None,
                 read_only: false,
                 host_seq: 0,
@@ -266,6 +270,24 @@ impl TermStream {
     /// Whether the emulator shows the alternate screen (a full-screen program).
     pub fn alt_screen(&self) -> bool {
         self.lock().emulator.alt_screen()
+    }
+
+    /// Whether an attached client holds an unsent prompt draft for this terminal.
+    pub fn has_draft(&self) -> bool {
+        !self.lock().drafts.is_empty()
+    }
+
+    /// Sets or clears the draft of an attached client; false when it is not attached.
+    pub fn set_draft(&self, client_id: u64, draft: bool) -> bool {
+        let mut st = self.lock();
+        if !st.clients.iter().any(|c| c.id == client_id) {
+            return false;
+        }
+        st.drafts.retain(|d| *d != client_id);
+        if draft {
+            st.drafts.push(client_id);
+        }
+        true
     }
 
     pub fn is_controller(&self, client_id: u64) -> bool {
@@ -536,6 +558,7 @@ impl TermStream {
     fn remove(&self, st: &mut State, client_id: u64) {
         let before = st.clients.len();
         st.clients.retain(|c| c.id != client_id);
+        st.drafts.retain(|d| *d != client_id);
         if st.clients.len() != before && st.controller == Some(client_id) {
             st.controller = None;
             (self.publish)(Event::TerminalControllerDetached {
