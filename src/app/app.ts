@@ -59,6 +59,7 @@ import { RecentTabs } from "./recent-tabs/recent-tabs";
 import { Toasts } from "./ui/toasts/toasts";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
+import { HiddenViews, onePerTab } from "./terminal-view/hidden-views";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
@@ -253,6 +254,7 @@ export class App {
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
 
   protected readonly editor = inject(EditorTabs);
+  private readonly hiddenViews = inject(HiddenViews);
   private readonly attention = inject(Attention);
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
@@ -897,16 +899,14 @@ export class App {
       this.paneAction(id, action.slice("pane-".length));
   }
 
-  protected groupPane(group: EditorGroup): Terminal | undefined {
-    return group.activeId && tabKind(group.activeId) === "pane"
-      ? this.pane(group.activeId)
-      : undefined;
+  /** The panes a group keeps mounted (#978). */
+  protected viewIds(group: EditorGroup): readonly string[] {
+    return onePerTab(this.hiddenViews.of(group.id), (id) => this.paneLayout(id)?.tab_id);
   }
 
-  /** The tab of the group's active pane when it is split (more than one leaf), else `undefined`. */
-  protected groupLayout(group: EditorGroup): Tab | undefined {
-    const pane = this.groupPane(group);
-    const tab = pane && this.store.snapshot().tabs.find((t) => t.tab_id === pane.tab_id);
+  /** The tab of a pane when it is split (more than one leaf), else `undefined`. */
+  protected paneLayout(id: string): Tab | undefined {
+    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === this.pane(id)?.tab_id);
     return tab?.root?.kind === "split" ? tab : undefined;
   }
 
@@ -1047,7 +1047,7 @@ export class App {
     return pane ? paneTitle(this.store.all(), pane) : id;
   }
 
-  private pane(id: string): Terminal | undefined {
+  protected pane(id: string): Terminal | undefined {
     return this.store.panes().get(id) ?? this.known.get(id);
   }
 

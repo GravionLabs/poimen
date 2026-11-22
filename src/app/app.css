@@ -73,3 +73,9 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+
+/* A hidden terminal view stays mounted for a short time (#978). */
+app-terminal-view[hidden],
+app-tab-layout[hidden] {
+  display: none;
+}

@@ -102,8 +102,8 @@ function ansiColors(
 }
 
 /**
- * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
- * destroys it, which closes the stream and disposes xterm; the terminal keeps running.
+ * The live terminal of a tab: it exists while visible and, `hidden`, for a short time after
+ * (`HiddenViews`); destroying it closes the stream and disposes xterm, the terminal keeps running.
  */
 /** Limits of the inline image addon (`pixelLimit` per image, `storageLimit` in MB). */
 export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
@@ -178,6 +178,7 @@ export class TerminalView implements OnDestroy, Searchable {
   /** The PTY size the server last reported (the controller's, for an observer). */
   private ptySize = { cols: 0, rows: 0 };
   private destroyed = false;
+  private wasHidden = false;
   private framed = false;
   /** The snapshot of a controller stream was just reset: refit once it is written. */
   private refitAfterSnapshot = false;
@@ -759,6 +760,9 @@ export class TerminalView implements OnDestroy, Searchable {
   }
 
   private scheduleResize(): void {
+    const shown = this.body().nativeElement.offsetParent !== null;
+    if (shown && this.wasHidden) this.term?.focus(); // a kept view (#978) shows again
+    this.wasHidden = !shown;
     clearTimeout(this.resizeTimer);
     this.resizeTimer = setTimeout(() => this.applySize(), RESIZE_DEBOUNCE_MS);
   }
