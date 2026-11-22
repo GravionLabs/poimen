@@ -8,7 +8,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 - `theme`: `light`, `dark` or `system`. The button in the top bar cycles them.
 - `colorSchema`: a bundled scheme, or a pair `{ "light": "...", "dark": "..." }`. Bundled: `poimen` (default), `catppuccin`, `tokyo-night`, `dracula`, `gruvbox`, `one-dark`, `solarized` and more. Your own WezTerm color schemes go into `~/.config/poimen/themes/` and are picked up without a restart.
-- `terminal.fontFamily`, `terminal.fontSize` (6 to 72), `terminal.scrollback` (default 10000) and `terminal.ghostty` to take font and colors from your Ghostty config.
+- `terminal.fontFamily`, `terminal.fontSize` (6 to 72), `terminal.scrollback` (default 10000) and `terminal.ghostty` and `terminal.kitty` to take font and colors from your Ghostty config (including `theme = <name>`) or `kitty.conf` (including `include`d themes).
 - `sounds`: a tone or sound file for blocked and done agents.
 
 ## Terminals and keys
