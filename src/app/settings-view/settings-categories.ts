@@ -95,7 +95,14 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       {
         id: "server",
         title: "Server",
-        labels: ["Agent hooks and MCP", "Install hooks"],
+        labels: [
+          "Terminal history",
+          "Keep terminal history",
+          "Limit per terminal",
+          "Limit in total",
+          "Agent hooks and MCP",
+          "Install hooks",
+        ],
       },
       {
         id: "machines",

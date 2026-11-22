@@ -107,6 +107,8 @@ pub(crate) struct TermStream {
     signals: OnceLock<SignalSink>,
     /// Where the live output and the resizes are logged to disk (#973).
     history: OnceLock<Arc<History>>,
+    /// Set by [`closed`](Self::closed): nothing is logged afterwards.
+    closed: AtomicBool,
     /// Output bytes between two checkpoints of the history log.
     checkpoint_every: AtomicUsize,
 }
@@ -156,6 +158,7 @@ impl TermStream {
             writer: Mutex::new(None),
             signals: OnceLock::new(),
             history: OnceLock::new(),
+            closed: AtomicBool::new(false),
             checkpoint_every: AtomicUsize::new(CHECKPOINT_INTERVAL),
         }
     }
@@ -169,7 +172,7 @@ impl TermStream {
     /// Starts a new history log: the old one is removed and the empty grid is its first
     /// checkpoint, so the log always has a valid starting point.
     pub fn start_log(&self) {
-        if let Some(history) = self.history.get() {
+        if let Some(history) = self.history() {
             history.reset(&self.terminal_id);
         }
         self.checkpoint();
@@ -182,7 +185,7 @@ impl TermStream {
         let (cols, rows) = st.emulator.size();
         if emulator.size() != (cols, rows) {
             emulator.resize(cols, rows);
-            if let Some(history) = self.history.get() {
+            if let Some(history) = self.history() {
                 history.resize(&self.terminal_id, cols, rows);
             }
         }
@@ -212,7 +215,7 @@ impl TermStream {
             return;
         }
         st.since_checkpoint = 0;
-        let Some(history) = self.history.get() else {
+        let Some(history) = self.history() else {
             return;
         };
         let (cols, rows) = st.emulator.size();
@@ -230,6 +233,15 @@ impl TermStream {
     /// Where output and resizes are written to the history log; set once.
     pub fn set_history(&self, history: Arc<History>) {
         let _ = self.history.set(history);
+    }
+
+    /// The history writer, `None` once the terminal is closed: the output that still arrives
+    /// must not bring its log back (#1196).
+    fn history(&self) -> Option<&Arc<History>> {
+        if self.closed.load(Ordering::SeqCst) {
+            return None;
+        }
+        self.history.get()
     }
 
     /// Where the agent status signals of the output go; set once.
@@ -272,7 +284,7 @@ impl TermStream {
 
     /// [`output`](Self::output) for the records up to host record `seq` (0: unknown).
     pub fn output_at(&self, bytes: &[u8], seq: u64) {
-        if let Some(history) = self.history.get() {
+        if let Some(history) = self.history() {
             history.output_at(&self.terminal_id, bytes, seq);
         }
         self.feed(bytes, true, seq);
@@ -289,7 +301,7 @@ impl TermStream {
     /// [`replay`](Self::replay) for the records up to host record `seq` (0: unknown). The log
     /// does not hold them yet (the host's records it has were dropped before), so they go in.
     pub fn replay_at(&self, bytes: &[u8], seq: u64) {
-        if let Some(history) = self.history.get() {
+        if let Some(history) = self.history() {
             history.output_at(&self.terminal_id, bytes, seq);
         }
         self.feed(bytes, false, seq);
@@ -360,7 +372,7 @@ impl TermStream {
 
     /// The controller's resize: grid and records. (The caller resizes the PTY.)
     pub fn resized(&self, cols: u16, rows: u16) {
-        if let Some(history) = self.history.get() {
+        if let Some(history) = self.history() {
             history.resize(&self.terminal_id, cols, rows);
         }
         let mut st = self.lock();
@@ -396,6 +408,7 @@ impl TermStream {
 
     /// The terminal is closed: end every attachment.
     pub fn closed(&self) {
+        self.closed.store(true, Ordering::SeqCst);
         let mut st = self.lock();
         let line = line_of(&Event::TerminalDetached {
             terminal_id: self.terminal_id.clone(),
@@ -413,7 +426,7 @@ impl TermStream {
         let mut st = self.lock();
         // A checkpoint of the grid, so the next server rebuilds without a replay (#1194).
         self.checkpoint_locked(&mut st);
-        if let Some(history) = self.history.get() {
+        if let Some(history) = self.history() {
             history.flush();
         }
         for client in st.clients.drain(..) {

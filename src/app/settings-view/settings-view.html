@@ -403,6 +403,52 @@
               >
                 Restart server…
               </button>
+              <h3 [class.hit]="hit('Terminal history')">Terminal history</h3>
+              <label class="check" [class.hit]="hit('Keep terminal history')">
+                <input
+                  hx-checkbox
+                  type="checkbox"
+                  role="switch"
+                  [checked]="settings().terminalHistory.enabled"
+                  (change)="setHistory('enabled', $event)"
+                />
+                Keep terminal history on disk
+              </label>
+              <p class="hint">
+                Privacy: with this on, everything a terminal prints (including anything secret that
+                appears on screen) is stored in files in the server's state directory, readable only
+                by you, so a terminal can show its output again after a reboot. Turning it off stops
+                writing; the logs that exist stay until their terminal is closed. Closing a terminal
+                removes its log.
+              </p>
+              <div class="fields aligned">
+                <label class="field ratio" [class.hit]="hit('Limit per terminal')">
+                  Limit per terminal (MiB)
+                  <input
+                    hx-input
+                    size="small"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="history-per-terminal"
+                    [value]="settings().terminalHistory.perTerminalMib"
+                    (change)="setHistory('perTerminalMib', $event)"
+                  />
+                </label>
+                <label class="field ratio" [class.hit]="hit('Limit in total')">
+                  Limit in total (MiB)
+                  <input
+                    hx-input
+                    size="small"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="history-total"
+                    [value]="settings().terminalHistory.totalMib"
+                    (change)="setHistory('totalMib', $event)"
+                  />
+                </label>
+              </div>
               <h3 [class.hit]="hit('Agent hooks')">Agent hooks and MCP</h3>
               <table class="integrations" aria-label="Agent hooks and MCP">
                 <thead>

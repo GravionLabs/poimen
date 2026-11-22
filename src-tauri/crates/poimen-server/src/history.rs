@@ -17,7 +17,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 
 /// Start of every log file.
@@ -81,6 +82,30 @@ impl Default for Limits {
     }
 }
 
+/// The setting the writer follows while it runs (#1196).
+struct Live {
+    enabled: AtomicBool,
+    per_terminal: AtomicU64,
+    total: AtomicU64,
+}
+
+impl Live {
+    fn new(limits: Limits) -> Self {
+        Self {
+            enabled: AtomicBool::new(true),
+            per_terminal: AtomicU64::new(limits.per_terminal),
+            total: AtomicU64::new(limits.total),
+        }
+    }
+
+    fn limits(&self) -> Limits {
+        Limits {
+            per_terminal: self.per_terminal.load(Ordering::Relaxed),
+            total: self.total.load(Ordering::Relaxed),
+        }
+    }
+}
+
 enum Msg {
     Frame {
         id: String,
@@ -97,6 +122,10 @@ pub struct History {
     log: PathBuf,
     dir: PathBuf,
     overflowed: AtomicBool,
+    live: Arc<Live>,
+    /// Terminals whose log was removed on close: ids are never reused, so late output of a
+    /// closed terminal is refused instead of bringing its log back (#1196).
+    removed: std::sync::Mutex<HashSet<String>>,
     /// Terminals whose next record must be preceded by a [`Record::Hole`].
     holes: std::sync::Mutex<HashSet<String>>,
 }
@@ -106,7 +135,8 @@ impl History {
     /// the worker reports to.
     pub fn start(dir: PathBuf, limits: Limits, log: PathBuf) -> Self {
         let (tx, rx) = sync_channel::<Msg>(QUEUE);
-        let mut worker = Worker::new(dir.clone(), limits, log.clone());
+        let live = Arc::new(Live::new(limits));
+        let mut worker = Worker::new(dir.clone(), Arc::clone(&live), log.clone());
         let spawned = std::thread::Builder::new()
             .name("history".into())
             .spawn(move || {
@@ -129,8 +159,21 @@ impl History {
             log,
             dir,
             overflowed: AtomicBool::new(false),
+            live,
+            removed: Default::default(),
             holes: Default::default(),
         }
+    }
+
+    /// Applies the user setting to the output that follows (#1196): off writes nothing (the logs
+    /// that exist stay as they are until their terminal closes), the limits count from the next
+    /// write on.
+    pub fn configure(&self, enabled: bool, limits: Limits) {
+        self.live
+            .per_terminal
+            .store(limits.per_terminal, Ordering::Relaxed);
+        self.live.total.store(limits.total, Ordering::Relaxed);
+        self.live.enabled.store(enabled, Ordering::Relaxed);
     }
 
     /// The file of the log of `terminal`.
@@ -145,6 +188,8 @@ impl History {
             log: PathBuf::new(),
             dir: PathBuf::new(),
             overflowed: AtomicBool::new(false),
+            live: Arc::new(Live::new(Limits::default())),
+            removed: Default::default(),
             holes: Default::default(),
         }
     }
@@ -193,8 +238,26 @@ impl History {
 
     /// Queues the removal of the log of `terminal`: the next record starts a new one.
     pub fn reset(&self, terminal: &str) {
+        // Off: the logs that exist stay as they are until their terminal closes.
+        if !self.live.enabled.load(Ordering::Relaxed) {
+            return;
+        }
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(Msg::Reset(terminal.to_string()));
+        }
+    }
+
+    /// Removes the log of a closed `terminal` (#1196). Waits for room in the queue: a dropped
+    /// removal would leave the output of a closed terminal on disk.
+    pub fn remove(&self, terminal: &str) {
+        let mut removed = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+        removed.insert(terminal.to_string());
+        self.holes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(terminal);
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Msg::Reset(terminal.to_string()));
         }
     }
 
@@ -222,7 +285,19 @@ impl History {
 
     fn send_frame(&self, terminal: &str, frame: Vec<u8>) {
         let Some(tx) = &self.tx else { return };
+        // Held while queueing, so a removal cannot slip between the check and the send.
+        let removed = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+        if removed.contains(terminal) {
+            return;
+        }
         let mut holes = self.holes.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.live.enabled.load(Ordering::Relaxed) {
+            // Off: the log of a terminal that is written again later shows the gap.
+            if !holes.contains(terminal) {
+                holes.insert(terminal.to_string());
+            }
+            return;
+        }
         let mut data = Vec::new();
         if holes.contains(terminal) {
             data.extend_from_slice(&self::frame(&[KIND_HOLE]));
@@ -345,9 +420,50 @@ pub fn read(path: &Path) -> Vec<Record> {
     records
 }
 
+/// Removes the logs in `dir` whose terminal is not in `keep` (the terminals the server knows
+/// at start), and the leftovers of an interrupted shrink (#1196). Returns how many it removed.
+/// Only regular files go; a missing directory is nothing to do.
+pub fn sweep_orphans(dir: &Path, keep: &HashSet<String>) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let is_file = entry.file_type().is_ok_and(|t| t.is_file());
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_file
+            && (name.starts_with('.') || !keep.contains(&name))
+            && std::fs::remove_file(entry.path()).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Removes the logs of terminals the server no longer has, then starts the writer (#1196).
+pub(crate) fn start_after_sweep(
+    config: &crate::Config,
+    terminals: &[crate::store::StoredTerminal],
+    log_file: &Path,
+) -> std::sync::Arc<History> {
+    let known: HashSet<String> = terminals.iter().map(|t| t.id.clone()).collect();
+    let swept = sweep_orphans(&config.history_dir, &known);
+    if swept > 0 {
+        let note = format!("removed {swept} log(s) of terminals that no longer exist");
+        crate::log::line(log_file, "history", &note);
+    }
+    let writer = History::start(
+        config.history_dir.clone(),
+        Limits::default(),
+        log_file.into(),
+    );
+    std::sync::Arc::new(writer)
+}
+
 struct Worker {
     dir: PathBuf,
-    limits: Limits,
+    live: Arc<Live>,
     log: PathBuf,
     open: HashMap<String, File>,
     sizes: HashMap<String, u64>,
@@ -359,7 +475,7 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(dir: PathBuf, limits: Limits, log: PathBuf) -> Self {
+    fn new(dir: PathBuf, live: Arc<Live>, log: PathBuf) -> Self {
         let mut sizes = HashMap::new();
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -376,7 +492,7 @@ impl Worker {
         let total = sizes.values().sum();
         Self {
             dir,
-            limits,
+            live,
             log,
             open: HashMap::new(),
             sizes,
@@ -406,13 +522,14 @@ impl Worker {
             self.report(id, &e);
             return;
         }
+        let limits = self.live.limits();
         let size = self.sizes.get(id).copied().unwrap_or(0);
         let stuck = self
             .stuck
             .get(id)
-            .map_or(0, |s| s + self.limits.per_terminal / 8);
-        if size > self.limits.per_terminal && size >= stuck {
-            self.shrink(id, self.limits.per_terminal - self.limits.per_terminal / 8);
+            .map_or(0, |s| s + limits.per_terminal / 8);
+        if size > limits.per_terminal && size >= stuck {
+            self.shrink(id, limits.per_terminal - limits.per_terminal / 8);
         }
         self.enforce_total();
     }
@@ -532,7 +649,7 @@ impl Worker {
 
     /// While all logs together are over the cap, the largest one loses its oldest data.
     fn enforce_total(&mut self) {
-        while self.total > self.limits.total {
+        while self.total > self.live.limits().total {
             let Some((id, size)) = self
                 .sizes
                 .iter()
@@ -541,7 +658,7 @@ impl Worker {
             else {
                 return;
             };
-            let excess = self.total - self.limits.total;
+            let excess = self.total - self.live.limits().total;
             let target = size.saturating_sub(excess + size / 8);
             self.shrink(&id, target);
             if self.sizes.get(&id).copied().unwrap_or(0) >= size {
