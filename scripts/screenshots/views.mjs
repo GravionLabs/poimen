@@ -10,20 +10,20 @@ export const VIEWPORT = { width: 1280, height: 800 };
 /** Saved UI state (`poimen.ui-state`) every view starts from: a wider sidebar. */
 const BASE_UI = { sidebarWidth: 340 };
 
-const button = (page, name) => page.getByRole("button", { name, exact: true }).first();
+export const button = (page, name) => page.getByRole("button", { name, exact: true }).first();
 
 /** Waits for the app to show the spaces. */
-async function ready(page) {
+export async function ready(page) {
   await page.getByText("billing-api").first().waitFor();
 }
 
 /** Opens the pane row `name` of the sidebar (a double click pins the tab). */
-async function openPane(page, name, nth = 0) {
+export async function openPane(page, name, nth = 0) {
   await page.getByText(name, { exact: true }).nth(nth).dblclick();
 }
 
 /** Waits until the demo backend pushed the screens of the terminals `ids` (a canvas has no text to look for). */
-async function terminalShows(page, ...ids) {
+export async function terminalShows(page, ...ids) {
   await page.waitForFunction(
     (want) =>
       want.every((id) => (document.body.dataset.demoTerminals ?? "").split(" ").includes(id)),

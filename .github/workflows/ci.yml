@@ -67,6 +67,29 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  # UI end-to-end tests (#1156, advisory: not a required check): Playwright against the demo build, Chromium only.
+  e2e:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.frontend == 'true'
+    name: e2e (Playwright, Chromium)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: tmp/e2e/
+          retention-days: 7
+
   # Ratchets (scripts/ratchets/, no dependencies): checks with a baseline that may only shrink. Always runs; it is cheap.
   ratchets:
     name: ratchets
