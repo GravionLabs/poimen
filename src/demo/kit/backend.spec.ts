@@ -4,10 +4,32 @@ import { DemoBackend, DemoChannel, UnansweredCommandError } from "./backend";
 
 beforeEach(() => {
   delete window.__demoFailures;
+  delete window.__demoCalls;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 describe("DemoBackend", () => {
+  it("records every call in order, answered or not, and tells the runner", async () => {
+    const backend = new DemoBackend().fixed({ a: 1 });
+    const channel = new DemoChannel();
+    await backend.invoke("a", { x: 1 });
+    await backend.invoke("missing", { onRecord: channel }).catch(() => {});
+    await backend.invoke("a", { body: new Uint8Array(3) });
+    const expected = [
+      { command: "a", args: { x: 1 } },
+      { command: "missing", args: { onRecord: `[channel ${channel.id}]` } },
+      { command: "a", args: { body: "[3 bytes]" } },
+    ];
+    expect(backend.calls).toEqual(expected);
+    expect(window.__demoCalls).toEqual(expected);
+  });
+
+  it("lets a test replace an answer at runtime", async () => {
+    const backend = new DemoBackend().fixed({ snapshot: { tabs: [] } });
+    backend.set("snapshot", { tabs: [1] });
+    await expect(backend.invoke("snapshot")).resolves.toEqual({ tabs: [1] });
+  });
+
   it("answers a command from a function with its arguments", async () => {
     const backend = new DemoBackend().answer({ add: (args) => Number(args?.["a"]) + 1 });
     await expect(backend.invoke("add", { a: 1 })).resolves.toBe(2);
