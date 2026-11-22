@@ -24,8 +24,10 @@ describe("pane kind icon (#1215)", () => {
     expect(paneKindIcon(pane({ agent_kind: "claude" }))).toBe("agent:Cc");
   });
 
-  it("is the generic agent icon for an unknown kind", () => {
-    expect(paneKindIcon(pane({ agent: "mystery" }))).toBe("agent");
+  it("derives the badge for a harness without a monogram, generic icon when nothing is usable", () => {
+    expect(paneKindIcon(pane({ agent: "aider" }))).toBe("agent:Ai");
+    expect(paneKindIcon(pane({ agent: "kilo-code" }))).toBe("agent:KC");
+    expect(paneKindIcon(pane({ agent: "---" }))).toBe("agent");
   });
 
   it("derives a monogram from the display name for a harness without one", () => {
