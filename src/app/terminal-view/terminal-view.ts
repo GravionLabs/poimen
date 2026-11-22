@@ -102,8 +102,9 @@ function ansiColors(
 }
 
 /**
- * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
- * destroys it, which closes the stream and disposes xterm; the terminal keeps running.
+ * The live terminal of a tab. It exists while its tab is visible and for a short time after (the
+ * app keeps it `hidden`, see `HiddenViews`); destroying it closes the stream and disposes xterm,
+ * the terminal keeps running.
  */
 /** Limits of the inline image addon (`pixelLimit` per image, `storageLimit` in MB). */
 export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
