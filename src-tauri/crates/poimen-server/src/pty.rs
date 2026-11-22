@@ -85,6 +85,11 @@ pub(crate) fn program_name_for(program: &str, windows: bool) -> String {
 /// Output is passed on in batches: what arrives within this time, up to [`MAX_BATCH`] bytes.
 const COALESCE: Duration = Duration::from_millis(4);
 pub(crate) const MAX_BATCH: usize = 32 * 1024;
+/// Small output right after an input (an echo) is passed on without waiting for [`COALESCE`]
+/// (#976): at most this many bytes in the first chunk of a batch.
+pub(crate) const ECHO_BYTES: usize = 512;
+/// How long after an input its output counts as interactive.
+pub(crate) const ECHO_WINDOW: Duration = Duration::from_millis(150);
 
 /// What the reader of a host hands to [`coalesce`].
 pub(crate) enum Chunk {
@@ -101,9 +106,12 @@ pub(crate) enum Chunk {
 /// Calls `on_output` with batches of the records of `rx` (what arrives within [`COALESCE`], up
 /// to [`MAX_BATCH`] bytes), in order; `live` is false for a batch of [`Chunk::Replay`]s, and a
 /// batch never mixes the two. Returns the exit code of [`Chunk::End`] once everything before it
-/// was handed on (`None` also when the sender went away).
+/// was handed on (`None` also when the sender went away). A live batch that starts with at most
+/// [`ECHO_BYTES`] while `interactive()` (an input came [`ECHO_WINDOW`] ago or less) does not
+/// wait: it takes what is already queued and goes at once.
 pub(crate) fn coalesce(
     rx: &Receiver<Chunk>,
+    interactive: impl Fn() -> bool,
     mut on_output: impl FnMut(&[u8], bool),
 ) -> Option<u32> {
     let mut end: Option<Option<u32>> = None;
@@ -119,7 +127,12 @@ pub(crate) fn coalesce(
                 Err(_) => return None,
             },
         };
-        let deadline = Instant::now() + COALESCE;
+        let wait = if live && batch.len() <= ECHO_BYTES && interactive() {
+            Duration::ZERO
+        } else {
+            COALESCE
+        };
+        let deadline = Instant::now() + wait;
         while batch.len() < MAX_BATCH {
             let left = deadline.saturating_duration_since(Instant::now());
             let (data, kind) = match rx.recv_timeout(left) {
@@ -185,7 +198,7 @@ mod tests {
         }
         drop(tx);
         let mut batches = Vec::new();
-        let code = coalesce(&rx, |b, _| batches.push(b.to_vec()));
+        let code = coalesce(&rx, || false, |b, _| batches.push(b.to_vec()));
         (batches, code)
     }
 
@@ -203,9 +216,13 @@ mod tests {
             tx.send(chunk).unwrap();
         }
         let mut batches = Vec::new();
-        let code = coalesce(&rx, |b, live| {
-            batches.push((String::from_utf8(b.to_vec()).unwrap(), live));
-        });
+        let code = coalesce(
+            &rx,
+            || false,
+            |b, live| {
+                batches.push((String::from_utf8(b.to_vec()).unwrap(), live));
+            },
+        );
         assert_eq!(
             batches,
             [
@@ -292,5 +309,60 @@ mod tests {
             "cmd.exe"
         );
         assert_eq!(windows_shell(&[], None, found(vec![])), "cmd.exe");
+    }
+
+    /// Feeds `chunks` (all queued before the batch starts) with the given `interactive`.
+    fn batched(interactive: bool, chunks: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for chunk in chunks {
+            tx.send(Chunk::Data(chunk)).unwrap();
+        }
+        tx.send(Chunk::End(None)).unwrap();
+        let mut batches = Vec::new();
+        coalesce(&rx, move || interactive, |b, _| batches.push(b.to_vec()));
+        batches
+    }
+
+    #[test]
+    fn a_small_echo_after_input_is_passed_on_before_the_next_output_arrives() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (out, got) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            coalesce(&rx, || true, |b, _| out.send(b.to_vec()).unwrap());
+        });
+        tx.send(Chunk::Data(b"a".to_vec())).unwrap();
+        // Delivered with nothing else sent: no wait for the coalescing time (which here would
+        // not end before the thread of this test does anything else).
+        assert_eq!(got.recv_timeout(Duration::from_secs(5)).unwrap(), b"a");
+        tx.send(Chunk::Data(b"b".to_vec())).unwrap();
+        assert_eq!(got.recv_timeout(Duration::from_secs(5)).unwrap(), b"b");
+        tx.send(Chunk::End(None)).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_echo_takes_what_is_queued_and_goes_without_more_waiting() {
+        let chunks = vec![b"a".to_vec(), b"b".to_vec()];
+        assert_eq!(batched(true, chunks.clone()), [b"ab".to_vec()]);
+        assert_eq!(batched(false, chunks), [b"ab".to_vec()]);
+    }
+
+    #[test]
+    fn output_larger_than_an_echo_is_still_coalesced_after_input() {
+        let big = vec![b'x'; ECHO_BYTES + 1];
+        let batches = batched(true, vec![big, b"later".to_vec()]);
+        assert_eq!(batches.len(), 1);
+        assert!(batches[0].ends_with(b"later"));
+    }
+
+    #[test]
+    fn replayed_output_is_never_an_echo() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Chunk::Replay(b"a".to_vec())).unwrap();
+        tx.send(Chunk::Replay(b"b".to_vec())).unwrap();
+        tx.send(Chunk::End(None)).unwrap();
+        let mut batches = Vec::new();
+        coalesce(&rx, || true, |b, _| batches.push(b.to_vec()));
+        assert_eq!(batches, [b"ab".to_vec()]);
     }
 }

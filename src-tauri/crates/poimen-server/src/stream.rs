@@ -7,12 +7,16 @@
 //! record after it: nothing is lost or repeated between the two.
 //!
 //! The PTY is never blocked by a client: records go into a bounded channel per client with
-//! `try_send`; a client whose channel is full is detached (it must attach again for a fresh
-//! snapshot).
+//! `try_send`. The controller whose channel is full is detached (it must attach again for a
+//! fresh snapshot). An observer whose channel is full is not (#976): it is marked lagging, its
+//! output and resizes are dropped (the grid still saw them, so queries are answered as ever),
+//! and once its queue has room again it gets the current size and a snapshot of the grid as one
+//! output record, a resync that replaces everything it missed.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
+use std::time::Duration;
 
 use poimen_protocol::{
     AttachMode, AttachResult, DetachReason, ErrorCode, Event, Response, encode_bytes,
@@ -21,6 +25,8 @@ use serde_json::json;
 
 use crate::emulator::{Colors, Emulator, Signal};
 use crate::pty::{MAX_BATCH, PtyWriter};
+use crate::{WRITE_TIMEOUT, send, write_line};
+use poimen_client::transport::Conn;
 
 /// Records a client may have queued before it counts as too slow.
 pub(crate) const CLIENT_QUEUE: usize = 128;
@@ -42,6 +48,9 @@ pub(crate) struct Link {
     /// `keep_terminals`): the writer closes the connection without a record, so the client sees
     /// the server go away and attaches again to the next one.
     pub released: AtomicBool,
+    /// Set while the stream drops output for this observer (its queue was full); its writer
+    /// asks for the resync when the queue has drained.
+    pub lagging: AtomicBool,
 }
 
 impl Link {
@@ -49,6 +58,7 @@ impl Link {
         Self {
             overflowed: AtomicBool::new(false),
             released: AtomicBool::new(false),
+            lagging: AtomicBool::new(false),
         }
     }
 }
@@ -57,6 +67,8 @@ struct Client {
     id: u64,
     tx: SyncSender<Line>,
     link: Arc<Link>,
+    /// The queue was full and records were dropped; a resync is due.
+    lagging: bool,
 }
 
 struct State {
@@ -341,7 +353,12 @@ impl TermStream {
         }
         let id = st.next_client;
         st.next_client += 1;
-        st.clients.push(Client { id, tx, link });
+        st.clients.push(Client {
+            id,
+            tx,
+            link,
+            lagging: false,
+        });
         if mode == AttachMode::Control {
             st.controller = Some(id);
             (self.publish)(Event::TerminalControllerAttached {
@@ -371,14 +388,24 @@ impl TermStream {
         }
     }
 
+    /// Sends a record that changes the grid (output, resize) to every client. The controller
+    /// that cannot take it is detached; an observer is marked lagging and gets a resync later.
     fn broadcast(&self, st: &mut State, line: &Arc<str>) {
+        let controller = st.controller;
         let mut gone = Vec::new();
-        for client in &st.clients {
+        for client in &mut st.clients {
+            if client.lagging {
+                continue;
+            }
             match client.tx.try_send(Line {
                 text: Arc::clone(line),
                 last: false,
             }) {
                 Ok(()) => {}
+                Err(TrySendError::Full(_)) if controller != Some(client.id) => {
+                    client.lagging = true;
+                    client.link.lagging.store(true, Ordering::SeqCst);
+                }
                 Err(TrySendError::Full(_)) => {
                     client.link.overflowed.store(true, Ordering::SeqCst);
                     gone.push(client.id);
@@ -389,6 +416,46 @@ impl TermStream {
         for id in gone {
             self.remove(st, id);
         }
+    }
+
+    /// Brings a lagging observer up to date when its queue has room: the current size and the
+    /// grid as one output record. Called by its writer when the queue is drained, and before
+    /// every record.
+    pub fn resync(&self, client_id: u64) {
+        let mut st = self.lock();
+        let State {
+            emulator,
+            seq,
+            clients,
+            ..
+        } = &mut *st;
+        let Some(client) = clients.iter_mut().find(|c| c.id == client_id) else {
+            return;
+        };
+        if !client.lagging {
+            return;
+        }
+        *seq += 1;
+        let (cols, rows) = emulator.size();
+        let resized = line_of(&Event::TerminalResized {
+            terminal_id: self.terminal_id.clone(),
+            seq: *seq,
+            cols,
+            rows,
+        });
+        let output = line_of(&Event::TerminalOutput {
+            terminal_id: self.terminal_id.clone(),
+            seq: *seq,
+            data: encode_bytes(&emulator.snapshot()),
+        });
+        for text in [resized, output] {
+            if client.tx.try_send(Line { text, last: false }).is_err() {
+                // Still full (or gone, which the writer notices); try again later.
+                return;
+            }
+        }
+        client.lagging = false;
+        client.link.lagging.store(false, Ordering::SeqCst);
     }
 }
 
@@ -407,294 +474,54 @@ fn kick(client: &Client, line: &Arc<str>) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::mpsc::{Receiver, sync_channel};
-
-    fn stream() -> (TermStream, Arc<Mutex<Vec<Event>>>) {
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&events);
-        let s = TermStream::new(
-            "t1",
-            20,
-            5,
-            100,
-            Arc::default(),
-            Arc::new(move |e| sink.lock().unwrap().push(e)),
-        );
-        (s, events)
-    }
-
-    fn client(
-        s: &TermStream,
-        mode: AttachMode,
-        take_over: bool,
-        cap: usize,
-    ) -> Result<(Attached, Receiver<Line>), (ErrorCode, String)> {
-        let (tx, rx) = sync_channel(cap);
-        let link = Arc::new(Link::new());
-        s.attach("1", mode, take_over, tx, link).map(|a| (a, rx))
-    }
-
-    fn texts(rx: &Receiver<Line>) -> Vec<String> {
-        rx.try_iter().map(|l| l.text.to_string()).collect()
-    }
-
-    #[test]
-    fn output_before_attach_is_in_the_snapshot_and_after_it_in_the_stream() {
-        let (s, _) = stream();
-        s.output(b"before");
-        let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.output(b"after");
-        let lines = texts(&rx);
-        let attach: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        assert_eq!(attach["result"]["seq"], 1);
-        let snap =
-            poimen_protocol::decode_bytes(attach["result"]["snapshot"].as_str().unwrap()).unwrap();
-        assert!(String::from_utf8_lossy(&snap).contains("before"));
-        assert!(!String::from_utf8_lossy(&snap).contains("after"));
-        let record: serde_json::Value = serde_json::from_str(&lines[1]).unwrap();
-        assert_eq!(record["data"]["seq"], 2);
-        assert_eq!(
-            poimen_protocol::decode_bytes(record["data"]["data"].as_str().unwrap()).unwrap(),
-            b"after"
-        );
-    }
-
-    #[test]
-    fn a_second_controller_needs_take_over_and_the_first_is_detached() {
-        let (s, events) = stream();
-        let (first, rx1) = client(&s, AttachMode::Control, false, 8).unwrap();
-        let err = client(&s, AttachMode::Control, false, 8).unwrap_err();
-        assert_eq!(err.0, ErrorCode::Conflict);
-        let (second, _rx2) = client(&s, AttachMode::Control, true, 8).unwrap();
-        assert!(!s.is_controller(first.client_id));
-        assert!(s.is_controller(second.client_id));
-        let last = rx1.try_iter().last().unwrap();
-        assert!(last.last && last.text.contains("taken_over"));
-        let events = events.lock().unwrap();
-        assert_eq!(
-            events.as_slice(),
-            [
-                Event::TerminalControllerAttached {
-                    terminal_id: "t1".into()
-                },
-                Event::TerminalControllerDetached {
-                    terminal_id: "t1".into()
-                },
-                Event::TerminalControllerAttached {
-                    terminal_id: "t1".into()
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn observers_are_many_and_do_not_take_the_control() {
-        let (s, _) = stream();
-        let (_c, _rc) = client(&s, AttachMode::Control, false, 8).unwrap();
-        let (a, _ra) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        let (b, _rb) = client(&s, AttachMode::Observe, true, 8).unwrap();
-        assert!(!s.is_controller(a.client_id) && !s.is_controller(b.client_id));
-        assert!(s.has_controller());
-    }
-
-    #[test]
-    fn a_full_client_is_dropped_and_the_others_keep_receiving() {
-        let (s, events) = stream();
-        let (slow, slow_rx) = client(&s, AttachMode::Control, false, 2).unwrap();
-        let (_ok, ok_rx) = client(&s, AttachMode::Observe, false, 64).unwrap();
-        for i in 0..5 {
-            s.output(format!("{i}").as_bytes());
+/// The writer of an attached connection: the lines of its queue in order, then, when the stream
+/// ran over, a `detached` record. A client that stops reading blocks only this thread, which
+/// gives up after [`WRITE_TIMEOUT`] (Unix; named pipes have no write timeout, so on Windows it
+/// waits for that client alone). An observer whose queue ran over is not detached (#976): the
+/// stream drops its output and, once this queue is drained and idle, `resync` queues the
+/// current size and grid.
+pub(crate) fn write_stream(
+    mut stream: Conn,
+    rx: &Receiver<Line>,
+    link: &Link,
+    terminal_id: &str,
+    term: &TermStream,
+    client_id: u64,
+) {
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+    loop {
+        let lagging = link.lagging.load(std::sync::atomic::Ordering::SeqCst);
+        let wait = Duration::from_millis(if lagging { 50 } else { 200 });
+        match rx.recv_timeout(wait) {
+            Ok(line) => {
+                if write_line(&mut stream, &line.text).is_err() || line.last {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if lagging {
+                    term.resync(client_id);
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
         }
-        assert!(!s.is_controller(slow.client_id));
-        assert_eq!(texts(&ok_rx).len(), 1 + 5);
-        assert_eq!(slow_rx.try_iter().count(), 2);
-        assert!(
-            events
-                .lock()
-                .unwrap()
-                .contains(&Event::TerminalControllerDetached {
-                    terminal_id: "t1".into()
-                })
-        );
-    }
-
-    #[test]
-    fn detaching_the_controller_is_reported_once() {
-        let (s, events) = stream();
-        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
-        s.detach(c.client_id);
-        s.detach(c.client_id);
-        assert!(!s.has_controller());
-        assert_eq!(events.lock().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn exit_ends_the_streams_and_late_attachers_get_the_snapshot_and_the_exit() {
-        let (s, _) = stream();
-        let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.output(b"bye");
-        s.exited(Some(3));
-        let lines = texts(&rx);
-        assert!(lines.last().unwrap().contains(r#""exit_code":3"#));
-        let (_, late) = client(&s, AttachMode::Control, false, 8).unwrap();
-        let lines = texts(&late);
-        assert!(lines[0].contains("snapshot"));
-        assert!(lines[1].contains("terminal.exited"));
-        assert!(!s.has_controller());
-    }
-
-    #[test]
-    fn resize_is_recorded_with_a_sequence_number() {
-        let (s, _) = stream();
-        let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.resized(30, 9);
-        let lines = texts(&rx);
-        let r: serde_json::Value = serde_json::from_str(&lines[1]).unwrap();
-        assert_eq!(r["event"], "terminal.resized");
-        assert_eq!(
-            (
-                r["data"]["cols"].as_u64(),
-                r["data"]["rows"].as_u64(),
-                r["data"]["seq"].as_u64()
-            ),
-            (Some(30), Some(9), Some(1))
-        );
-    }
-
-    /// A writer that collects what the stream answers.
-    #[derive(Clone, Default)]
-    struct Sink(Arc<Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Sink {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
+        // The server let the terminal go to the next one: the connection just ends.
+        if link.released.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn answering() -> (TermStream, Sink) {
-        let (s, _) = stream();
-        let sink = Sink::default();
-        s.set_writer(PtyWriter::new(Box::new(sink.clone())));
-        (s, sink)
-    }
-
-    fn answered(sink: &Sink) -> String {
-        String::from_utf8_lossy(&sink.0.lock().unwrap()).into_owned()
-    }
-
-    #[test]
-    fn without_a_controller_queries_are_answered_on_the_pty() {
-        let (s, sink) = answering();
-        s.output(b"ab\x1b[6n\x1b[c\x1b[>c");
-        let version = env!("CARGO_PKG_VERSION");
-        assert!(
-            answered(&sink).starts_with("\x1b[1;3R\x1b[?6c\x1b[>0;"),
-            "{version}"
-        );
-    }
-
-    #[test]
-    fn color_queries_use_the_colors_set_by_the_app() {
-        let (s, sink) = answering();
-        {
-            let mut colors = s.colors.write().unwrap();
-            colors.background = alacritty_terminal::vte::ansi::Rgb {
-                r: 0x11,
-                g: 0x22,
-                b: 0x33,
+        if link.overflowed.load(std::sync::atomic::Ordering::SeqCst) {
+            let detached = Event::TerminalDetached {
+                terminal_id: terminal_id.to_string(),
+                reason: DetachReason::Overflow,
             };
+            let _ = send(&mut stream, &detached);
+            break;
         }
-        s.output(b"\x1b]11;?\x07");
-        assert_eq!(answered(&sink), "\x1b]11;rgb:1111/2222/3333\x07");
     }
-
-    #[test]
-    fn with_a_controller_the_server_stays_silent_and_answers_again_after_it_left() {
-        let (s, sink) = answering();
-        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
-        s.output(b"\x1b[c\x1b]10;?\x07\x1b[6n");
-        assert_eq!(answered(&sink), "");
-        s.detach(c.client_id);
-        s.output(b"\x1b[c");
-        assert_eq!(answered(&sink), "\x1b[?6c");
-    }
-
-    #[test]
-    fn the_detection_query_is_answered_with_and_without_a_controller_once() {
-        let (s, sink) = answering();
-        s.output(b"\x1b]7501;?\x07\x1b[c");
-        assert_eq!(
-            answered(&sink),
-            format!("{}\x1b[?6c", crate::emulator::DETECTION_REPLY)
-        );
-        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
-        let before = answered(&sink).len();
-        s.output(b"\x1b]7501;?\x07\x1b[c\x1b[6n");
-        assert_eq!(&answered(&sink)[before..], crate::emulator::DETECTION_REPLY);
-        s.detach(c.client_id);
-    }
-
-    #[test]
-    fn replayed_output_reaches_the_grid_and_the_clients_but_its_queries_get_no_answer() {
-        let (s, sink) = answering();
-        let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.replay(b"prompt$ \x1b[c\x1b[6n\x1b]7501;?\x07");
-        assert_eq!(answered(&sink), "");
-        let lines = texts(&rx);
-        assert!(lines[1].contains("terminal.output"), "{lines:?}");
-        let (_, late) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        let snap: serde_json::Value = serde_json::from_str(&texts(&late)[0]).unwrap();
-        let snap =
-            poimen_protocol::decode_bytes(snap["result"]["snapshot"].as_str().unwrap()).unwrap();
-        assert!(String::from_utf8_lossy(&snap).contains("prompt$"));
-        // Live output after the replay is answered again.
-        s.output(b"\x1b[c");
-        assert_eq!(answered(&sink), "\x1b[?6c");
-    }
-
-    #[test]
-    fn release_ends_every_attachment_without_a_record_and_frees_the_controller() {
-        let (s, _) = stream();
-        let (tx, rx) = sync_channel(8);
-        let link = Arc::new(Link::new());
-        s.attach("1", AttachMode::Control, false, tx, Arc::clone(&link))
-            .unwrap();
-        let _ = rx.try_recv(); // the attach response
-        s.release();
-        assert!(link.released.load(Ordering::SeqCst));
-        assert!(!s.has_controller());
-        let last = rx.try_recv().unwrap();
-        assert!(last.last && last.text.is_empty());
-        assert!(!link.overflowed.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn replies_of_a_silent_period_are_not_delivered_late() {
-        let (s, sink) = answering();
-        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
-        s.output(b"\x1b[c");
-        s.detach(c.client_id);
-        s.output(b"x");
-        assert_eq!(answered(&sink), "");
-    }
-
-    #[test]
-    fn a_replay_hands_all_its_signals_over_in_one_call() {
-        let (s, _events) = stream();
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&calls);
-        s.set_signal_sink(Arc::new(move |signals| sink.lock().unwrap().push(signals)));
-        s.replay(b"\x1b]7501;state=working\x07$ \x1b]133;A\x07\x1b]7501;state=done\x07");
-        let calls = calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].len(), 3);
-        drop(calls);
-    }
+    // Wakes the request loop of this connection, which then detaches.
+    let _ = stream.shutdown();
 }
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod tests;

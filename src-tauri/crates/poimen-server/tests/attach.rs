@@ -372,7 +372,7 @@ fn taking_over_the_control_is_explicit_and_reported() {
 
 #[cfg(unix)]
 #[test]
-fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receiving() {
+fn an_observer_that_does_not_read_is_thinned_not_detached_while_the_controller_keeps_receiving() {
     let f = fixture("slow");
     // Starts after a second, so both are attached before the flood.
     let id = f.run("sleep 1; yes 0123456789abcdef | head -c 20000000; sleep 30");
@@ -403,18 +403,23 @@ fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receivin
         .recv_timeout(Duration::from_secs(30))
         .expect("the controller did not receive the flood");
 
-    // The slow observer finds a detach record after what was queued for it.
+    // The slow observer is not detached (#976): after what was queued for it, its stream is
+    // thinned and a resync (the grid as one output record, starting with RIS) follows.
     let mut ignored = Vec::new();
-    let end = read_until(&mut slow, &mut ignored, |e, _| {
-        matches!(e, Event::TerminalDetached { .. })
-    });
-    assert_eq!(
-        end,
-        Event::TerminalDetached {
-            terminal_id: id.clone(),
-            reason: DetachReason::Overflow
+    let end = read_until(&mut slow, &mut ignored, |e, _| match e {
+        Event::TerminalDetached { .. } => true,
+        Event::TerminalOutput { data, .. } => {
+            decode_bytes(data).is_ok_and(|bytes| bytes.starts_with(b"\x1bc"))
         }
-    );
+        _ => false,
+    });
+    match end {
+        Event::TerminalOutput { data, .. } => {
+            let bytes = decode_bytes(&data).unwrap();
+            assert!(bytes.starts_with(b"\x1bc"), "not a resync");
+        }
+        other => panic!("the observer was detached: {other:?}"),
+    }
     // The controller received everything, is still attached and can still type.
     let mut controller = reader.join().unwrap();
     controller.input("\n").unwrap();
