@@ -1096,7 +1096,7 @@ fn attach(
     thread::spawn(move || write_stream(writer_stream, &rx, &link, &terminal_id));
     // Only a controller wakes a hibernated agent (ADR 0014); an observer triggers nothing.
     if attached.mode == AttachMode::Control {
-        shared.resume_hibernated(&p.terminal_id);
+        shared.controller_attached(&term, &p.terminal_id);
     }
     *attachment = Some(Attachment {
         stream: term,

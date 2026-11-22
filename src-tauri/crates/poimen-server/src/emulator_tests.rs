@@ -469,3 +469,81 @@ fn tone_is_parsed_and_an_unknown_value_is_ignored() {
         assert_eq!(got[0].tone, None, "{body}");
     }
 }
+
+#[test]
+fn snapshot_restores_the_kitty_keyboard_flags() {
+    for (input, flags) in [
+        (&b"\x1b[>1u"[..], TermMode::DISAMBIGUATE_ESC_CODES),
+        (b"\x1b[>31u", TermMode::KITTY_KEYBOARD_PROTOCOL),
+        (
+            b"\x1b[>1u\x1b[>11u",
+            TermMode::DISAMBIGUATE_ESC_CODES
+                | TermMode::REPORT_EVENT_TYPES
+                | TermMode::REPORT_ALL_KEYS_AS_ESC,
+        ),
+        (b"\x1b[>1u\x1b[<u", TermMode::empty()),
+    ] {
+        let mut e = fresh(40, 10);
+        e.feed(input);
+        let copy = replay(&e);
+        assert_eq!(
+            copy.mode() & TermMode::KITTY_KEYBOARD_PROTOCOL,
+            flags,
+            "{input:?}"
+        );
+        assert_eq!(copy.mode(), e.mode());
+    }
+}
+
+#[test]
+fn snapshot_restores_the_kitty_flags_of_the_alternate_screen() {
+    let mut e = fresh(40, 10);
+    e.feed(b"\x1b[?1049h\x1b[>5u");
+    let copy = replay(&e);
+    assert!(copy.mode().contains(TermMode::ALT_SCREEN));
+    assert_eq!(copy.mode(), e.mode());
+    assert!(copy.mode().contains(TermMode::REPORT_ALTERNATE_KEYS));
+    // Leaving the alternate screen on the copy drops them again, as on the original.
+    let mut copy = copy;
+    copy.feed(b"\x1b[?1049l");
+    e.feed(b"\x1b[?1049l");
+    assert_eq!(copy.mode(), e.mode());
+}
+
+fn links(e: &Emulator) -> Vec<(i32, usize, String, String)> {
+    let grid = e.term.grid();
+    let mut found = Vec::new();
+    for line in grid.topmost_line().0..=grid.bottommost_line().0 {
+        for c in 0..grid.columns() {
+            if let Some(link) = grid[Line(line)][Column(c)].hyperlink() {
+                found.push((line, c, link.id().to_string(), link.uri().to_string()));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn snapshot_restores_hyperlinks_of_the_screen_and_the_scrollback() {
+    let mut e = fresh(40, 3);
+    e.feed(b"\x1b]8;id=a;https://example.com/a\x1b\\one\x1b]8;;\x1b\\ plain\r\n");
+    e.feed(b"\x1b]8;;https://example.com/b\x07two\x1b]8;;\x07\r\nthree\r\nfour\r\nfive");
+    // The first links are in the scrollback now, the last one is on the screen.
+    e.feed(b"\r\n\x1b]8;id=c;https://example.com/c\x1b\\six \x1b[1mbold\x1b]8;;\x1b\\");
+    let before = links(&e);
+    assert!(before.len() >= 9, "{before:?}");
+    assert!(before.iter().any(|l| l.0 < 0));
+    assert!(before.iter().any(|l| l.0 >= 0));
+    let copy = replay(&e);
+    assert_eq!(links(&copy), before);
+    assert_eq!(row_text(&copy, 0), row_text(&e, 0));
+}
+
+#[test]
+fn a_hyperlink_over_blank_cells_is_kept_and_text_after_it_is_not_linked() {
+    let mut e = fresh(20, 3);
+    e.feed(b"\x1b]8;id=x;https://example.com/x\x1b\\   \x1b]8;;\x1b\\after");
+    let copy = replay(&e);
+    assert_eq!(links(&copy), links(&e));
+    assert_eq!(links(&copy).len(), 3);
+}

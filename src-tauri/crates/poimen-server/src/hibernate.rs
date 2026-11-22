@@ -16,7 +16,52 @@ use poimen_core::harness;
 use poimen_core::settings::{config_path, hibernate_after_minutes};
 use poimen_protocol::{AgentStatus, Event, Hibernated, TerminalStatus};
 
+use crate::stream::TermStream;
 use crate::{Server, Shared, lock};
+
+/// How long the PTY keeps the nudge size before it gets its own back.
+const NUDGE_HOLD: Duration = Duration::from_millis(80);
+
+/// Makes a full-screen program repaint for a client that just attached: the PTY is one row off
+/// for a moment and then back (SIGWINCH twice), the grid keeps its size. A resize that arrives
+/// meanwhile (the client fitting itself) wins and the size is not set back.
+fn nudge_repaint(shared: &Arc<Shared>, terminal_id: &str) {
+    let shared = Arc::clone(shared);
+    let id = terminal_id.to_string();
+    thread::spawn(move || {
+        let size = {
+            let mut inner = lock(&shared.inner);
+            let Some(entry) = inner.terminals.iter_mut().find(|t| t.info.id == id) else {
+                return;
+            };
+            let (cols, rows) = (entry.info.cols, entry.info.rows);
+            let off = if rows > 1 { rows - 1 } else { rows + 1 };
+            match entry.host.as_ref() {
+                Some(host) if host.resize(cols, off).is_ok() => (cols, rows),
+                _ => return,
+            }
+        };
+        thread::sleep(NUDGE_HOLD);
+        let mut inner = lock(&shared.inner);
+        if let Some(entry) = inner.terminals.iter_mut().find(|t| t.info.id == id)
+            && (entry.info.cols, entry.info.rows) == size
+            && let Some(host) = entry.host.as_ref()
+        {
+            let _ = host.resize(size.0, size.1);
+        }
+    });
+}
+
+impl Shared {
+    /// What a new controller of a terminal sets going: the resume of a hibernated agent and, on
+    /// the alternate screen, the repaint nudge.
+    pub(crate) fn controller_attached(self: &Arc<Self>, term: &TermStream, terminal_id: &str) {
+        self.resume_hibernated(terminal_id);
+        if term.alt_screen() {
+            nudge_repaint(self, terminal_id);
+        }
+    }
+}
 
 /// How often the sweeper looks.
 pub(crate) const SWEEP: Duration = Duration::from_secs(5);
