@@ -582,3 +582,66 @@ fn the_host_log_stays_when_the_host_vanished() {
         "{server_log}"
     );
 }
+
+/// What the fake host is told after its attach: the resizes, in order, until it is quiet.
+fn resizes_until_quiet(rx: &Receiver<String>) -> Vec<String> {
+    let mut seen = Vec::new();
+    while let Ok(line) = rx.recv_timeout(Duration::from_millis(600)) {
+        seen.push(line);
+    }
+    seen
+}
+
+fn resize_script(output: &'static str) -> (PtyHost, Receiver<String>) {
+    let (host, said, _) = fake(move |listener, start, tx| {
+        let mut peer = Peer::accept(&listener, 0, &start);
+        report(&tx, peer.read());
+        peer.output(1, output);
+        while let Some(message) = peer.read() {
+            if matches!(message, ClientMessage::Resize { .. }) {
+                report(&tx, Some(message));
+            }
+        }
+    });
+    (host, said)
+}
+
+#[test]
+fn a_controller_attach_to_a_full_screen_program_nudges_it_to_repaint() {
+    let (host, said) = resize_script("\x1b[?1049h\x1b[>1ufull screen");
+    let f = fixture("nudge", host);
+    let id = f.create().unwrap();
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "Some(Attach { since: 0 })"
+    );
+    f.wait_for_screen(&id, "full screen");
+    // An observer does not disturb the program.
+    assert!(resizes_until_quiet(&said).is_empty());
+    let attached = f.client.attach(&id, AttachMode::Control, false).unwrap();
+    assert_eq!(
+        resizes_until_quiet(&said),
+        [
+            "Some(Resize { cols: 90, rows: 19 })",
+            "Some(Resize { cols: 90, rows: 20 })"
+        ]
+    );
+    // The grid keeps its size and the kitty flags are in the snapshot.
+    assert_eq!((attached.info.cols, attached.info.rows), (90, 20));
+    let snapshot = decode_bytes(&attached.info.snapshot).unwrap();
+    assert!(String::from_utf8_lossy(&snapshot).contains("\x1b[>1u"));
+}
+
+#[test]
+fn a_controller_attach_to_the_primary_screen_does_not_resize() {
+    let (host, said) = resize_script("plain shell");
+    let f = fixture("no-nudge", host);
+    let id = f.create().unwrap();
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "Some(Attach { since: 0 })"
+    );
+    f.wait_for_screen(&id, "plain shell");
+    let _attached = f.client.attach(&id, AttachMode::Control, false).unwrap();
+    assert!(resizes_until_quiet(&said).is_empty());
+}

@@ -144,6 +144,11 @@ impl TermStream {
         self.lock().controller.is_some()
     }
 
+    /// Whether the emulator shows the alternate screen (a full-screen program).
+    pub fn alt_screen(&self) -> bool {
+        self.lock().emulator.alt_screen()
+    }
+
     pub fn is_controller(&self, client_id: u64) -> bool {
         self.lock().controller == Some(client_id)
     }
