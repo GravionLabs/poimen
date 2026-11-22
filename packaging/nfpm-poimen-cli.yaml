@@ -1,13 +1,17 @@
-# The poimen-cli package (#519): /usr/bin/poimen alone, for Linux hosts without the app. Built by release.yml with
-# nfpm; VERSION, ARCH (nfpm arch) and BINARY come from the environment. The app package ships /usr/bin/poimen too,
-# so the two conflict.
+# The poimen-cli package (#519, #1177): the console and the server for Linux hosts without the app (ADR 0006). All
+# three binaries go to /usr/bin, because the server starts its terminals in the PTY host next to its own binary
+# (ADR 0009). Built by release.yml with nfpm; VERSION, ARCH (nfpm arch), BINARY, SERVER, PTY_HOST and the channel
+# names SERVER_NAME and PTY_HOST_NAME (poimen-server and poimen-pty-host, with -rc on the rc channel) come from the
+# environment. The app package ships /usr/bin/poimen too, so the two conflict. dpkg and rpm replace a file by
+# renaming a new one over it, so an install over a running server leaves that process and its terminals alone
+# (ADR 0009); the package starts and stops nothing.
 name: poimen-cli
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
 section: utils
 maintainer: GravionLabs
-description: The poimen console (TUI and CLI) for poimen-server.
+description: The poimen console (TUI and CLI) with poimen-server, for hosts without the app.
 homepage: https://github.com/GravionLabs/poimen
 license: MIT
 conflicts:
@@ -15,5 +19,13 @@ conflicts:
 contents:
   - src: ${BINARY}
     dst: /usr/bin/poimen
+    file_info:
+      mode: 0755
+  - src: ${SERVER}
+    dst: /usr/bin/${SERVER_NAME}
+    file_info:
+      mode: 0755
+  - src: ${PTY_HOST}
+    dst: /usr/bin/${PTY_HOST_NAME}
     file_info:
       mode: 0755

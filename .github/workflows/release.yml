@@ -425,7 +425,7 @@ jobs:
           if [[ "${{ matrix.target }}" == *musl* ]]; then sudo apt-get update && sudo apt-get install -y musl-tools; fi
           rustup target add "${{ matrix.target }}"
           cd src-tauri
-          cargo build --release --locked -p poimen-console --target "${{ matrix.target }}"
+          cargo build --release --locked -p poimen-console -p poimen-server -p poimen-pty-host --target "${{ matrix.target }}"
 
       - name: Package
         shell: bash
@@ -438,11 +438,18 @@ jobs:
             file "$bin"
             "$bin" --version
             curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_$([ "${{ matrix.arch }}" = amd64 ] && echo x86_64 || echo arm64).tar.gz | tar -xz nfpm
+            release="src-tauri/target/${{ matrix.target }}/release"
+            "$release/poimen-server" --version
+            "$release/poimen-pty-host" --version
+            # The package carries the server and its PTY host named for the channel (#1177, as server-linux).
+            suffix=""; if [ "$POIMEN_CHANNEL" = rc ]; then suffix="-rc"; fi
             export ARCH="${{ matrix.arch }}" BINARY="$PWD/$bin" VERSION="${VERSION:-0.0.0}"
+            export SERVER="$PWD/$release/poimen-server" PTY_HOST="$PWD/$release/poimen-pty-host"
+            export SERVER_NAME="poimen-server$suffix" PTY_HOST_NAME="poimen-pty-host$suffix"
             # nfpm does not expand the environment in `contents.src` (the glob failed on a literal ${BINARY}),
-            # so fill the three variables into a copy of the file first.
+            # so fill the variables into a copy of the file first.
             cfg="$RUNNER_TEMP/nfpm-poimen-cli.yaml"
-            envsubst '${ARCH} ${VERSION} ${BINARY}' < packaging/nfpm-poimen-cli.yaml > "$cfg"
+            envsubst '${ARCH} ${VERSION} ${BINARY} ${SERVER} ${PTY_HOST} ${SERVER_NAME} ${PTY_HOST_NAME}' < packaging/nfpm-poimen-cli.yaml > "$cfg"
             ./nfpm package -f "$cfg" -p deb -t dist
             if [[ "$VERSION" != *-* ]]; then ./nfpm package -f "$cfg" -p rpm -t dist; fi
           fi

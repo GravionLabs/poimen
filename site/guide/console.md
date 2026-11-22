@@ -19,16 +19,21 @@ For agents there is also `poimen mcp`, an MCP server; it has a page of its own: 
 
 The console talks to a running `poimen-server` and never starts one itself. Next to the app this is automatic: the app starts the server, and it keeps running after you close the app.
 
-On a machine without the app (a server, a VM) you need two downloads of the same release:
+On a machine without the app (a server, a VM) install the `poimen-cli` package of the release (`.deb` or `.rpm`, it conflicts with the app package). It holds the console `poimen`, the server `poimen-server` and its PTY host `poimen-pty-host`, all in `/usr/bin`. It starts no server: start one per user yourself.
 
-1. The console: the `poimen-cli` package (`.deb` or `.rpm`, it conflicts with the app package), or `poimen-<version>-<target>.tar.gz`. **It holds only `poimen`, not the server.**
-2. The server: `poimen-server-<version>-<target>.tar.gz` (Linux, x86_64 and aarch64). It holds `poimen-server` and `poimen-pty-host`, which must stay in the same directory.
+```sh
+nohup poimen-server >/dev/null 2>&1 &   # one per user; a second start exits
+poimen doctor
+```
+
+Installing a newer package over a running server keeps its terminals; the new server runs after you stop the old one and start it again.
+
+Without the package (another system, or no root), download `poimen-<version>-<target>.tar.gz` (the console only) and `poimen-server-<version>-<target>.tar.gz` (Linux, x86_64 and aarch64; it holds `poimen-server` and `poimen-pty-host`, which must stay in the same directory):
 
 ```sh
 mkdir -p ~/.local/bin
 tar -xzf poimen-server-0.32.1-x86_64-unknown-linux-musl.tar.gz -C ~/.local/bin
-nohup ~/.local/bin/poimen-server >/dev/null 2>&1 &   # one per user; a second start exits
-poimen doctor
+nohup ~/.local/bin/poimen-server >/dev/null 2>&1 &
 ```
 
 The app can also install the server on a machine for you over ssh, see [Remote machines](/guide/remote-machines).
