@@ -35,7 +35,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 - `machines`: see [Remote machines](/guide/remote-machines).
 - `trustedProjects`: managed by the trust dialog and **Settings > Workspace > Trusted projects**, never imported.
-- `console.prefix` and `console.keys`: the TUI keys, see [Console and MCP](/guide/console).
+- `console.prefix` and `console.keys`: the TUI keys, see [Console](/guide/console#configuration).
 
 **Settings > General > Export & import** moves your settings to another machine as a JSON file. Import shows what it would add, change and remove before it writes anything.
 
