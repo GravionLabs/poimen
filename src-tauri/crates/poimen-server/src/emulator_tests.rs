@@ -547,3 +547,16 @@ fn a_hyperlink_over_blank_cells_is_kept_and_text_after_it_is_not_linked() {
     assert_eq!(links(&copy), links(&e));
     assert_eq!(links(&copy).len(), 3);
 }
+
+#[test]
+fn a_restored_grid_serializes_to_the_same_bytes_with_scrollback_and_alt_screen() {
+    let mut e = fresh(30, 6);
+    for n in 0..40 {
+        e.feed(format!("\x1b[3{}mline {n}\x1b[0m\r\n", n % 8).as_bytes());
+    }
+    e.feed(b"\x1b]2;title\x07\x1b[?2004h\x1b[?1049h\x1b[2;3Halt");
+    let first = e.snapshot();
+    let copy = replay(&e);
+    assert_eq!(copy.snapshot(), first);
+    assert_eq!(copy.size(), e.size());
+}

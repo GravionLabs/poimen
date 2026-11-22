@@ -334,8 +334,8 @@ fn a_gap_of_the_ring_is_one_marker_line_in_the_adopted_grid() {
         first.output(1, "early");
         let mut second = Peer::accept(&listener, 40, &start.endpoint);
         let _ = tx.send(format!("{:?}", second.read()));
-        // Records 1 to 38 left the ring while no server read it.
-        second.send(&HostMessage::Gap { from: 1, to: 38 });
+        // Records 2 to 38 left the ring while no server read it.
+        second.send(&HostMessage::Gap { from: 2, to: 38 });
         second.output(39, "late\r\n");
         second.output(40, "$ ready");
         while second.read().is_some() {}
@@ -366,11 +366,106 @@ fn a_gap_of_the_ring_is_one_marker_line_in_the_adopted_grid() {
     assert_eq!(
         lines,
         [
-            "[poimen: earlier output lost, 38 records left the host's buffer]",
+            "[poimen: earlier output lost, 37 records left the host's buffer]",
             "late"
         ],
         "{s:?}"
     );
+}
+
+/// Server A reads records 1 and 2 of a fake host and is stopped keeping the terminal; server B
+/// adopts it when the host is at record 4 and sends `second_gap` (if any), then records 3 and 4.
+/// Returns the screen of B and the history file of the terminal; `damage` may change the file
+/// between the two servers.
+fn restart_with_gap(
+    name: &str,
+    second_gap: Option<(u64, u64)>,
+    damage: impl FnOnce(&Path),
+) -> (String, PathBuf) {
+    let env = Env::new(name);
+    let (host, rx) = fake(move |listener, start, tx| {
+        let mut first = Peer::accept(&listener, 0, &start.endpoint);
+        first.read();
+        first.output(1, "early ");
+        first.output(2, "middle\r\n");
+        let mut second = Peer::accept(&listener, 4, &start.endpoint);
+        let _ = tx.send(format!("{:?}", second.read()));
+        if let Some((from, to)) = second_gap {
+            second.send(&HostMessage::Gap { from, to });
+        }
+        second.output(3, "down ");
+        second.output(4, "ready");
+        while second.read().is_some() {}
+    });
+    let (a, a_down) = start(&env.config(1, host));
+    let space = a.create_space("work", &env.work()).unwrap().id;
+    let id = a
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["fake-shell".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    wait_for_screen(&a, &id, "middle");
+    a.shutdown_keeping_terminals().unwrap();
+    a_down.recv_timeout(WAIT).unwrap();
+    let log = env.state_file().with_file_name("history").join(&id);
+    damage(&log);
+
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert_eq!(said(&rx), "Some(Attach { since: 0 })");
+    let s = wait_for_screen(&b, &id, "ready");
+    // The server is alive and answers.
+    assert!(b.list_terminals(None).is_ok());
+    (s, log)
+}
+
+#[test]
+fn a_restart_whose_log_covers_the_history_leaves_no_gap_marker() {
+    // The ring lost records 1 and 2 meanwhile, but the log has them.
+    let (s, _) = restart_with_gap("covered", Some((1, 2)), |_| {});
+    assert!(!s.contains("poimen:"), "{s:?}");
+    for text in ["early", "middle", "down ready"] {
+        assert!(s.contains(text), "{text}: {s:?}");
+    }
+}
+
+#[test]
+fn a_restart_whose_log_misses_records_keeps_the_gap_for_them_only() {
+    // Record 3 left the ring too and no log has it: one record lost.
+    let (s, _) = restart_with_gap("missing", Some((1, 3)), |_| {});
+    assert!(
+        s.contains("[poimen: earlier output lost, 1 record left the host's buffer]"),
+        "{s:?}"
+    );
+    assert!(s.contains("early") && s.contains("middle") && s.contains("ready"));
+}
+
+#[test]
+fn a_restart_without_a_log_builds_the_grid_from_the_ring_and_marks_the_gap() {
+    let (s, _) = restart_with_gap("nolog", Some((1, 3)), |log| {
+        std::fs::remove_file(log).unwrap();
+    });
+    assert!(
+        s.contains("[poimen: earlier output lost, 3 records left the host's buffer]"),
+        "{s:?}"
+    );
+    assert!(!s.contains("early") && s.contains("ready"), "{s:?}");
+}
+
+#[test]
+fn a_damaged_log_never_stops_the_server() {
+    let (s, _) = restart_with_gap("damaged", None, |log| {
+        // The checkpoint of the shutdown and the end of the log are garbage.
+        let mut data = std::fs::read(log).unwrap();
+        let at = data.len() - 40;
+        for b in &mut data[at..] {
+            *b ^= 0x5a;
+        }
+        std::fs::write(log, data).unwrap();
+    });
+    assert!(s.contains("ready"), "{s:?}");
 }
 
 /// A terminal list and layout as a previous server left them: space `s1` with tab `tab3`, a

@@ -59,7 +59,7 @@ fn the_output_of_a_terminal_lands_in_its_history_log() {
             .into_iter()
             .filter_map(|r| match r {
                 Record::Output(b) => Some(b),
-                Record::Resize { .. } => None,
+                _ => None,
             })
             .flatten()
             .collect();

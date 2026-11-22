@@ -14,6 +14,7 @@
 //! records up to its `hello` as a replay ([`Chunk::Replay`]). A `gap` becomes a marker line in
 //! the grid ([`gap_marker`]).
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -310,7 +311,7 @@ impl Drop for Handle {
 pub(crate) fn start(
     host: &PtyHost,
     spec: &Spec<'_>,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Result<Handle, String> {
     let endpoint = endpoint_for(spec.socket, spec.terminal_id);
@@ -337,6 +338,7 @@ pub(crate) fn start(
         conn,
         lines,
         replay_until: 0,
+        read_from: 0,
         version,
         child_pid,
     };
@@ -430,10 +432,13 @@ fn hello_of(endpoint: &Path) -> HelloOf {
 
 /// Reads a [`reach`]ed host as [`start`] reads a new one; the records up to its `hello` go to
 /// `on_output` as a replay (`live` false), so their queries are not answered a second time.
+/// The records up to `read_from` are not read again: the grid has them already (a rebuild from
+/// the history log, #1194); with `0` the whole ring is read.
 pub(crate) fn adopt(
     reached: Reached,
     log: &Path,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    read_from: u64,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
     let Reached {
@@ -451,6 +456,7 @@ pub(crate) fn adopt(
         conn,
         lines,
         replay_until: seq,
+        read_from,
         version,
         child_pid,
     };
@@ -465,6 +471,8 @@ struct Source {
     conn: Conn,
     lines: BufReader<Conn>,
     replay_until: u64,
+    /// The records up to this `seq` count as read.
+    read_from: u64,
     version: String,
     child_pid: Option<u32>,
 }
@@ -472,7 +480,7 @@ struct Source {
 /// Starts the threads that read and write an attached host connection.
 fn follow(
     source: Source,
-    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_output: impl FnMut(&[u8], bool, u64) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
     let Source {
@@ -481,13 +489,14 @@ fn follow(
         conn,
         lines,
         replay_until,
+        read_from,
         version,
         child_pid,
     } = source;
     let conn = HostConn(Arc::new(Mutex::new(conn)));
     let handle = Handle {
         endpoint,
-        read: Arc::new(AtomicU64::new(0)),
+        read: Arc::new(AtomicU64::new(read_from)),
         outbox: Outbox::new(),
         closing: Arc::new(AtomicBool::new(false)),
         conn: conn.clone(),
@@ -499,6 +508,7 @@ fn follow(
     thread::spawn(move || outbox.run(&writing));
     let (tx, rx) = mpsc::channel::<Chunk>();
     let queued = Arc::new(AtomicUsize::new(0));
+    let pending = Arc::new(Mutex::new(VecDeque::new()));
     let reader = Reader {
         feed: Feed {
             endpoint: handle.endpoint.clone(),
@@ -506,6 +516,7 @@ fn follow(
             read: Arc::clone(&handle.read),
             tx,
             queued: Arc::clone(&queued),
+            pending: Arc::clone(&pending),
             replay_until,
         },
         conn,
@@ -516,8 +527,21 @@ fn follow(
     let echo = Arc::clone(&handle.outbox);
     let interactive = move || echo.input_within(pty::ECHO_WINDOW);
     thread::spawn(move || {
+        let mut done = read_from;
         let code = pty::coalesce(&rx, interactive, |batch, live| {
-            on_output(batch, live);
+            // A batch is whole records: the last one in it is the `seq` the grid has reached.
+            let mut left = batch.len();
+            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            while let Some(&(seq, len)) = pending.front() {
+                if len > left {
+                    break;
+                }
+                left -= len;
+                done = seq;
+                pending.pop_front();
+            }
+            drop(pending);
+            on_output(batch, live, done);
             queued.fetch_sub(batch.len(), Ordering::SeqCst);
         });
         on_exit(code);
@@ -590,6 +614,9 @@ struct Feed {
     tx: mpsc::Sender<Chunk>,
     /// Bytes in `tx` not yet fed ([`QUEUE_BYTES`]).
     queued: Arc<AtomicUsize>,
+    /// `seq` and length of the chunks in `tx` not yet fed, to tell the stream how far a batch
+    /// reaches.
+    pending: Arc<Mutex<VecDeque<(u64, usize)>>>,
     /// Records up to this `seq` ran before this server read the host: a replay.
     replay_until: u64,
 }
@@ -689,6 +716,7 @@ impl Feed {
                     }
                     self.read.store(seq, Ordering::SeqCst);
                     self.queued.fetch_add(data.len(), Ordering::SeqCst);
+                    self.note(seq, data.len());
                     if self.tx.send(self.chunk(seq, data)).is_err() {
                         return Ended::Stopped;
                     }
@@ -698,9 +726,12 @@ impl Feed {
                     if to <= self.read.load(Ordering::SeqCst) {
                         continue;
                     }
-                    let after_output = self.read.load(Ordering::SeqCst) > 0;
-                    let marker = gap_marker(from, to, after_output);
+                    let read = self.read.load(Ordering::SeqCst);
+                    let after_output = read > 0;
+                    // What the grid has seen is not lost.
+                    let marker = gap_marker(from.max(read + 1), to, after_output);
                     self.queued.fetch_add(marker.len(), Ordering::SeqCst);
+                    self.note(to, marker.len());
                     if self.tx.send(self.chunk(to, marker)).is_err() {
                         return Ended::Stopped;
                     }
@@ -718,6 +749,13 @@ impl Feed {
                 HostMessage::Hello { .. } | HostMessage::Unknown => {}
             }
         }
+    }
+
+    fn note(&self, seq: u64, len: usize) {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back((seq, len));
     }
 
     /// Output of record `seq`: a replay when it ran before this server read the host.
