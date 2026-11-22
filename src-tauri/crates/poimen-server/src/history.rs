@@ -407,9 +407,12 @@ fn prepare_dir(dir: &Path) -> std::io::Result<()> {
 /// Windows: the directory keeps only the user's own access (no inherited entries). Best
 /// effort: `%LOCALAPPDATA%` is the user's profile already.
 #[cfg(windows)]
+#[allow(clippy::disallowed_methods)] // CREATE_NO_WINDOW is set below.
 fn owner_only_acl(dir: &Path) {
+    use std::os::windows::process::CommandExt;
     if let Ok(user) = std::env::var("USERNAME") {
         let _ = std::process::Command::new("icacls")
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .arg(dir)
             .args(["/inheritance:r", "/grant:r"])
             .arg(format!("{user}:(OI)(CI)F"))
