@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal } from "@angular/core";
+import { joinPath } from "./path";
 import { UiState } from "./ui-state";
 import type { IconName } from "../ui/icon/icon";
 import type { Mode } from "./backend";
@@ -49,6 +50,19 @@ export function changesDir(id: string): string | null {
   return id.startsWith(CHANGES_TAB_PREFIX) ? id.slice(CHANGES_TAB_PREFIX.length) : null;
 }
 
+/** Prefix of a file preview tab id; the rest is the absolute path of the file (#1004). */
+const PREVIEW_TAB_PREFIX = "preview:";
+
+/** The id of the preview tab of the file `path` (at most one per file). */
+export function previewTab(path: string): string {
+  return PREVIEW_TAB_PREFIX + path;
+}
+
+/** The file a preview tab shows; `null` for any other tab. */
+export function previewPath(id: string): string | null {
+  return id.startsWith(PREVIEW_TAB_PREFIX) ? id.slice(PREVIEW_TAB_PREFIX.length) : null;
+}
+
 /** Prefix of a space overview tab id; the rest is the id of the space it shows. */
 const SPACE_TAB_PREFIX = "poimen:space:";
 
@@ -64,15 +78,24 @@ export function spaceOfTab(id: string): string | null {
 
 /**
  * What a tab shows: a herdr pane (live terminal), the settings view, GitHub, the flow of a
- * pane's agent run, the changes of a directory or the overview of a space.
+ * pane's agent run, the changes of a directory, a file preview or the overview of a space.
  */
-export type TabKind = "pane" | "settings" | "github" | "deliver" | "flow" | "changes" | "space";
+export type TabKind =
+  | "pane"
+  | "settings"
+  | "github"
+  | "deliver"
+  | "flow"
+  | "changes"
+  | "preview"
+  | "space";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
   if (id === GITHUB_TAB) return "github";
   if (id === DELIVER_TAB) return "deliver";
   if (changesDir(id) !== null) return "changes";
+  if (previewPath(id) !== null) return "preview";
   if (spaceOfTab(id) !== null) return "space";
   return flowPane(id) !== null ? "flow" : "pane";
 }
@@ -83,6 +106,7 @@ const KIND_ICONS: Partial<Record<TabKind, IconName>> = {
   deliver: "runs",
   flow: "flow",
   changes: "changes",
+  preview: "preview",
   space: "space",
 };
 
@@ -347,6 +371,32 @@ export class EditorTabs {
     if (wanted?.dir !== dir) return undefined;
     this.changesFocus.set(null);
     return wanted.file;
+  }
+
+  /** The file each open changes tab has selected, by directory (what the palette previews, #1004). */
+  readonly changesSelection = signal<ReadonlyMap<string, string>>(new Map());
+  setChangesSelection(dir: string, path: string | null): void {
+    this.changesSelection.update((m) => {
+      const next = new Map(m);
+      if (path === null) next.delete(dir);
+      else next.set(dir, path);
+      return next;
+    });
+  }
+
+  /** The palette entry "Preview File": the file selected in the active Changes tab; false without one. */
+  previewSelectedFile(): boolean {
+    const active = this.activeId();
+    const dir = active === null ? null : changesDir(active);
+    const file = dir === null ? undefined : this.changesSelection().get(dir);
+    if (dir === null || !file) return false;
+    this.openPreview(joinPath(dir, file));
+    return true;
+  }
+
+  /** Opens the preview tab of the file `path` (at most one per file) as a pinned tab, or activates it. */
+  openPreview(path: string): void {
+    this.openPinned(previewTab(path));
   }
 
   /** Opens the overview tab of `spaceId` (at most one per space) as a pinned tab, or activates it. */

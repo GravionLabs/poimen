@@ -64,6 +64,7 @@ import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
   changesDir,
+  previewPath,
   flowPane,
   spaceOfTab,
   spaceTab,
@@ -83,6 +84,8 @@ import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
 import { ChangesView } from "./changes/changes-view";
+import { FilePreview } from "./file-preview/file-preview";
+import { specialTabItem } from "./tab-bar-special";
 import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
@@ -157,6 +160,7 @@ const ZOOM_STEP = 1;
     BottomPanel,
     FlowTab,
     ChangesView,
+    FilePreview,
     SpaceOverview,
     NgTemplateOutlet,
     PaneDialog,
@@ -274,34 +278,8 @@ export class App {
       this.editor.groups().map((group) => [
         group.id,
         group.tabs.map((tab): TabBarItem => {
-          if (tabKind(tab.paneId) === "settings") {
-            return { id: tab.paneId, label: "Settings", title: "Settings" };
-          }
-          if (tabKind(tab.paneId) === "github") {
-            return {
-              id: tab.paneId,
-              label: "Pull requests",
-              group: "GitHub",
-              title: "GitHub pull requests",
-            };
-          }
-          if (tabKind(tab.paneId) === "deliver") {
-            return { id: tab.paneId, label: "Runs", title: "Agent runs" };
-          }
-          const spaceOf = spaceOfTab(tab.paneId);
-          if (spaceOf !== null) {
-            const name = snap.spaces.find((w) => w.space_id === spaceOf)?.label ?? spaceOf;
-            return { id: tab.paneId, label: `Space: ${name}`, title: `Overview of space ${name}` };
-          }
-          const changesOf = changesDir(tab.paneId);
-          if (changesOf !== null) {
-            const name = changesOf.split("/").filter(Boolean).pop() ?? changesOf;
-            return {
-              id: tab.paneId,
-              label: `Changes: ${name}`,
-              title: `Changes of ${changesOf}`,
-            };
-          }
+          const special = specialTabItem(tab.paneId, snap.spaces);
+          if (special) return special;
           const flowOf = flowPane(tab.paneId);
           const paneId = flowOf ?? tab.paneId;
           const pane = this.pane(paneId);
@@ -587,6 +565,12 @@ export class App {
     }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
+      return;
+    }
+    if (id === "previewFile") {
+      if (!this.editor.previewSelectedFile()) {
+        this.spaceActions.notify("Preview File: select a file in a Changes tab first");
+      }
       return;
     }
     if (id === "startIssueTask") {
@@ -998,6 +982,11 @@ export class App {
   /** The directory of the group's active tab when that is a changes tab. */
   protected changesOf(group: EditorGroup): string | null {
     return group.activeId === null ? null : changesDir(group.activeId);
+  }
+
+  /** The file of the group's active tab when that is a preview tab. */
+  protected previewOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : previewPath(group.activeId);
   }
 
   protected isDeliver(id: string | null): boolean {

@@ -24,6 +24,7 @@ export interface PoimenCommand {
     | "githubMilestones"
     | "openDeliver"
     | "showChanges"
+    | "previewFile"
     | "markUnread"
     | "showSpaceOverview"
     | "closeSpace"
@@ -89,6 +90,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubMilestones", title: "GitHub: Milestones" },
   { id: "openDeliver", title: "Open Runs" },
   { id: "showChanges", title: "Show Changes" },
+  { id: "previewFile", title: "Preview File" },
   { id: "markUnread", title: "Mark Agent as Unread" },
   { id: "showSpaceOverview", title: "Show Space Overview" },
   { id: "startTask", title: "Start task from issue…" },
@@ -174,6 +176,7 @@ export class CommandPalette {
         c.id === "githubMilestones" ||
         c.id === "openDeliver" ||
         c.id === "showChanges" ||
+        c.id === "previewFile" ||
         c.id === "markUnread" ||
         c.id === "showSpaceOverview" ||
         c.id === "closeSpace" ||

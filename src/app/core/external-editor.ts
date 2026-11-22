@@ -1,4 +1,5 @@
 import { Injectable, inject } from "@angular/core";
+import { joinPath } from "./path";
 import { SpaceActions } from "./space-actions";
 import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
@@ -7,12 +8,6 @@ import { TauriBridge } from "./tauri";
 export interface EditorPosition {
   line?: number;
   column?: number;
-}
-
-/** The path `file` (relative to `dir`, or absolute as it is) as one path, with `/` between the parts. */
-export function joinPath(dir: string, file: string): string {
-  if (/^([\\/]|[A-Za-z]:[\\/])/.test(file)) return file;
-  return `${dir.replace(/[\\/]+$/, "")}/${file.replace(/^[\\/]+/, "")}`;
 }
 
 /**
@@ -52,3 +47,5 @@ export class ExternalEditor {
     if (cwd) void this.open(cwd);
   }
 }
+
+export { joinPath };

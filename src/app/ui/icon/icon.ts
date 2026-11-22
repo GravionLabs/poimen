@@ -30,6 +30,14 @@ const STROKES = {
   runs: ["M6 3l14 9-14 9z"],
   space: ["M3 3h7v9H3z", "M14 3h7v5h-7z", "M14 12h7v9h-7z", "M3 16h7v5H3z"],
   changes: ["M12 3v14", "M5 10h14", "M5 21h14"],
+  // Lucide "file-text": a file preview (#1004).
+  preview: [
+    "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z",
+    "M14 2v4a2 2 0 0 0 2 2h4",
+    "M10 9H8",
+    "M16 13H8",
+    "M16 17H8",
+  ],
   flow: [
     "M5 3h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
     "M7 11v4a2 2 0 0 0 2 2h4",
