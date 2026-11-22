@@ -1,0 +1,125 @@
+@if (editing(); as e) {
+  <section class="snippet-form" aria-label="Edit snippet">
+    <label class="field grow">
+      <span>Label</span>
+      <input
+        hx-input
+        size="small"
+        type="text"
+        name="snippet-label"
+        [value]="e.draft.label"
+        (input)="setLabel($event)"
+      />
+    </label>
+    @if (errors()?.label; as m) {
+      <p class="field-error">{{ m }}</p>
+    }
+    <label class="field">
+      <span>Text</span>
+      <textarea
+        name="snippet-text"
+        rows="4"
+        [value]="e.draft.text"
+        (input)="setText($event)"
+      ></textarea>
+    </label>
+    @if (errors()?.text; as m) {
+      <p class="field-error">{{ m }}</p>
+    }
+    <label class="field">
+      <span>Send to</span>
+      <select name="snippet-target" (change)="setTarget($event)">
+        <option value="terminal" [selected]="e.draft.target === 'terminal'">
+          The pane (typed into the terminal)
+        </option>
+        <option value="agent" [selected]="e.draft.target === 'agent'">
+          An agent (sent as a prompt)
+        </option>
+      </select>
+    </label>
+    <label class="check">
+      <input
+        hx-checkbox
+        type="checkbox"
+        name="snippet-enter"
+        [checked]="e.draft.enter"
+        [disabled]="e.draft.target === 'agent'"
+        (change)="setEnter($event)"
+      />
+      Press Enter after the text
+    </label>
+    @if (e.draft.target === "agent") {
+      <p class="hint">An agent prompt is always submitted.</p>
+    }
+    <div class="toolbar-row">
+      <span class="spacer"></span>
+      <button
+        hx-button
+        size="small"
+        variant="outlined"
+        severity="secondary"
+        type="button"
+        (click)="cancel()"
+      >
+        Cancel
+      </button>
+      <button hx-button size="small" type="button" [disabled]="!valid()" (click)="save()">
+        Save snippet
+      </button>
+    </div>
+  </section>
+} @else {
+  <p class="hint">
+    Text you send again and again. A snippet shows in the command palette as
+    <code>Snippet: &lt;label&gt;</code> and in the menu of a pane; one for an agent is offered for
+    agent panes only. The commands of a project file stay as they are.
+  </p>
+  @if (warnings().length > 0) {
+    <ul class="warnings">
+      @for (w of warnings(); track w) {
+        <li>{{ w }}</li>
+      }
+    </ul>
+  }
+  @if (writeError(); as m) {
+    <p class="field-error" role="alert">{{ m }}</p>
+  }
+  <ul class="rows" aria-label="Snippets">
+    @for (s of snippets(); track s.label; let i = $index) {
+      <li class="row-item">
+        <strong>{{ s.label }}</strong>
+        <span class="snippet-text">{{ s.text }}</span>
+        <span class="hint">{{ summary(s) }}</span>
+        <span class="actions">
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            [attr.aria-label]="'Edit ' + s.label"
+            (click)="edit(i)"
+          >
+            Edit
+          </button>
+          <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="danger"
+            type="button"
+            [attr.aria-label]="'Remove ' + s.label"
+            (click)="remove(i)"
+          >
+            Remove
+          </button>
+        </span>
+      </li>
+    } @empty {
+      <li class="row-item"><span class="hint">No snippets yet.</span></li>
+    }
+  </ul>
+  <div class="toolbar-row">
+    <button hx-button size="small" type="button" (click)="add()">Add snippet</button>
+  </div>
+}

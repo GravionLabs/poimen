@@ -36,6 +36,8 @@ mod server_install;
 mod server_paths;
 mod settings;
 mod settings_transfer;
+mod settings_write;
+mod snippets;
 mod spaces;
 mod task_start;
 mod terminal_colors;
@@ -794,21 +796,6 @@ async fn resolve_space_template(cwd: String) -> Option<TemplateHint> {
     .await
     .ok()
     .flatten()
-}
-
-/// Writes only `layouts` after validating it (named layouts, ADR 0011); a layout a template uses
-/// cannot be dropped or renamed.
-#[tauri::command]
-fn set_layouts(layouts: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    poimen_core::settings::save_layouts(&home, &layouts)
-}
-
-/// Writes only `spaceTemplates` after validating it; the settings watcher emits the change.
-#[tauri::command]
-fn set_space_templates(templates: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_space_templates(&home, &templates)
 }
 
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
@@ -2910,8 +2897,10 @@ pub fn run() {
             paste_image,
             usage_claude,
             set_spaces_layout,
-            set_layouts,
-            set_space_templates,
+            settings_write::set_layouts,
+            snippets::set_snippets,
+            snippets::terminal_type,
+            settings_write::set_space_templates,
             resolve_space_template,
             revoke_project,
             settings_export,

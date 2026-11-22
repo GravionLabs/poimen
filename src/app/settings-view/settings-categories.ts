@@ -85,6 +85,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Preview",
         ],
       },
+      {
+        id: "snippets",
+        title: "Snippets",
+        labels: ["Add snippet", "Label", "Text", "Send to", "Press Enter"],
+      },
       { id: "trusted-projects", title: "Trusted projects", labels: ["Revoke"] },
     ],
   },

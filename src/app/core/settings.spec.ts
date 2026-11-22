@@ -181,6 +181,7 @@ describe("parseSettings", () => {
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       machines: [],
+      snippets: [],
       sounds: { blocked: false, done: false },
       usage: { claude: true },
       home: "/Users/x",

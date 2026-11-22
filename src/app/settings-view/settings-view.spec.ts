@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { Type } from "@angular/core";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -24,6 +25,7 @@ import {
 import { allPages, SETTINGS_GROUPS } from "./settings-categories";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
+import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 
@@ -141,36 +143,23 @@ function setup(
       template: readFileSync("src/app/settings-view/settings-view.html", "utf8"),
     },
   });
-  TestBed.overrideComponent(LayoutTabsEditor, {
-    set: {
-      templateUrl: undefined,
-      styleUrl: undefined,
-      styleUrls: undefined,
-      template: readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8"),
-    },
-  });
-  TestBed.overrideComponent(LayoutsEditor, {
-    set: {
-      templateUrl: undefined,
-      styleUrl: undefined,
-      styleUrls: undefined,
-      template: readFileSync("src/app/settings-view/layouts-editor.html", "utf8"),
-    },
-  });
-  TestBed.overrideComponent(SettingsImportPanel, {
-    set: {
-      templateUrl: undefined,
-      styleUrl: undefined,
-      template: readFileSync("src/app/settings-view/settings-import-panel.html", "utf8"),
-    },
-  });
-  TestBed.overrideComponent(SpaceTemplatesEditor, {
-    set: {
-      templateUrl: undefined,
-      styleUrl: undefined,
-      template: readFileSync("src/app/settings-view/space-templates-editor.html", "utf8"),
-    },
-  });
+  const editors: [Type<unknown>, string][] = [
+    [LayoutTabsEditor, "layout-tabs-editor"],
+    [LayoutsEditor, "layouts-editor"],
+    [SettingsImportPanel, "settings-import-panel"],
+    [SpaceTemplatesEditor, "space-templates-editor"],
+    [SnippetsEditor, "snippets-editor"],
+  ];
+  for (const [component, name] of editors) {
+    TestBed.overrideComponent(component, {
+      set: {
+        templateUrl: undefined,
+        styleUrl: undefined,
+        styleUrls: undefined,
+        template: readFileSync(`src/app/settings-view/${name}.html`, "utf8"),
+      },
+    });
+  }
   TestBed.inject(UiState).selectSettingsPage(page);
   const store = TestBed.inject(SettingsStore);
   store["_settings"].set({ ...DEFAULT_SETTINGS, colorSchema, explorerRoots });
@@ -630,6 +619,7 @@ describe("SettingsView categories", () => {
       "Explorer",
       "Templates",
       "Layouts",
+      "Snippets",
       "Trusted projects",
       "Backend",
       "Server",
@@ -843,7 +833,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(13);
+    expect(titles(host)).toHaveLength(14);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -991,6 +981,7 @@ describe("SettingsView categories", () => {
       readFileSync("src/app/settings-view/layouts-editor.html", "utf8") +
       readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8");
     const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
+    const snippets = readFileSync("src/app/settings-view/snippets-editor.html", "utf8");
     for (const page of allPages()) {
       const source =
         page.id === "layouts"
@@ -999,7 +990,9 @@ describe("SettingsView categories", () => {
             ? templates
             : page.id === "machines"
               ? machinesPage
-              : html;
+              : page.id === "snippets"
+                ? snippets
+                : html;
       for (const label of page.labels) {
         expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
       }
