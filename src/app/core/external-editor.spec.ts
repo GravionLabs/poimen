@@ -68,7 +68,15 @@ describe("ExternalEditor entries", () => {
         { provide: SpaceActions, useValue: { notify } },
         {
           provide: SpacesStore,
-          useValue: { snapshot: () => ({ spaces: [{ space_id: "s1", cwd: "/work/s1" }] }) },
+          useValue: {
+            snapshot: () => ({ spaces: [{ space_id: "s1", cwd: "/work/s1" }] }),
+            all: () => ({
+              spaces: [
+                { space_id: "s1", cwd: "/work/s1" },
+                { space_id: "box::s2", cwd: "/srv/s2", machine: "box" },
+              ],
+            }),
+          },
         },
         { provide: ExternalEditor, useClass: ExternalEditor, deps: [] },
       ],
@@ -81,6 +89,22 @@ describe("ExternalEditor entries", () => {
       line: null,
       column: null,
     });
+  });
+
+  it("opens the directory of a space of a machine over ssh (#1005)", () => {
+    service().openSpace("box::s2");
+    expect(invoke).toHaveBeenCalledWith("open_in_editor", {
+      path: "/srv/s2",
+      line: null,
+      column: null,
+      machine: "box",
+    });
+  });
+
+  it("names the setting when the remote editor cannot be started", async () => {
+    invoke.mockRejectedValueOnce("no editor with remote support (VS Code, Zed) found on the PATH");
+    expect(await service().openRemote("box", "/srv/s2")).toBe(false);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("remote support"), "error");
   });
 
   it("says so when the palette command has no active tab", () => {

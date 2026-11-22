@@ -215,15 +215,33 @@ pub fn launch(
     Ok((program, args, resolved))
 }
 
-/// Opens `path` (at `line` and `column`) in the editor.
+/// Opens `path` (at `line` and `column`) in the editor. With `machine` the path is on that machine
+/// (#1005, connected now) and opens over ssh in VS Code Remote-SSH or Zed.
 #[tauri::command]
-pub fn open_in_editor(path: String, line: Option<u32>, column: Option<u32>) -> Result<(), String> {
+pub fn open_in_editor(
+    machines: tauri::State<'_, std::sync::Arc<crate::machines::Machines>>,
+    path: String,
+    line: Option<u32>,
+    column: Option<u32>,
+    machine: Option<String>,
+) -> Result<(), String> {
     let search_path = gui_path::child_path();
+    if let Some(machine) = machine {
+        machines.connected_backend(&machine)?;
+        let ssh = machines.config(&machine)?.ssh;
+        let (_, args, resolved) = launch_remote(&read_config(), &search_path, &ssh, &path)?;
+        return spawn_detached(&resolved, args, &search_path);
+    }
     let (_, args, resolved) = launch(&read_config(), &search_path, &path, line, column)?;
-    let mut command = gui_path::command(&resolved);
+    spawn_detached(&resolved, args, &search_path)
+}
+
+/// Starts the launcher without a shell and reaps it on a thread.
+fn spawn_detached(resolved: &Path, args: Vec<String>, search_path: &str) -> Result<(), String> {
+    let mut command = gui_path::command(resolved);
     command
         .args(args)
-        .env("PATH", &search_path)
+        .env("PATH", search_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -235,6 +253,75 @@ pub fn open_in_editor(path: String, line: Option<u32>, column: Option<u32>) -> R
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// The editors that open a folder on a machine over ssh (#1005), in the order they are tried.
+const REMOTE_PRESETS: &[&str] = &["vscode", "zed"];
+
+/// The program and arguments that open `path` on the machine `ssh` (a `~/.ssh/config` host or
+/// `user@host`) in the preset `id`: VS Code with the Remote-SSH authority `ssh-remote+<ssh>`, Zed
+/// with `ssh://<ssh><path>`. `None` for an editor without remote support.
+pub fn remote_argv(id: &str, ssh: &str, path: &str) -> Option<(String, Vec<String>)> {
+    let program = preset(id)?.program.to_owned();
+    let args = match id {
+        "vscode" => vec![
+            "--remote".to_owned(),
+            format!("ssh-remote+{ssh}"),
+            path.to_owned(),
+        ],
+        "zed" => vec![format!("ssh://{ssh}{}", percent_encode_path(path))],
+        _ => return None,
+    };
+    Some((program, args))
+}
+
+/// `path` with every byte outside `A-Z a-z 0-9 - . _ ~ /` as `%XX` (a URL path).
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// The program, arguments and resolved binary for opening the remote `path` on `ssh`. The `editor`
+/// setting wins and has to be a preset with remote support; without it the first of those found on
+/// `search_path` is used.
+pub fn launch_remote(
+    config: &str,
+    search_path: &str,
+    ssh: &str,
+    path: &str,
+) -> Result<(String, Vec<String>, PathBuf), String> {
+    if !path.starts_with('/') {
+        return Err(format!("{path} is not an absolute path on the machine"));
+    }
+    if ssh.is_empty() || ssh.starts_with('-') {
+        return Err(format!("{ssh:?} is not an ssh target"));
+    }
+    let id = match parse_setting(config)? {
+        Some(Choice::Preset(id)) if REMOTE_PRESETS.contains(&id) => id,
+        Some(_) => {
+            return Err(
+                "the editor in config.json cannot open a remote space; use \"vscode\" or \"zed\""
+                    .into(),
+            );
+        }
+        None => REMOTE_PRESETS
+            .iter()
+            .copied()
+            .find(|id| preset(id).is_some_and(|p| find_program(p.program, search_path).is_some()))
+            .ok_or("no editor with remote support (VS Code, Zed) found on the PATH")?,
+    };
+    let (program, args) = remote_argv(id, ssh, path).expect("a remote preset has an argv");
+    let resolved = find_program(&program, search_path).ok_or_else(|| {
+        format!("the editor \"{program}\" was not found on the PATH; set \"editor\" in config.json (Settings)")
+    })?;
+    Ok((program, args, resolved))
 }
 
 /// A path found in terminal text that is a file (#1003).
@@ -398,5 +485,37 @@ mod tests {
             Some(dir.join("src/a.ts"))
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn remote_editors_get_the_ssh_authority_or_url() {
+        assert_eq!(
+            remote_argv("vscode", "box", "/srv/my repo"),
+            Some((
+                "code".into(),
+                vec![
+                    "--remote".into(),
+                    "ssh-remote+box".into(),
+                    "/srv/my repo".into()
+                ]
+            ))
+        );
+        assert_eq!(
+            remote_argv("zed", "me@box", "/srv/my repo"),
+            Some(("zed".into(), vec!["ssh://me@box/srv/my%20repo".into()]))
+        );
+        assert_eq!(remote_argv("idea", "box", "/r"), None);
+    }
+
+    #[test]
+    fn remote_launch_needs_a_remote_editor_and_a_clean_target() {
+        let bad = launch_remote(r#"{"editor":"idea"}"#, "", "box", "/r").unwrap_err();
+        assert!(bad.contains("cannot open a remote space"));
+        let argv = launch_remote(r#"{"editor":["ed","{path}"]}"#, "", "box", "/r");
+        assert!(argv.is_err());
+        assert!(launch_remote("{}", "", "-oProxy", "/r").is_err());
+        assert!(launch_remote("{}", "", "box", "relative").is_err());
+        let none = launch_remote("{}", "/nonexistent", "box", "/r").unwrap_err();
+        assert!(none.contains("remote support"));
     }
 }
