@@ -55,10 +55,22 @@ pub(crate) fn rebuild(path: &Path, initial: (u16, u16), scrollback: usize) -> Op
             _ => None,
         })
         .unwrap_or_else(|| (Emulator::new(initial.0, initial.1, scrollback), 0, 0));
-    for record in &records[from..] {
+    let mut tail = &records[from..];
+    // Output a crash left without its `seq` would be read from the host's ring again.
+    if records.iter().any(|r| matches!(r, Record::Seq(_))) {
+        while let [rest @ .., Record::Output(_)] = tail {
+            tail = rest;
+        }
+    }
+    // Dropped records: the log cannot say what the grid missed since the checkpoint.
+    if tail.iter().any(|r| matches!(r, Record::Hole)) {
+        return None;
+    }
+    for record in tail {
         match record {
             Record::Output(bytes) => emulator.feed(bytes),
             Record::Resize { cols, rows } => emulator.resize(*cols, *rows),
+            Record::Hole => {}
             Record::Seq(s) => seq = seq.max(*s),
             // An invalid one: its records are replayed from the one before.
             Record::Checkpoint(c) => seq = seq.max(c.seq),

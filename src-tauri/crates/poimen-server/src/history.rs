@@ -35,6 +35,7 @@ const KIND_OUTPUT: u8 = 1;
 const KIND_RESIZE: u8 = 2;
 const KIND_CHECKPOINT: u8 = 3;
 const KIND_SEQ: u8 = 4;
+pub(crate) const KIND_HOLE: u8 = 6;
 /// Kind byte, `seq`, `cols`, `rows` of a checkpoint payload.
 const CHECKPOINT_HEAD: usize = 13;
 
@@ -49,6 +50,8 @@ pub enum Record {
     /// The host `seq` of the last output record logged so far (#1194).
     Seq(u64),
     Checkpoint(Checkpoint),
+    /// Records before this one were dropped (a full queue): the log is not complete here.
+    Hole,
 }
 
 /// The grid of a terminal at one point of its log (#1194).
@@ -94,6 +97,8 @@ pub struct History {
     log: PathBuf,
     dir: PathBuf,
     overflowed: AtomicBool,
+    /// Terminals whose next record must be preceded by a [`Record::Hole`].
+    holes: std::sync::Mutex<HashSet<String>>,
 }
 
 impl History {
@@ -124,6 +129,7 @@ impl History {
             log,
             dir,
             overflowed: AtomicBool::new(false),
+            holes: Default::default(),
         }
     }
 
@@ -139,6 +145,7 @@ impl History {
             log: PathBuf::new(),
             dir: PathBuf::new(),
             overflowed: AtomicBool::new(false),
+            holes: Default::default(),
         }
     }
 
@@ -215,13 +222,23 @@ impl History {
 
     fn send_frame(&self, terminal: &str, frame: Vec<u8>) {
         let Some(tx) = &self.tx else { return };
+        let mut holes = self.holes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut data = Vec::new();
+        if holes.contains(terminal) {
+            data.extend_from_slice(&self::frame(&[KIND_HOLE]));
+        }
+        data.extend_from_slice(&frame);
         let msg = Msg::Frame {
             id: terminal.to_string(),
-            frame,
+            frame: data,
         };
         match tx.try_send(msg) {
-            Ok(()) => self.overflowed.store(false, Ordering::Relaxed),
+            Ok(()) => {
+                holes.remove(terminal);
+                self.overflowed.store(false, Ordering::Relaxed);
+            }
             Err(_) => {
+                holes.insert(terminal.to_string());
                 if !self.overflowed.swap(true, Ordering::Relaxed) {
                     crate::log::line(
                         &self.log,
@@ -234,7 +251,7 @@ impl History {
     }
 }
 
-fn frame(payload: &[u8]) -> Vec<u8> {
+pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(FRAME_HEAD + payload.len());
     out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     out.extend_from_slice(&crc32(payload).to_le_bytes());
@@ -284,6 +301,7 @@ fn decode(payload: &[u8]) -> Option<Record> {
             cols: u16::from_le_bytes([*c0, *c1]),
             rows: u16::from_le_bytes([*r0, *r1]),
         }),
+        (&KIND_HOLE, _) => Some(Record::Hole),
         (&KIND_SEQ, body) => Some(Record::Seq(u64::from_le_bytes(body.try_into().ok()?))),
         (&KIND_CHECKPOINT, _) => Some(Record::Checkpoint(decode_checkpoint(payload))),
         _ => None,

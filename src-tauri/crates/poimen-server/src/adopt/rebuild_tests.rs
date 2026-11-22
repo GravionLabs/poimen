@@ -155,3 +155,38 @@ fn a_restored_checkpoint_answers_no_query_and_raises_no_signal() {
     assert!(restored.take_signals().is_empty());
     assert!(restored.take_answers(&Colors::default()).all.is_empty());
 }
+
+#[test]
+fn output_without_its_seq_at_the_end_is_left_to_the_ring() {
+    let dir = temp("torn-pair");
+    let h = history(&dir);
+    h.output_at("t", b"one", 1);
+    // What a crash between the output frame and its seq frame leaves.
+    h.output("t", b" torn");
+    h.flush();
+    let r = rebuild(&dir.join("history").join("t"), (20, 5), 100).unwrap();
+    assert_eq!(r.seq, 1);
+    assert!(!text(&r.emulator).contains("torn"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dropped_records_after_the_checkpoint_make_the_log_unusable_but_before_it_do_not() {
+    let dir = temp("hole");
+    let path = dir.join("history").join("t");
+    std::fs::create_dir_all(dir.join("history")).unwrap();
+    let e = Emulator::new(20, 5, 100);
+    let h = history(&dir);
+    h.output_at("t", b"a", 1);
+    h.flush();
+    let mut data = std::fs::read(&path).unwrap();
+    data.extend(crate::history::frame(&[crate::history::KIND_HOLE]));
+    std::fs::write(&path, &data).unwrap();
+    assert!(rebuild(&path, (20, 5), 100).is_none());
+    // A checkpoint after the hole is the grid itself, whatever the log lost.
+    let h = history(&dir);
+    h.checkpoint("t", &checkpoint_of(&e, 9));
+    h.flush();
+    assert_eq!(rebuild(&path, (20, 5), 100).unwrap().seq, 9);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -87,6 +87,8 @@ struct State {
     host_seq: u64,
     /// Output bytes since the last checkpoint of the history log.
     since_checkpoint: usize,
+    /// A batch is being fed chunk by chunk: the grid is between two records.
+    mid_batch: bool,
 }
 
 pub(crate) struct TermStream {
@@ -143,6 +145,7 @@ impl TermStream {
                 exited: None,
                 host_seq: 0,
                 since_checkpoint: 0,
+                mid_batch: false,
             }),
             publish,
             colors,
@@ -191,6 +194,10 @@ impl TermStream {
     }
 
     fn checkpoint_locked(&self, st: &mut State) {
+        if st.mid_batch {
+            // The log replays this batch from its own records.
+            return;
+        }
         st.since_checkpoint = 0;
         let Some(history) = self.history.get() else {
             return;
@@ -279,6 +286,7 @@ impl TermStream {
         let mut signals = Vec::new();
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
+            st.mid_batch = true;
             st.emulator.feed(chunk);
             signals.extend(st.emulator.take_signals());
             let answers = {
@@ -307,6 +315,7 @@ impl TermStream {
         }
         {
             let mut st = self.lock();
+            st.mid_batch = false;
             if seq > 0 {
                 st.host_seq = seq;
             }
