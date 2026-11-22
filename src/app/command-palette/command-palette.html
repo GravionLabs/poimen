@@ -40,6 +40,7 @@
           tabindex="-1"
           [attr.aria-selected]="tab.id === palette.tab()"
           [class.active]="tab.id === palette.tab()"
+          (mousedown)="$event.preventDefault()"
           (click)="palette.selectTab(tab.id)"
         >
           {{ tab.label }}
