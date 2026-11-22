@@ -30,6 +30,7 @@ All of these hold, else nothing happens:
 - The harness of the terminal defines `exitInput` (what to type to end the agent) and `resumeArgs` (the arguments that resume a session, with `{session}`). A harness without both is never hibernated.
 - The session id is known (from the hooks), so the resume goes to the same session.
 - No controller is typing: a terminal with a controller attached is not hibernated.
+- No input reached the terminal after the `done` report (#988): text in the agent's input box (a draft) would be lost under the exit input. The server keeps the time of the last input in memory; a new status report starts a new `done` period.
 
 ### How an agent is stopped
 

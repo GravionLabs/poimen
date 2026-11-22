@@ -144,5 +144,6 @@ fn adopted(
         records,
         tokens,
         resuming: false,
+        last_input_ms: None,
     }
 }

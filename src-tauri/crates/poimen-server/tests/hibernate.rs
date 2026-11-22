@@ -400,3 +400,64 @@ fn a_second_hibernation_is_resumed_again() {
     wait_until("resumed again", || env.terminal(&id).hibernated.is_none());
     assert_eq!(env.starts(), 3);
 }
+
+#[test]
+fn input_after_done_blocks_hibernation_until_the_next_done() {
+    let env = Env::new("input", Some(ON));
+    let id = env.done_agent();
+    // A draft typed into the agent's input box after `done` (no Enter).
+    let since = env.terminal(&id).agent.unwrap().status_since.unwrap();
+    wait_until("a later millisecond", || now_ms() > since);
+    env.client.input(&id, "draft").unwrap();
+    (env.sweep)(now_ms() + 600 * MINUTE_MS);
+    assert_eq!(env.terminal(&id).hibernated, None, "input after done");
+    assert_eq!(env.typed(), "work\n");
+
+    // The next turn ends in a new `done`; the idle time counts from it.
+    let before = env.terminal(&id).agent.unwrap().status_since;
+    env.client.prompt_agent(&id, "more", LONG).unwrap();
+    wait_until("done again", || {
+        env.terminal(&id)
+            .agent
+            .is_some_and(|a| a.status == AgentStatus::Done && a.status_since != before)
+    });
+    (env.sweep)(now_ms() + 31 * MINUTE_MS);
+    assert!(env.terminal(&id).hibernated.is_some(), "hibernated again");
+}
+
+#[test]
+fn a_repeated_done_keeps_the_idle_time() {
+    let env = Env::new("repeat", Some(ON));
+    let id = env.done_agent();
+    let first = env.terminal(&id).agent.unwrap();
+    wait_until("a later millisecond", || {
+        now_ms() > first.reported_at.unwrap()
+    });
+    stop_hook(&env, &id);
+    wait_until("the report", || {
+        env.terminal(&id).agent.unwrap().reported_at != first.reported_at
+    });
+    assert_eq!(
+        env.terminal(&id).agent.unwrap().status_since,
+        first.status_since
+    );
+}
+
+/// A `Stop` hook report, as the agent sends it after a turn.
+fn stop_hook(env: &Env, id: &str) {
+    use std::io::Write;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_poimen-server"))
+        .args(["hook", "claude"])
+        .env("POIMEN_TERMINAL_ID", id)
+        .env("POIMEN_SOCKET", env.dir.join("run").join("server.sock"))
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"hook_event_name":"Stop","session_id":"fake-1"}"#)
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
