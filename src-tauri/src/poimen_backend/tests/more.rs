@@ -104,3 +104,18 @@ fn a_stream_opened_while_a_draft_is_held_tells_the_server_again() {
     }
     assert_eq!(params_of(&log, "terminal.set_draft")["draft"], true);
 }
+
+#[test]
+fn a_held_controller_is_reported_as_a_closed_record_not_an_error() {
+    let (backend, _) = backend_for("held", vec![], true);
+    let (opened, rx) = collect(&backend, Mode::Control, false);
+    assert!(opened.is_ok());
+    let (_, record) = rx.recv().unwrap();
+    assert!(matches!(
+        record,
+        StreamRecord::Closed {
+            code: Some(CloseCode::ControllerHeld),
+            ..
+        }
+    ));
+}

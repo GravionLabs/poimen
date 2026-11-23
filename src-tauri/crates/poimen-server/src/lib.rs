@@ -32,6 +32,7 @@ mod pty;
 mod records;
 pub mod report;
 mod reports;
+mod revive;
 mod runs;
 mod settings_reread;
 pub mod stdio;
@@ -178,6 +179,8 @@ struct TerminalEntry {
     /// When input last reached the terminal through `terminal.input` (#988), in ms; in memory,
     /// not persisted. Hibernation skips an agent that got input after its `done`.
     last_input_ms: Option<u64>,
+    /// The latest agent session of this terminal (#1232), kept after `/clear` and `gone`.
+    last_agent: Option<store::LastAgent>,
 }
 
 struct TokenEntry {
@@ -232,6 +235,7 @@ impl TerminalEntry {
             hibernated: self.info.hibernated.clone(),
             started_by: self.info.started_by.clone(),
             report: self.info.report.clone(),
+            last_agent: self.last_agent.clone(),
             tokens,
         })
     }
@@ -676,61 +680,6 @@ impl Shared {
             self.persist(&inner);
         }
     }
-
-    pub(crate) fn terminal_exited(&self, terminal_id: &str, exit_code: Option<u32>) {
-        let mut inner = lock(&self.inner);
-        let Some(entry) = inner
-            .terminals
-            .iter_mut()
-            .find(|t| t.info.id == terminal_id)
-        else {
-            return;
-        };
-        if entry.info.status == TerminalStatus::Exited {
-            return;
-        }
-        entry.info.status = TerminalStatus::Exited;
-        entry.info.exit_code = exit_code;
-        self.log(
-            "server",
-            &format!(
-                "terminal {terminal_id} ended, exit code {}",
-                exit_code.map_or("unknown".to_string(), |c| c.to_string())
-            ),
-        );
-        // Nothing of it is left for a restart to keep.
-        entry.info.survives_restart = false;
-        entry.info.host_version = None;
-        entry.info.host_bundled_version = None;
-        entry.host = None;
-        // A program's own `idle` or `done` stays; the rest of the status goes with the process.
-        entry.hook_agent = None;
-        entry.info.agent = entry
-            .osc
-            .take()
-            .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
-        if !entry.info.tokens.is_empty() {
-            entry.info.tokens.clear();
-            entry.tokens.clear();
-            self.publish(Event::TerminalTokensChanged {
-                terminal_id: terminal_id.to_string(),
-                tokens: Default::default(),
-            });
-        }
-        entry.records.exited();
-        if entry.sync_records() {
-            self.publish(records_event(entry));
-        }
-        entry.stream.exited(exit_code);
-        self.publish(Event::TerminalExited {
-            terminal_id: terminal_id.to_string(),
-            exit_code,
-        });
-        // An exited terminal is no longer in the tree, nor in the terminal list.
-        let events = inner.layout.remove_terminal(terminal_id);
-        publish_all(self, events);
-        self.persist(&inner);
-    }
 }
 
 type ApiResult = Result<Value, (ErrorCode, String)>;
@@ -1080,6 +1029,7 @@ fn attach(
             "this connection is already attached".into(),
         ));
     }
+    shared.revive_ended(&p.terminal_id, p.mode);
     let term = {
         let inner = lock(&shared.inner);
         let entry = inner
@@ -2027,6 +1977,7 @@ fn spawn_terminal(
         tokens: Vec::new(),
         resuming: false,
         last_input_ms: None,
+        last_agent: None,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -2169,6 +2120,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     if entry.info.status == TerminalStatus::Exited {
         return Ok(json!({ "accepted": true }));
     }
+    entry.note_session(&p);
     // Any report but `gone` means the agent runs again (the user came back): no longer hibernated.
     let came_back = p.status != AgentStatus::Gone && entry.info.hibernated.take().is_some();
     if came_back {

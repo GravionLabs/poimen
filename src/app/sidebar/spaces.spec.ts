@@ -417,6 +417,17 @@ describe("renderRow", () => {
     expect(line.find((s) => s.kind === "state")?.text).toBe("hibernated");
   });
 
+  it("shows an ended terminal with a session to resume as ended, can resume (#1232)", () => {
+    const r = row({ pane: { hibernated: true, ended: true, agent_status: "unknown" } });
+    const [line] = renderRow(
+      "terminal",
+      [[{ token: "state_icon" }, { token: "name" }, { token: "state_text" }]],
+      r,
+      spaceContext(space([r])),
+    );
+    expect(line.find((s) => s.kind === "state")?.text).toBe("ended, can resume");
+  });
+
   it("renders herdr tokens, tab, emphasis, the status classes data and separators", () => {
     const r = row({ tab: "build", pane: { tokens: { deliver_step: " review ", x: "" } } });
     const [line] = renderRow(

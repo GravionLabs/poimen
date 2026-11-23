@@ -125,6 +125,9 @@ fn state_word(t: &Terminal) -> String {
     match (t.status, t.exit_code) {
         (TerminalStatus::Running, _) => "running".into(),
         (TerminalStatus::Exited, Some(c)) => format!("exited({c})"),
+        (TerminalStatus::Exited, None) if t.from_history && t.hibernated.is_some() => {
+            "ended(can resume)".into()
+        }
         (TerminalStatus::Exited, None) if t.from_history => "ended(history)".into(),
         (TerminalStatus::Exited, None) => "exited".into(),
     }
@@ -204,4 +207,25 @@ fn status(client: &Client, id: &str, json: bool, out: &mut dyn Write) -> Result<
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod state_word_tests {
+    use super::*;
+
+    fn ended(extra: serde_json::Value) -> Terminal {
+        let mut t = serde_json::json!({"id":"t1","space_id":"s1","name":"claude","cwd":"/","cols":80,"rows":24,"status":"exited","from_history":true});
+        t.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(t).unwrap()
+    }
+
+    #[test]
+    fn an_ended_terminal_says_whether_it_can_resume() {
+        assert_eq!(state_word(&ended(serde_json::json!({}))), "ended(history)");
+        let resumable =
+            ended(serde_json::json!({"hibernated":{"agent":"claude","session_id":"s","since":1}}));
+        assert_eq!(state_word(&resumable), "ended(can resume)");
+    }
 }
