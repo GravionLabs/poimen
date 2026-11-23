@@ -162,7 +162,7 @@ fn wait_for_screen(client: &Client, id: &str, needle: &str) -> String {
         if s.contains(needle) || Instant::now() > deadline {
             return s;
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::yield_now();
     }
 }
 

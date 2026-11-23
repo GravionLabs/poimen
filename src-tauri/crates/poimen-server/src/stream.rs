@@ -218,6 +218,13 @@ impl TermStream {
         self.checkpoint_locked(&mut st);
     }
 
+    /// Undoes [`revive`](Self::revive) when the new host could not be started.
+    pub fn unrevive(&self) {
+        let mut st = self.lock();
+        st.read_only = true;
+        st.exited = Some(None);
+    }
+
     /// Queues a checkpoint of the grid as it is now to the history log (#1194).
     pub fn checkpoint(&self) {
         let mut st = self.lock();

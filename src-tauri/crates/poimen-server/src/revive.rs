@@ -78,6 +78,8 @@ impl Shared {
         command.extend(args);
         let term = std::env::var("TERM").ok();
         let entry = &mut inner.terminals[index];
+        // Before the host starts: its first output must find the stream revived.
+        entry.stream.revive();
         let spawned = host::start(
             &self.pty_host,
             &host::Spec {
@@ -98,6 +100,14 @@ impl Shared {
         let spawned = match spawned {
             Ok(spawned) => spawned,
             Err(e) => {
+                entry.stream.unrevive();
+                // Not retried on every attach: the terminal stays read-only history.
+                entry.info.hibernated = None;
+                self.publish(Event::TerminalHibernatedChanged {
+                    terminal_id: terminal_id.to_owned(),
+                    hibernated: None,
+                });
+                self.persist(&inner);
                 self.publish(Event::TerminalResumeFailed {
                     terminal_id: terminal_id.to_owned(),
                     reason: format!("no new shell could be started: {e}"),
@@ -106,7 +116,6 @@ impl Shared {
             }
         };
         entry.stream.set_writer(spawned.writer());
-        entry.stream.revive();
         entry.info.status = TerminalStatus::Running;
         entry.info.exit_code = None;
         entry.info.from_history = false;
