@@ -25,6 +25,7 @@ fn main() -> ExitCode {
         }
         Ok(Command::Tui) => tui(),
         Ok(Command::Attach(a)) => attach(a),
+        Ok(Command::SessionRun(a)) => session_run(&a),
         Ok(Command::Mcp) => {
             let client = Client::new(poimen_protocol::terminal_socket_path());
             let terminal = std::env::var(poimen_protocol::ENV_TERMINAL_ID).ok();
@@ -242,4 +243,34 @@ fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
         }
     }
     ExitCode::from(report.exit_code())
+}
+
+/// `poimen session run`: records on stdout, diagnostics on stderr, the exit code of the outcome.
+fn session_run(a: &cli::SessionRunArgs) -> ExitCode {
+    use poimen_console::session_run::{self as run, Env, Signals};
+    let client = Client::new(poimen_protocol::terminal_socket_path());
+    let signals = Signals::default();
+    // The wait ends and the terminal keeps running (unless `--close-on-end`).
+    #[cfg(unix)]
+    {
+        let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signals.int));
+        let _ =
+            signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&signals.term));
+    }
+    let env = Env {
+        caller: std::env::var(poimen_protocol::ENV_TERMINAL_ID)
+            .ok()
+            .filter(|id| !id.is_empty()),
+        home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
+        confirm_wait: poimen_client::agent::CONFIRM_WAIT,
+    };
+    let code = run::run(
+        &client,
+        &env,
+        a,
+        &signals,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    );
+    ExitCode::from(code)
 }
