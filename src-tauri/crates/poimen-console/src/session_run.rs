@@ -118,6 +118,10 @@ pub fn run(
             None
         };
         if let Some(code) = signal {
+            // A `Started` that arrived in the same tick names the terminal to close.
+            while let Ok(Msg::Event(SessionEvent::Started { terminal: t, .. })) = rx.try_recv() {
+                terminal = Some(t);
+            }
             let _ = writeln!(err, "poimen: interrupted; the session keeps running");
             if args.close_on_end {
                 close(client, env, &args.harness, terminal.as_deref(), err);
