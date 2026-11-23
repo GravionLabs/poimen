@@ -129,8 +129,16 @@
   overflow-y: auto;
 }
 
+/* One shared cap, left-aligned beside the navigation; the scrollbar stays on `.scroll` at the window edge. */
 .page {
+  box-sizing: border-box;
+  max-width: var(--settings-page-width, 800px);
   padding: 8px 24px 32px;
+}
+
+/* Pages with wide tables or editors (see `wideIds` in settings-view.ts) use the wider cap. */
+.page.wide {
+  max-width: var(--settings-page-width-wide, 1200px);
 }
 
 h2 {
