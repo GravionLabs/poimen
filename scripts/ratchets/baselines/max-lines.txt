@@ -3,7 +3,6 @@ src-tauri/crates/poimen-console/src/tui/mod.rs	1301
 src-tauri/crates/poimen-console/src/tui/palette.rs	1209
 src-tauri/crates/poimen-console/src/tui/sidebar.rs	888
 src-tauri/crates/poimen-console/tests/tui.rs	938
-src-tauri/crates/poimen-core/src/agent_events.rs	954
 src-tauri/crates/poimen-core/src/github.rs	1364
 src-tauri/crates/poimen-core/src/layout.rs	1186
 src-tauri/crates/poimen-core/src/settings.rs	1101

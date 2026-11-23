@@ -212,8 +212,12 @@ describe("BottomPanel empty states", () => {
       tone: "neutral",
       host: { "poimen.terminal": "w1:p1" },
       events: [
-        ev("task.started", "t1", { subject: "PBI one" }),
-        ev("task.finished", "t1", { outcome: "skipped", reason: "blocked", text: "waits" }),
+        ev("task.started", "t1", { subject: "PBI one", text: "waits" }),
+        ev("task.finished", "t1", {
+          outcome: "skipped",
+          reason: "blocked",
+          text: "Blocked by #12",
+        }),
         ev("task.started", "t2", { subject: "PBI two" }),
         ev("task.finished", "t2", { outcome: "skipped", reason: "blocked" }),
       ],
@@ -227,7 +231,7 @@ describe("BottomPanel empty states", () => {
     panel.fixture.detectChanges();
     expect(root.querySelectorAll("[data-testid=skipped-fold]").length).toBe(1);
     expect(root.querySelector("[data-testid=skipped-fold]")!.textContent).toContain(
-      "2 skipped (blocked)",
+      "2 skipped (Blocked by #12, blocked)",
     );
     expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(0);
     root.querySelector<HTMLButtonElement>(".fold-toggle")!.click();
@@ -235,6 +239,9 @@ describe("BottomPanel empty states", () => {
     const tasks = root.querySelectorAll("[data-testid=skipped-task]");
     expect(tasks.length).toBe(2);
     expect(tasks[0]!.textContent).toContain("PBI one: waits");
+    // `text ?? reason` (#622): the sentence when present, else the code.
+    expect(tasks[0]!.textContent).toContain("Blocked by #12");
+    expect(tasks[1]!.textContent).toContain("blocked");
     // A new event keeps the fold open.
     cards.update((c) => [...c]);
     panel.fixture.detectChanges();
