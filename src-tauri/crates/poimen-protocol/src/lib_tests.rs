@@ -568,3 +568,19 @@ fn an_ended_terminal_from_history_is_additive() {
     assert!(r.read_only);
     assert_eq!(serde_json::to_value(&r).unwrap(), with);
 }
+
+#[test]
+fn an_ended_terminal_with_a_session_to_resume_is_from_history_and_hibernated() {
+    // #1232: no new field; the pair `from_history` + `hibernated` says "ended, can resume".
+    let wire = json!({"id":"t1","space_id":"s1","name":"claude","cwd":"/w","cols":80,"rows":24,
+        "status":"exited","hibernated":{"agent":"claude","session_id":"abc","since":5},
+        "from_history":true});
+    let t: Terminal = serde_json::from_value(wire.clone()).unwrap();
+    assert!(t.from_history);
+    let h = t.hibernated.as_ref().unwrap();
+    assert_eq!(
+        (h.agent.as_str(), h.session_id.as_str(), h.since),
+        ("claude", "abc", 5)
+    );
+    assert_eq!(serde_json::to_value(&t).unwrap(), wire);
+}

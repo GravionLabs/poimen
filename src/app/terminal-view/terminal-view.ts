@@ -24,14 +24,8 @@ import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type DragDrop, type Unlisten } from "../core/tauri";
 import { SpaceActions } from "../core/space-actions";
-import {
-  dropAction,
-  imagePasteRefusal,
-  overRect,
-  pastedImageType,
-  quotePaths,
-  savableImage,
-} from "./drop";
+import { dropAction, overRect, pastedImageType } from "./drop";
+import { pasteImage } from "./paste-image";
 import { agentKind, splitId, type Terminal } from "../core/snapshot";
 import type { Mode, StreamRecord } from "../core/backend";
 import {
@@ -47,6 +41,7 @@ import { PromptBar } from "../prompt-bar/prompt-bar";
 import { fileLinkMenu, FileLinkActions } from "./file-link-actions";
 import { fileLinkProvider, offersFileLinks, type FileLinkTarget } from "./file-links";
 import { ContextMenu } from "../ui/context-menu/context-menu";
+import { copyMenu, copyMenuAt, copyText } from "./copy-menu";
 import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
 import { matchLabel, searchDecorations, TerminalSearch, type Searchable } from "./search";
 import { Icon } from "../ui/icon/icon";
@@ -130,6 +125,9 @@ export class TerminalView implements OnDestroy, Searchable {
     changed: boolean;
   } | null>(null);
   protected readonly fileMenuGroups = fileLinkMenu;
+  protected readonly ended = signal(false);
+  protected readonly copyAt = signal<{ x: number; y: number; selected: boolean } | null>(null);
+  protected readonly copyGroups = copyMenu;
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
   /** The mode the stream really has. */
@@ -496,8 +494,7 @@ export class TerminalView implements OnDestroy, Searchable {
     }
     const key = event.key.toLowerCase();
     if (key === "c") {
-      const text = this.term?.getSelection();
-      if (text) void navigator.clipboard?.writeText(text).catch(() => undefined);
+      copyText(this.term?.getSelection());
       return true;
     }
     return key === "v"; // the paste event does the work
@@ -531,32 +528,34 @@ export class TerminalView implements OnDestroy, Searchable {
       const text = data?.getData("text/plain");
       if (text && this.mode() === "control" && this.session?.open) this.term?.paste(text);
     };
+    const onMenu = (event: MouseEvent) => {
+      if (!this.ended()) return;
+      event.preventDefault();
+      this.copyAt.set(copyMenuAt(event, this.term?.getSelection()));
+    };
+    host.addEventListener("contextmenu", onMenu, true);
     host.addEventListener("copy", onCopy, true);
     host.addEventListener("paste", onPaste, true);
     return () => {
+      host.removeEventListener("contextmenu", onMenu, true);
       host.removeEventListener("copy", onCopy, true);
       host.removeEventListener("paste", onPaste, true);
     };
   }
 
-  /** A pasted image is saved by the backend and its quoted path typed like a drop (#906). */
-  private async pasteImage(blob: Blob, mime: string): Promise<void> {
-    const notify = (text: string) => this.injector.get(SpaceActions).notify(text);
-    const refusal = imagePasteRefusal({
+  protected pickCopy(): void {
+    this.copyAt.set(null);
+    copyText(this.term?.getSelection());
+  }
+
+  private pasteImage(blob: Blob, mime: string): Promise<void> {
+    return pasteImage(blob, mime, {
+      tauri: this.tauri,
+      notify: (text) => this.injector.get(SpaceActions).notify(text),
       remote: !!this.pane().machine,
-      control: this.mode() === "control" && !!this.session?.open,
+      controls: () => !this.destroyed && this.mode() === "control" && !!this.session?.open,
+      paste: (text) => this.term?.paste(text),
     });
-    if (refusal) return notify(refusal);
-    if (!savableImage(mime))
-      return notify("This image type cannot be pasted (png, jpeg, gif, webp).");
-    try {
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      const path = await this.tauri.invokeRaw<string>("paste_image", bytes, { "x-mime": mime });
-      if (this.destroyed || this.mode() !== "control" || !this.session?.open) return;
-      this.term?.paste(quotePaths([path], isWindows()));
-    } catch (e) {
-      notify(`The pasted image was not saved: ${e}`);
-    }
   }
 
   private async start(takeover: boolean): Promise<void> {
@@ -582,6 +581,7 @@ export class TerminalView implements OnDestroy, Searchable {
     keepBlocked = false,
   ): Promise<void> {
     this.banner.set(null);
+    this.ended.set(false);
     this.setState("observe", keepBlocked ? this.blocked() : null);
     await this.connect(mode, takeover);
   }
@@ -726,7 +726,9 @@ export class TerminalView implements OnDestroy, Searchable {
         if (record.code === "exited") {
           // The process ended: keep the last screen and say how; nothing to fall back to.
           this.setState("observe", null);
+          this.ended.set(true);
           this.banner.set(record.reason);
+          this.term?.focus(); // no input here; focus lets Ctrl+Shift+C reach the history
           return;
         }
         this.failed(this.attempt, record.reason, this.framed, record.code === "controller_held");

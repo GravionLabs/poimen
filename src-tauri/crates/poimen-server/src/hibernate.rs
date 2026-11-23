@@ -75,7 +75,7 @@ const PROMPT_SETTLE: Duration = Duration::from_millis(300);
 const POLL: Duration = Duration::from_millis(50);
 
 /// The harnesses of the user config, read now (the defaults without a config).
-fn harnesses_of(shared: &Shared) -> Vec<harness::Harness> {
+pub(crate) fn harnesses_of(shared: &Shared) -> Vec<harness::Harness> {
     let root = shared
         .home
         .as_deref()

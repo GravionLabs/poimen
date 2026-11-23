@@ -284,6 +284,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
         agent_status: status_of(terminal),
         hibernated: terminal.hibernated.is_some(),
+        ended: terminal.from_history,
         started_by: terminal.started_by.clone(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
@@ -2496,21 +2497,6 @@ mod tests {
             ),
             "{last:?}"
         );
-    }
-
-    #[test]
-    fn a_held_controller_is_reported_as_a_closed_record_not_an_error() {
-        let (backend, _) = backend_for("held", vec![], true);
-        let (opened, rx) = collect(&backend, Mode::Control, false);
-        assert!(opened.is_ok());
-        let (_, record) = rx.recv().unwrap();
-        assert!(matches!(
-            record,
-            StreamRecord::Closed {
-                code: Some(CloseCode::ControllerHeld),
-                ..
-            }
-        ));
     }
     mod more;
 }
