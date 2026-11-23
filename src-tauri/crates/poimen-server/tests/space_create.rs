@@ -397,3 +397,125 @@ fn server_and_app_writes_of_config_json_in_turn_keep_both_changes() {
         second.as_str()
     );
 }
+
+/// Creates the space of a trusted project file (asks first, then answers with the hash).
+#[cfg(unix)]
+fn create_trusted(client: &Client, cwd: &str, env: &[(&str, &str)]) -> SpaceCreated {
+    let question = asked(create(client, cwd, None));
+    created(
+        client
+            .create_space_with(&SpaceCreate {
+                trust: Some(TrustAnswer::Trust {
+                    hash: question.hash,
+                }),
+                env: env
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                    .collect(),
+                ..SpaceCreate::with_layout("work", cwd)
+            })
+            .unwrap(),
+    )
+}
+
+#[cfg(unix)]
+fn wait_until_gone(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while path.exists() {
+        assert!(Instant::now() < deadline, "{} stayed", path.display());
+        thread::yield_now();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_and_layout_commands_get_the_workspace_variables_and_the_clients_task_ones() {
+    let env = Env::new("env");
+    env.project(
+        "repo",
+        r#"{"layout": {"panes": [{"name": "dev",
+              "command": "echo $POIMEN_ISSUE:$POIMEN_BRANCH:$POIMEN_SPACE > dev-env"}]},
+            "setup": "echo $POIMEN_ROOT_PATH:$POIMEN_WORKTREE_PATH:$POIMEN_SPACE > setup-env"}"#,
+    );
+    let client = env.start();
+    let repo = env.repo("repo");
+    let space = create_trusted(
+        &client,
+        &repo,
+        &[("POIMEN_ISSUE", "12"), ("POIMEN_BRANCH", "feat/12-x")],
+    );
+    assert!(space.setup_started);
+    let (setup, dev) = (
+        Path::new(&repo).join("setup-env"),
+        Path::new(&repo).join("dev-env"),
+    );
+    wait_for_file(&setup);
+    wait_for_file(&dev);
+    // Not a repository: the directory is both the root and the worktree.
+    let read = |p: &Path| {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let text = std::fs::read_to_string(p).unwrap_or_default();
+            if text.ends_with('\n') || Instant::now() > deadline {
+                return text.trim().to_owned();
+            }
+            thread::yield_now();
+        }
+    };
+    assert_eq!(read(&setup), format!("{repo}:{repo}:work"));
+    assert_eq!(read(&dev), "12:feat/12-x:work");
+}
+
+#[cfg(unix)]
+fn wait_project(setup: &str) -> String {
+    format!(
+        r#"{{"layout": {{"panes": [{{"name": "dev", "command": "cat setup-done > dev-ran"}}]}},
+            "setupPolicy": "wait", "setup": "{setup}"}}"#
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_policy_wait_types_the_root_command_only_after_setup_exited_zero() {
+    let env = Env::new("wait-ok");
+    env.project("repo", &wait_project("sleep 1; echo ok > setup-done"));
+    let client = env.start();
+    let repo = env.repo("repo");
+    create_trusted(&client, &repo, &[]);
+    let dev = Path::new(&repo).join("dev-ran");
+    wait_for_file(&dev);
+    // `cat` ran after the setup wrote its file, so it copied it.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while std::fs::read_to_string(&dev).unwrap_or_default().trim() != "ok" {
+        assert!(
+            Instant::now() < deadline,
+            "dev-ran is empty: setup did not come first"
+        );
+        thread::yield_now();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_policy_wait_leaves_the_root_pane_at_its_prompt_when_setup_fails() {
+    let env = Env::new("wait-fail");
+    env.project("repo", &wait_project("echo x > setup-done; false"));
+    let client = env.start();
+    let repo = env.repo("repo");
+    create_trusted(&client, &repo, &[]);
+    wait_for_file(&Path::new(&repo).join("setup-done"));
+    // The server read the failure (and removed its marker), then typed only a notice.
+    let marker = std::env::temp_dir()
+        .read_dir()
+        .unwrap()
+        .flatten()
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(&format!("poimen-setup-{}-", std::process::id()))
+        });
+    if let Some(marker) = marker {
+        wait_until_gone(&marker.path());
+    }
+    assert!(!Path::new(&repo).join("dev-ran").exists());
+}

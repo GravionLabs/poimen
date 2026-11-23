@@ -8,7 +8,6 @@ src-tauri/crates/poimen-console/tests/tui_palette.rs waits	2
 src-tauri/crates/poimen-core/src/git.rs waits	1
 src-tauri/crates/poimen-core/src/github.rs waits	1
 src-tauri/crates/poimen-core/src/gui_path.rs waits	1
-src-tauri/crates/poimen-core/src/project.rs waits	1
 src-tauri/crates/poimen-core/src/transcripts.rs waits	1
 src-tauri/crates/poimen-pty-host/src/lib.rs waits	1
 src-tauri/crates/poimen-pty-host/tests/host.rs waits	8

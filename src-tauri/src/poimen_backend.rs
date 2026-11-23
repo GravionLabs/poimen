@@ -498,10 +498,12 @@ impl Backend for PoimenBackend {
         &self,
         request: LayoutRequest<'_>,
     ) -> Option<Result<LaidOut, String>> {
+        let mut env = self.terminal_env();
+        env.extend(request.env.cloned().unwrap_or_default());
         let params = SpaceCreate {
             trust: request.decision.map(trust_answer),
             command: request.command.map(str::to_owned),
-            env: self.terminal_env(),
+            env,
             ..SpaceCreate::with_layout(request.label, request.cwd)
         };
         Some(
@@ -2055,39 +2057,9 @@ mod tests {
         assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
     }
 
-    fn layout_request<'a>(
-        cwd: &'a str,
-        decision: Option<&'a trust::Decision>,
-        command: Option<&'a str>,
-    ) -> LayoutRequest<'a> {
-        LayoutRequest {
-            cwd,
-            label: "api",
-            decision,
-            command,
-        }
-    }
-
-    #[test]
-    fn a_new_space_with_layout_is_built_by_the_server() {
-        let (backend, log) = backend_for("space-layout", vec![], false);
-        let request = layout_request("/work/api", None, Some("claude 'x'"));
-        let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
-        assert_eq!(
-            outcome,
-            LaidOut::Created {
-                space_id: "s9".into(),
-                warnings: vec!["template app: harness codex is not installed".into()],
-                setup_started: true,
-            }
-        );
-        assert_eq!(
-            params_of(&log, "space.create"),
-            json!({"name": "api", "cwd": "/work/api", "layout": true, "command": "claude 'x'"})
-        );
-        // The server built the space: no terminal, split or input from the app.
-        assert_eq!(lock(&log).len(), 1);
-    }
+    #[path = "../../poimen_backend_env_tests.rs"]
+    mod env_tests;
+    use env_tests::layout_request;
 
     #[test]
     fn an_untrusted_project_is_the_trust_question_and_creates_nothing() {

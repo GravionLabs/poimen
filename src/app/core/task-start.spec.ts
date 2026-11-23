@@ -34,7 +34,11 @@ const CHOICE: TaskChoice = {
   url: "https://github.com/o/r/issues/12",
   mode: "agent",
 };
-const ISSUE = { nr: 12, title: "Add picker", url: "https://github.com/o/r/issues/12" };
+const ISSUE = {
+  nr: 12,
+  title: "Add picker",
+  url: "https://github.com/o/r/issues/12",
+};
 
 function plan(over: Partial<TaskPlan> = {}): TaskPlan {
   return {
@@ -89,7 +93,13 @@ describe("TaskStarter", () => {
       { repoDir: "/work/app", issue: ISSUE, mode: "agent" },
     ]);
     expect(tauri.calls("create_space")).toEqual([
-      { cwd: "/work/app-12", label: "#12 Add picker", decision: null, command: "claude 'x'" },
+      {
+        cwd: "/work/app-12",
+        label: "#12 Add picker",
+        decision: null,
+        command: "claude 'x'",
+        env: { POIMEN_ISSUE: "12", POIMEN_BRANCH: "feat/12-x" },
+      },
     ]);
     expect(tauri.calls("task_tab")).toEqual([]);
   });
@@ -112,13 +122,27 @@ describe("TaskStarter", () => {
       { cwd: "/work/app", label: null, decision: null, command: null },
     ]);
     expect(tauri.calls("task_tab")).toEqual([
-      { spaceId: "w2", dir: "/work/app", name: "#12 plain", command: "sh -c 'x'" },
+      {
+        spaceId: "w2",
+        dir: "/work/app",
+        name: "#12 plain",
+        command: "sh -c 'x'",
+      },
     ]);
   });
 
   it("a number typed by hand has no title or url", async () => {
-    await starter.run("/work/app", { number: 5, title: null, url: null, mode: "agent" });
-    expect(tauri.calls("task_plan")[0]?.["issue"]).toEqual({ nr: 5, title: "", url: "" });
+    await starter.run("/work/app", {
+      number: 5,
+      title: null,
+      url: null,
+      mode: "agent",
+    });
+    expect(tauri.calls("task_plan")[0]?.["issue"]).toEqual({
+      nr: 5,
+      title: "",
+      url: "",
+    });
   });
 
   it("a failed mode lookup names the step and starts nothing", async () => {
@@ -157,7 +181,12 @@ describe("TaskStarter", () => {
   });
 
   it("an untrusted project holds the task: the answer creates the space with the command", async () => {
-    const request = { root: "/work/app-12", files: ["f"], hash: "h1", commands: [] };
+    const request = {
+      root: "/work/app-12",
+      files: ["f"],
+      hash: "h1",
+      commands: [],
+    };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
         ? { space_id: "w2", created: true }
@@ -171,12 +200,18 @@ describe("TaskStarter", () => {
       label: "#12 Add picker",
       decision: { kind: "trust", hash: "h1" },
       command: "claude 'x'",
+      env: { POIMEN_ISSUE: "12", POIMEN_BRANCH: "feat/12-x" },
     });
   });
 
   it("an untrusted project holds a tab task: the answer creates the space, then the tab", async () => {
     tauri.answer("task_plan", () => plan({ worktree: false, tab: "#12 agent" }));
-    const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
+    const request = {
+      root: "/work/app",
+      files: ["f"],
+      hash: "h1",
+      commands: [],
+    };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
         ? { space_id: "w2", created: true }
@@ -186,7 +221,12 @@ describe("TaskStarter", () => {
     expect(tauri.calls("task_tab")).toEqual([]);
     await spaces.answerTrust("without");
     expect(tauri.calls("task_tab")).toEqual([
-      { spaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
+      {
+        spaceId: "w2",
+        dir: "/work/app",
+        name: "#12 agent",
+        command: "claude 'x'",
+      },
     ]);
   });
 
@@ -195,13 +235,19 @@ describe("TaskStarter", () => {
 
     beforeEach(() => {
       tauri.answer("github_repo", () => ({ owner: "o", name: "r" }));
-      tauri.answer("machine_repo_ensure", () => ({ path: "/srv/o/r", cloned: true }));
+      tauri.answer("machine_repo_ensure", () => ({
+        path: "/srv/o/r",
+        cloned: true,
+      }));
       tauri.answer("machine_worktree_create", () => ({
         path: "/srv/o/r-12",
         branch: "feat/12-x",
         created: true,
       }));
-      tauri.answer("machine_create_space", () => ({ space_id: "s3", created: true }));
+      tauri.answer("machine_create_space", () => ({
+        space_id: "s3",
+        created: true,
+      }));
       tauri.answer("machine_task_tab", () => undefined);
     });
 
@@ -212,7 +258,13 @@ describe("TaskStarter", () => {
         { name: "dev", repoDir: "/srv/o/r", issue: ISSUE, mode: "agent" },
       ]);
       expect(tauri.calls("machine_create_space")).toEqual([
-        { name: "dev", cwd: "/srv/o/r-12", label: "#12 Add picker", command: "claude 'x'" },
+        {
+          name: "dev",
+          cwd: "/srv/o/r-12",
+          label: "#12 Add picker",
+          command: "claude 'x'",
+          env: { POIMEN_ISSUE: "12", POIMEN_BRANCH: "feat/12-x" },
+        },
       ]);
       expect(tauri.calls("machine_task_tab")).toEqual([]);
       expect(tauri.calls("task_worktree")).toEqual([]);
@@ -229,14 +281,26 @@ describe("TaskStarter", () => {
         { name: "dev", cwd: "/srv/o/r", label: null, command: null },
       ]);
       expect(tauri.calls("machine_task_tab")).toEqual([
-        { name: "dev", spaceId: "s3", dir: "/srv/o/r", tab: "#12 plain", command: "sh -c 'x'" },
+        {
+          name: "dev",
+          spaceId: "s3",
+          dir: "/srv/o/r",
+          tab: "#12 plain",
+          command: "sh -c 'x'",
+        },
       ]);
     });
 
     it("an existing space is focused and says so", async () => {
-      tauri.answer("machine_create_space", () => ({ space_id: "s7", created: false }));
+      tauri.answer("machine_create_space", () => ({
+        space_id: "s7",
+        created: false,
+      }));
       remoteSpaces = [
-        { space_id: qualifyId("dev", "s7"), label: "#12 Add picker" } as Snapshot["spaces"][number],
+        {
+          space_id: qualifyId("dev", "s7"),
+          label: "#12 Add picker",
+        } as Snapshot["spaces"][number],
       ];
       expect(await starter.run("/work/app", REMOTE)).toBe(true);
       expect(lastToast(injector)).toBe('Opened the existing space "#12 Add picker" on dev.');
@@ -278,7 +342,11 @@ describe("TaskStarter", () => {
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
       expect(lastToast(injector)).toBe("Start task on dev: git worktree failed: path exists");
       expect(tauri.calls("machine_create_space")).toEqual([]);
-      tauri.answer("machine_worktree_create", () => ({ path: "/p", branch: "b", created: true }));
+      tauri.answer("machine_worktree_create", () => ({
+        path: "/p",
+        branch: "b",
+        created: true,
+      }));
       tauri.answer("machine_create_space", () => {
         throw "not trusted";
       });

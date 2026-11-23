@@ -50,7 +50,15 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 - `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the
-  reason. The agent pane starts in parallel; it does not wait for the setup.
+  reason. By default the agent pane starts in parallel; it does not wait for the setup
+  (`setupPolicy`, below).
+- `setupPolicy`: `"start"` (default, as before) or `"wait"`. With `"wait"` the command of the root
+  pane (the first pane of the first tab, usually the agent) is typed only after `setup` exited 0.
+  The setup tab reports its end through a marker file in the temp directory, so this needs a setup
+  typed into a shell that understands `&&`/`||` (sh, bash, zsh, fish, PowerShell 7). If the setup
+  fails (or does not end within 30 minutes) the root pane stays at its prompt and shows a notice
+  instead. It has no effect without a `setup`, in an untrusted project or for later panes. Any
+  other value is a warning and counts as `"start"`.
 - `teardown`: a command. It runs in the worktree through your shell (`$SHELL -lc`; on Windows `pwsh`, else `powershell.exe`, with `-NoProfile -Command`) before "Clean up merged tasks" removes a worktree, and from the palette entry "Project: Run teardown" (in the directory of the focused space). Timeout 5 minutes, output capped at 1 MB. A failing or timed-out teardown stops the removal of that worktree and shows its output; it does not run when a space closes. In an untrusted project it does not run; the cleanup then asks whether to remove without it.
 - `tasks`: task modes of this repository, same schema as `tasks` in the user `config.json`
   (`modes[]`, `worktreeDir`). They merge by `name` over the user's modes (a project mode replaces
@@ -77,6 +85,24 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 
 The entries are read for the focused space and again when the palette opens. While the project
 file is not trusted they show a lock; running one opens the trust dialog (see Trust).
+
+## Environment variables
+
+`setup`, `teardown`, `commands[]` and the task command run with these variables:
+
+| Variable               | Value                                                                |
+| ---------------------- | -------------------------------------------------------------------- |
+| `POIMEN_ROOT_PATH`     | the main checkout of the repository (also from a linked worktree)    |
+| `POIMEN_WORKTREE_PATH` | the worktree the space lives in (the same as the root without one)   |
+| `POIMEN_SPACE`         | the label of the space                                               |
+| `POIMEN_ISSUE`         | the issue number of a task started from the task picker              |
+| `POIMEN_BRANCH`        | the branch of that task's worktree                                   |
+
+`poimen-server` sets the first three in every terminal of a space (so the layout panes and the
+terminals a `commands[]` entry opens have them too). `POIMEN_ISSUE` and `POIMEN_BRANCH` are only set
+in the terminals built when a task creates its space, also on a machine; a `teardown` run by "Clean
+up merged tasks" gets `POIMEN_BRANCH` of the worktree, a `teardown` sees `POIMEN_SPACE` as the name
+of the worktree directory and never `POIMEN_ISSUE`.
 
 ## Commands
 
