@@ -46,6 +46,7 @@ Write tools:
 
 - `start_agent` (`Client::start_agent`): starts an agent in a terminal, optionally in a new terminal of a space.
 - `prompt_agent` (`Client::prompt_agent`): types a prompt into the agent of a terminal, refused while that agent is working or blocked, as for `poimen prompt`.
+- `write_terminal` (#1184, `terminal`, `text`, `enter?`): types into an existing terminal that runs no agent. Marking: a terminal is "started by an agent" when `Terminal.started_by` (#982, set from `POIMEN_TERMINAL_ID` by `start_agent` and `start_shell`) is the caller's terminal. Only such a terminal takes text without a question; every other target, also in the caller's own space, needs a confirmation that shows the text, and no setting turns it off. Control characters other than newline and tab are refused (no signals, no escape sequences; `stop_terminal` interrupts). A terminal with a running agent is refused (`prompt_agent`).
 
 Results are text and structured content with ids that the tools accept. Tool errors are MCP errors with the server's `code` and `message`, never a crash.
 

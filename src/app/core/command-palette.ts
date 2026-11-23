@@ -39,6 +39,7 @@ export interface PoimenCommand {
     | "startIssueTask"
     | "githubMilestones"
     | "openDeliver"
+    | "deliverMilestone"
     | "showChanges"
     | "previewFile"
     | "markUnread"
@@ -107,6 +108,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubIssues", title: "GitHub: Issues" },
   { id: "githubMilestones", title: "GitHub: Milestones" },
   { id: "openDeliver", title: "Open Runs" },
+  { id: "deliverMilestone", title: "Deliver milestone…" },
   { id: "showChanges", title: "Show Changes" },
   { id: "previewFile", title: "Preview File" },
   { id: "markUnread", title: "Mark Agent as Unread" },
@@ -194,8 +196,10 @@ export class CommandPalette {
   private readonly all = computed<PaletteItem[]>(() => [
     ...POIMEN_COMMANDS.filter(
       (c) =>
-        this.settings.settings().sidebarSort === "manual" ||
-        (c.id !== "moveSpaceUp" && c.id !== "moveSpaceDown"),
+        (this.settings.settings().sidebarSort === "manual" ||
+          (c.id !== "moveSpaceUp" && c.id !== "moveSpaceDown")) &&
+        // A loop starts on this Mac only (#746): a space on a machine has no such entry.
+        (c.id !== "deliverMilestone" || this.activePane()?.machine === undefined),
     ).map((c): PaletteItem => ({
       key: `command:${c.id}`,
       title: c.title,
@@ -209,6 +213,7 @@ export class CommandPalette {
         c.id === "githubIssues" ||
         c.id === "githubMilestones" ||
         c.id === "openDeliver" ||
+        c.id === "deliverMilestone" ||
         c.id === "showChanges" ||
         c.id === "previewFile" ||
         c.id === "markUnread" ||

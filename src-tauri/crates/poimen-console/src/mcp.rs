@@ -13,8 +13,11 @@
 mod report;
 mod runs;
 mod screen;
+mod shell;
+mod stop;
 mod terminal;
 mod worktree;
+mod write;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -229,6 +232,19 @@ fn tools() -> Value {
             }, "required": ["harness"]},
         },
         {
+            "name": "start_shell",
+            "description": "Runs a long-running command in a new shell pane of the user, e.g. the deliver loop (`node deliver-loop.mts --milestone M005`) or a build watcher. Not for short commands: use your own shell for those. `command` is an argv list, never a shell string. Returns the terminal id; the pane stays after the command ends. Watch it with read_terminal (output), get_terminal (status, exit code), get_events and list_runs (agent runs it writes). In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
+            "inputSchema": {"type": "object", "properties": {
+                "command": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Program and arguments, e.g. [\"node\", \"deliver-loop.mts\", \"--milestone\", \"M005\"]."},
+                "cwd": {"type": "string", "description": "Working directory; the directory of the space by default."},
+                "name": {"type": "string", "description": "The name of the new terminal; the program by default."},
+                "space": {"type": "string", "description": "Space id; your own space when absent."},
+                "env": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra environment variables."}
+            }, "required": ["command"], "additionalProperties": false},
+        },
+        stop::tool(),
+        write::tool(),
+        {
             "name": "prompt_agent",
             "description": "Types a prompt into the agent of a terminal. Refused while that agent is working or blocked. In another space than your own the user must confirm in the poimen app (waits up to 60 s).",
             "inputSchema": {"type": "object", "properties": {
@@ -334,6 +350,9 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
             runs::get_events(args)
         }
         "start_agent" => start_agent(client, env, args),
+        "start_shell" => shell::start_shell(client, env, args),
+        "stop_terminal" => stop::stop_terminal(client, env, args),
+        "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
         "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
         "report_done" => report::report_done(client, env, args),

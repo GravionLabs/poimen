@@ -17,6 +17,8 @@ import { eventTime, toneStyle } from "../bottom-panel/run-events";
 import { errorText, type GhError } from "../github/pulls";
 import { compactTotal, totalsTip } from "../core/token-totals";
 import { Deliver } from "./deliver";
+import { DeliverLauncher } from "./deliver-launcher";
+import { milestoneName } from "./deliver-start";
 import { OVERVIEW_REFRESH_MS, Overview } from "./overview";
 import {
   issueSubjectNumber,
@@ -109,6 +111,7 @@ export function lineCounts(line: TimelineLine): string[] {
 })
 export class DeliverView {
   protected readonly deliver = inject(Deliver);
+  private readonly launcher = inject(DeliverLauncher);
   protected readonly ui = inject(UiState);
   protected readonly overview = inject(Overview);
   protected readonly slowRefresh = delayedBusy(() => this.overview.loading());
@@ -203,17 +206,16 @@ export class DeliverView {
     return status.attentions.filter((a) => isAlert(a, status));
   }
 
-  /** "Start loop" once per milestone group of this Mac, only while none of its runs runs. */
+  /** "Deliver milestone" once per milestone group of this Mac; a running loop is refused by the dialog. */
   protected canStart(group: RunGroup): boolean {
-    return (
-      group.machine === undefined &&
-      group.subject?.kind === "github.milestone" &&
-      this.running(group) === undefined
-    );
+    return group.machine === undefined && group.subject?.kind === "github.milestone";
   }
 
+  /** "Deliver milestone": the dialog for the milestone of the group (#746). */
   protected startLoop(group: RunGroup): void {
-    void this.deliver.startLoop(this.newest(group), group.root, group.machine);
+    const subject = group.subject;
+    const name = subject ? (milestoneName(subject.id) ?? milestoneName(subject.title)) : null;
+    void this.launcher.openMilestone(group.root, name ?? undefined);
   }
 
   /** The terminal of a group's running run, else of its newest run. */

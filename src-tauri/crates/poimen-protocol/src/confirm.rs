@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What an agent writes through `poimen mcp` (ADR 0012, #615).
+/// What an agent writes through `poimen mcp` (ADR 0012, #615, #1181, #1183, #1184).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentWriteAction {
@@ -11,6 +11,12 @@ pub enum AgentWriteAction {
     StartAgent,
     /// Types a prompt into the agent of a terminal.
     PromptAgent,
+    /// Runs a command in a new shell pane.
+    StartShell,
+    /// Interrupts or closes a terminal.
+    StopTerminal,
+    /// Types into an existing terminal.
+    WriteTerminal,
 }
 
 /// Params of `agent.confirm` (#615): an agent (the terminal `caller_terminal_id`) wants to write

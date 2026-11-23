@@ -361,6 +361,20 @@ export class SettingsView {
   protected readonly themeChoices = THEME_CHOICES;
   protected readonly settings = this.store.settings;
   protected readonly groups = computed(() => groupSchemes(this.user.registry()));
+  /** Pages with tables or editors that need more than the shared page width. */
+  private static readonly wideIds: readonly string[] = [
+    "machines",
+    "spaces",
+    "keyboard",
+    "snippets",
+    "palette",
+    "layouts",
+  ];
+
+  protected isWide(): boolean {
+    return SettingsView.wideIds.includes(this.current().page.id);
+  }
+
   protected readonly sides: readonly Appearance[] = ["dark", "light"];
   protected readonly mode = computed<SchemeMode>(() =>
     typeof this.settings().colorSchema === "object" ? "pair" : "single",

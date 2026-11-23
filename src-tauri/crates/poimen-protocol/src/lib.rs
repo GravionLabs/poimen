@@ -1084,8 +1084,7 @@ pub struct SpaceCreate {
     /// Replaces the command of the layout's root pane (a task's command); typed into its shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    /// Extra environment of the new terminal(s), added after the server's own variables
-    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    /// Extra environment, added after the server's own variables (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID` stay).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }
@@ -1213,8 +1212,7 @@ pub struct SpaceApplyLayout {
     /// The user's answer to a `trust_required` result; absent on the first send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust: Option<TrustAnswer>,
-    /// Extra environment of the new terminal(s), added after the server's own variables
-    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    /// Extra environment, added after the server's own variables (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID` stay).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }
@@ -1282,8 +1280,7 @@ pub struct TerminalCreate {
     pub cols: Option<u16>,
     #[serde(default)]
     pub rows: Option<u16>,
-    /// Extra environment of the new terminal(s), added after the server's own variables
-    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    /// Extra environment, added after the server's own variables (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID` stay).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
     /// Becomes `Terminal.started_by` (#982).
@@ -1311,8 +1308,7 @@ pub struct TabCreate {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
-    /// Extra environment of the new terminal(s), added after the server's own variables
-    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    /// Extra environment, added after the server's own variables (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID` stay).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }
@@ -1353,8 +1349,7 @@ pub struct TabSplit {
     /// Program and arguments, never through a shell; defaults to the user's `$SHELL`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<Vec<String>>,
-    /// Extra environment of the new terminal(s), added after the server's own variables
-    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    /// Extra environment, added after the server's own variables (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID` stay).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }
