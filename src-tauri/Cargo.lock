@@ -3253,6 +3253,7 @@ name = "poimen-client"
 version = "0.34.0"
 dependencies = [
  "interprocess",
+ "poimen-core",
  "poimen-protocol",
  "serde",
  "serde_json",

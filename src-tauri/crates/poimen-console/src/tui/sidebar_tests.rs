@@ -22,6 +22,8 @@ fn term(id: &str, space: &str, name: &str, cwd: &str) -> Terminal {
         records: Vec::new(),
         hibernated: None,
         started_by: None,
+        run: None,
+        task: None,
         report: None,
         agent_source: None,
         status_history: Vec::new(),

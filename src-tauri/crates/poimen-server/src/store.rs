@@ -76,6 +76,11 @@ pub(crate) struct StoredTerminal {
     /// The terminal whose agent started this one (#982); survives a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) started_by: Option<String>,
+    /// The agent-events run and task of a scripted session (#744); survive a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) task: Option<String>,
     /// The agent's `report_done` (#980); survives a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) report: Option<poimen_protocol::report::AgentReport>,
@@ -532,6 +537,8 @@ mod tests {
                 since: 1_700_000_100_000,
             }),
             started_by: Some("t0".into()),
+            run: Some("M001".into()),
+            task: Some("744".into()),
             report: None,
             last_agent: Some(LastAgent {
                 agent: "claude".into(),

@@ -11,11 +11,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod attach;
+mod confirm;
 pub mod files;
 pub mod host;
 pub mod report;
 pub mod status;
 pub use attach::{AttachMode, AttachResult, DetachReason, TerminalSetDraft};
+pub use confirm::{
+    AgentConfirm, AgentConfirmAnswer, AgentWriteAction, AgentWriteNotice, CONFIRM_WAIT_MS,
+    ConfirmReason, ConfirmResult, Placement,
+};
 pub use files::windows_dir_from;
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
@@ -587,6 +592,12 @@ pub struct Terminal {
     /// The terminal whose agent started this one with `start_agent` (#982); outlives the starter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// The agent-events run the terminal's session belongs to (#744), set from `TerminalCreate.run`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    /// The task of that run the session works on (#744, read by #745), from `TerminalCreate.task`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
     /// What the agent in the terminal reported with `report_done` (#980); the last one wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<report::AgentReport>,
@@ -913,79 +924,6 @@ pub struct WorktreeCreateResult {
     pub branch: String,
     /// `false` when an existing worktree of the branch was returned.
     pub created: bool,
-}
-
-/// What an agent writes through `poimen mcp` (ADR 0012, #615, #1181, #1183, #1184).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentWriteAction {
-    StartAgent,
-    PromptAgent,
-    StartShell,
-    StopTerminal,
-    WriteTerminal,
-}
-
-/// Params of `agent.confirm` (#615): an agent (the terminal `caller_terminal_id`) wants to write
-/// into `space_id`, which is not its own space. The server asks the connected app and answers
-/// when the user did, or after `wait_ms` (default and cap [`CONFIRM_WAIT_MS`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentConfirm {
-    pub caller_terminal_id: String,
-    pub action: AgentWriteAction,
-    /// The space written into; the server resolves its name.
-    pub space_id: String,
-    /// The terminal prompted; absent for a start in a new terminal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_id: Option<String>,
-    /// The prompt or the command line, shown to the user as is.
-    pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait_ms: Option<u64>,
-}
-
-/// How long `agent.confirm` waits for the user at most.
-pub const CONFIRM_WAIT_MS: u64 = 60_000;
-
-/// Why `agent.confirm` answered as it did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfirmReason {
-    Approved,
-    Declined,
-    /// The user did not answer in time.
-    Timeout,
-    /// No app is subscribed, so nobody can be asked.
-    NoApp,
-}
-
-/// Result of `agent.confirm`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConfirmResult {
-    pub approved: bool,
-    pub reason: ConfirmReason,
-}
-
-/// Params of `agent.confirm_answer`: the app's answer to an [`Event::AgentConfirmRequested`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentConfirmAnswer {
-    pub id: String,
-    pub approve: bool,
-}
-
-/// Params of `agent.write_notice` (#615): an agent wrote through `poimen mcp`; the server tells
-/// the apps ([`Event::AgentWrote`]) so the notification center lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentWriteNotice {
-    pub caller_terminal_id: String,
-    pub action: AgentWriteAction,
-    pub space_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_id: Option<String>,
-    pub text: String,
-    /// The user approved it in the app; false for a write in the caller's own space.
-    #[serde(default)]
-    pub confirmed: bool,
 }
 
 /// Params of `agent.transcript` (#698): the next updates of the agent transcript of a terminal.
@@ -1348,6 +1286,16 @@ pub struct TerminalCreate {
     /// Becomes `Terminal.started_by` (#982).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// Becomes `Terminal.run` (#744): the agent-events run of a scripted session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    /// Becomes `Terminal.task` (#744): the task of that run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Where the client wants the terminal's tab (#744, ADR 0010). Reserved: the server accepts
+    /// it and keeps no placement yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
 }
 
 /// `tab.create`: a new tab at the end of the space, with `terminal_id` (moved out of its tab) or
