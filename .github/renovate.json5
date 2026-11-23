@@ -23,12 +23,19 @@
   // Raise the range in package.json to the new version instead of leaving it as it was.
   rangeStrategy: "bump",
   automerge: false,
+  // Work is integrated on release/next; main only receives the release PR (AGENTS.md).
+  baseBranches: ["release/next"],
   labels: ["dependencies"],
   enabledManagers: ["npm", "cargo", "github-actions"],
   // The vendored copy of portable-pty is changed by hand (src-tauri/vendor/portable-pty/POIMEN.md).
   ignorePaths: ["src-tauri/vendor/**", "**/node_modules/**", "**/target/**"],
-  // A known vulnerability gets a pull request at once, outside the schedule.
-  vulnerabilityAlerts: { enabled: true, labels: ["security"], schedule: ["at any time"] },
+  // A known vulnerability gets a pull request at once, outside the schedule; all alerts share one pull request.
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ["security"],
+    schedule: ["at any time"],
+    groupName: "security",
+  },
   osvVulnerabilityAlerts: true,
   packageRules: [
     {
