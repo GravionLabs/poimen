@@ -95,7 +95,7 @@ A run is not a plugin: the plugin worker lives with the app window and has no re
 - Sessions in other spaces need a confirmation per call, which costs interruptions for a script that spreads over spaces; a per-run grant can follow.
 - The result records and exit codes are an interface to keep stable and are documented in `docs/protocol.md` and the console docs.
 - A pane per PBI stays after the run; closing is the user's job or the caller's `--close-on-end`.
-- Follow-ups: a live test on a remote machine; the print mode; a per-run grant for other spaces; the script environment inside poimen (#748).
+- Follow-ups: a live test on a remote machine; the print mode; a per-run grant for other spaces; the script environment inside poimen ([ADR 0017](0017-script-environment-for-runs.md), #748).
 
 ## Alternatives
 
