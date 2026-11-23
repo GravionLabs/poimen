@@ -18,25 +18,23 @@ mod worktree;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use terminal::{terminal_detail, terminal_json};
 use worktree::{WorktreeSpec, make_worktree_space};
 
 use poimen_client::Client;
-use poimen_client::agent::{AgentError, PromptResult};
+use poimen_client::agent::{self, AgentError, PromptResult, WriteAsk, WriteError, authorize_write};
 use poimen_client::protocol::{
-    AgentConfirm, AgentStatus, AgentWriteAction, AgentWriteNotice, Event, TerminalCreate,
-    TranscriptState,
+    AgentStatus, AgentWriteAction, AgentWriteNotice, TerminalCreate, TranscriptState,
 };
-use poimen_core::{harness, settings};
+use poimen_core::harness;
 use serde_json::{Value, json};
 
 /// The MCP revisions this server speaks, newest first.
 const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// How long a write into another space waits for the user.
-pub const CONFIRM_WAIT: Duration = Duration::from_secs(60);
+pub const CONFIRM_WAIT: Duration = agent::CONFIRM_WAIT;
 
 /// How long `start_agent` waits for the agent's first report.
 const START_WAIT: Duration = Duration::from_secs(30);
@@ -361,47 +359,22 @@ fn authorize(
     text: &str,
     always_ask: bool,
 ) -> Result<bool, Fail> {
-    let Some(caller) = env.terminal_id.filter(|i| !i.is_empty()) else {
-        return Err(Fail::Tool(
-            "refused: this agent does not run in a poimen terminal (POIMEN_TERMINAL_ID is not set), \
-             so there is no space of its own to write into"
-                .into(),
-        ));
-    };
-    let terminals = client.list_terminals(None).map_err(server_error)?;
-    let own = terminals
-        .iter()
-        .find(|t| t.id == caller)
-        .ok_or_else(|| Fail::Tool(format!("terminal {caller} is not known to the server")))?;
-    if own.space_id == space_id && !always_ask {
-        return Ok(false);
-    }
-    let asked = AgentConfirm {
-        caller_terminal_id: caller.to_owned(),
-        action,
-        space_id: space_id.to_owned(),
-        terminal_id: terminal_id.map(str::to_owned),
-        text: text.to_owned(),
-        wait_ms: None,
-    };
-    let answer = client
-        .confirm_agent_write(&asked, env.confirm_wait)
-        .map_err(server_error)?;
-    use poimen_client::protocol::ConfirmReason as Why;
-    match answer.reason {
-        Why::Approved if answer.approved => Ok(true),
-        Why::Declined => Err(Fail::Tool(
-            "refused: the user declined the write into another space".into(),
-        )),
-        Why::Timeout => Err(Fail::Tool(
-            "refused: the user did not answer in time (the write into another space was not made)"
-                .into(),
-        )),
-        Why::NoApp => Err(Fail::Tool(
-            "refused: poimen is not open, so nobody can confirm a write into another space".into(),
-        )),
-        Why::Approved => Err(Fail::Tool("refused: the server did not approve".into())),
-    }
+    authorize_write(
+        client,
+        env.terminal_id,
+        &WriteAsk {
+            space_id,
+            action,
+            terminal_id,
+            text,
+            always_ask,
+        },
+        env.confirm_wait,
+    )
+    .map_err(|e| match e {
+        WriteError::Refused(m) => Fail::Tool(m),
+        WriteError::Client(e) => server_error(e),
+    })
 }
 
 /// Tells the apps about a write that happened; a failure does not undo the write.
@@ -428,15 +401,7 @@ fn announce(
 }
 
 fn harnesses_of(env: &Env) -> Vec<harness::Harness> {
-    let config = env
-        .home
-        .as_deref()
-        .and_then(|h| std::fs::read_to_string(settings::config_path(h)).ok())
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    match config.as_ref().and_then(|c| c.get("harnesses")) {
-        Some(v) => harness::resolve(v, &mut Vec::new()),
-        None => harness::default_harnesses(),
-    }
+    agent::harnesses_of(env.home.as_deref())
 }
 
 fn agent_error(e: AgentError) -> Fail {
@@ -639,26 +604,6 @@ fn wait_result(terminal: &str, status: &str, message: Option<&str>, timed_out: b
     v
 }
 
-/// The status and blocked message of the agent of `terminal` now; `None` for an unknown terminal.
-fn agent_now(client: &Client, terminal: &str) -> Result<Option<(String, Option<String>)>, Fail> {
-    let terminals = client.list_terminals(None).map_err(server_error)?;
-    let Some(t) = terminals.iter().find(|t| t.id == terminal) else {
-        return Ok(None);
-    };
-    Ok(Some(match &t.agent {
-        Some(a) => {
-            let status = serde_json::to_value(a.status).unwrap_or_default();
-            (
-                status.as_str().unwrap_or("idle").to_owned(),
-                a.message
-                    .clone()
-                    .filter(|_| a.status == AgentStatus::Blocked),
-            )
-        }
-        None => ("gone".to_owned(), None),
-    }))
-}
-
 /// `wait_agent {terminal, timeout_s?}`: returns when the agent is done, blocked, in error or gone
 /// (also: the terminal is closed or its process ended), or at the timeout. It subscribes to the
 /// server's events before it reads the status, so no change is missed, and never polls.
@@ -672,61 +617,16 @@ fn wait_agent(client: &Client, args: &Value) -> Result<Value, Fail> {
         .unwrap_or(WAIT_DEFAULT_S)
         .min(WAIT_MAX_S);
     let deadline = Instant::now() + Duration::from_secs_f64(seconds);
-    let stream = client.subscribe().map_err(server_error)?;
-    let Some((status, message)) = agent_now(client, terminal)? else {
-        return Err(Fail::Tool(format!("terminal {terminal} not found")));
-    };
-    let mut last = (status, message);
-    if matches!(last.0.as_str(), "done" | "blocked" | "error" | "gone") {
-        return Ok(wait_result(terminal, &last.0, last.1.as_deref(), false));
-    }
-    // The stream blocks in a thread of its own so the wait can end at the deadline; the thread
-    // ends at the next event after that (or when the process does).
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for event in stream {
-            if tx.send(event).is_err() {
-                break;
-            }
-        }
-    });
-    let id = terminal.to_owned();
-    loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        let event = match rx.recv_timeout(left) {
-            Ok(Ok(event)) => event,
-            Ok(Err(e)) => return Err(server_error(e)),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                return Ok(wait_result(terminal, &last.0, last.1.as_deref(), true));
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(Fail::Tool("poimen-server: the event stream ended".into()));
-            }
-        };
-        match event {
-            Event::AgentStatusChanged {
-                terminal_id,
-                status,
-                message,
-                ..
-            } if terminal_id == id => {
-                let name = serde_json::to_value(status).unwrap_or_default();
-                let name = name.as_str().unwrap_or("idle").to_owned();
-                let message = message.filter(|_| status == AgentStatus::Blocked);
-                if is_final(status) {
-                    return Ok(wait_result(terminal, &name, message.as_deref(), false));
-                }
-                last = (name, message);
-            }
-            Event::TerminalClosed { terminal_id, .. }
-            | Event::TerminalExited { terminal_id, .. }
-                if terminal_id == id =>
-            {
-                return Ok(wait_result(terminal, "gone", None, false));
-            }
-            _ => {}
-        }
-    }
+    let watched = agent::watch_agent(client, terminal, Some(deadline), is_final, |_| {})
+        .map_err(server_error)?
+        .ok_or_else(|| Fail::Tool(format!("terminal {terminal} not found")))?;
+    let status = serde_json::to_value(watched.status).unwrap_or_default();
+    Ok(wait_result(
+        terminal,
+        status.as_str().unwrap_or("idle"),
+        watched.message.as_deref(),
+        watched.timed_out,
+    ))
 }
 
 /// `read_agent {terminal}`: the last assistant message of the agent's transcript, read by the

@@ -38,6 +38,7 @@ mod settings_reread;
 pub mod stdio;
 mod store;
 mod stream;
+mod tab_ops;
 mod tabs;
 mod typing;
 
@@ -61,11 +62,10 @@ use poimen_protocol::{
     ClientKind, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure,
     RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space, SpaceApplyLayout,
     SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList,
-    SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace, TabRename, TabResizeSplit,
-    TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
-    TerminalDetach, TerminalInput, TerminalRename, TerminalReportAgent, TerminalReportTokens,
-    TerminalResize, TerminalStatus, TranscriptState, WorktreeCleanup, WorktreeCleanupResult,
-    WorktreeCreate, WorktreeCreateResult,
+    SpaceRename, TabClose, TabCreate, TabPlace, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
+    TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
+    TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
+    TranscriptState, WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -234,6 +234,8 @@ impl TerminalEntry {
             records: self.records.raw().to_vec(),
             hibernated: self.info.hibernated.clone(),
             started_by: self.info.started_by.clone(),
+            run: self.info.run.clone(),
+            task: self.info.task.clone(),
             report: self.info.report.clone(),
             last_agent: self.last_agent.clone(),
             tokens,
@@ -1160,12 +1162,12 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
         "tab.create" => tab_create(shared, parsed(request)?),
-        "tab.rename" => tab_rename(shared, parsed(request)?),
+        "tab.rename" => tab_ops::tab_rename(shared, parsed(request)?),
         "tab.close" => tab_close(shared, parsed(request)?),
-        "tab.move" => tab_move(shared, parsed(request)?),
+        "tab.move" => tab_ops::tab_move(shared, parsed(request)?),
         "tab.split" => tab_split(shared, parsed(request)?),
         "tab.resize_split" => tab_resize_split(shared, parsed(request)?),
-        "tab.focus" => tab_focus(shared, parsed(request)?),
+        "tab.focus" => tab_ops::tab_focus(shared, parsed(request)?),
         "server.shutdown" => server_shutdown(shared, parsed(request)?),
         "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
@@ -1958,6 +1960,8 @@ fn spawn_terminal(
         records: Vec::new(),
         hibernated: None,
         started_by: p.started_by.clone(),
+        run: p.run.clone(),
+        task: p.task.clone(),
         report: None,
         agent_source: None,
         status_history: Vec::new(),
@@ -2396,14 +2400,6 @@ fn tab_create(shared: &Arc<Shared>, p: TabCreate) -> ApiResult {
     Ok(json!({ "tab": tab_json(&inner, &tab_id), "terminal": terminal }))
 }
 
-fn tab_rename(shared: &Shared, p: TabRename) -> ApiResult {
-    let name = require_name(&p.name)?;
-    let mut inner = lock(&shared.inner);
-    let events = inner.layout.rename(&p.tab_id, name)?;
-    shared.apply(&inner, events);
-    Ok(json!({ "tab": tab_json(&inner, &p.tab_id) }))
-}
-
 /// `tab.close`: closes the terminals of the tab (`terminal.closed` each), then the tab.
 fn tab_close(shared: &Shared, p: TabClose) -> ApiResult {
     let mut inner = lock(&shared.inner);
@@ -2425,14 +2421,6 @@ fn tab_close(shared: &Shared, p: TabClose) -> ApiResult {
     let (_, events) = inner.layout.remove_tab(&p.tab_id)?;
     shared.apply(&inner, events);
     Ok(json!({}))
-}
-
-fn tab_move(shared: &Shared, p: TabMove) -> ApiResult {
-    let mut inner = lock(&shared.inner);
-    let events = inner.layout.move_tab(&p.tab_id, p.index)?;
-    shared.apply(&inner, events);
-    let tab = inner.layout.tab(&p.tab_id)?;
-    Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
 }
 
 /// `tab.split`: a new terminal (cwd of the split one by default) as the second child of a split
@@ -2467,7 +2455,7 @@ fn tab_split(shared: &Arc<Shared>, p: TabSplit) -> ApiResult {
             cols: None,
             rows: None,
             env: p.env,
-            started_by: None,
+            ..Default::default()
         },
     )?;
     let split_id = shared.new_id("split");
@@ -2483,15 +2471,6 @@ fn tab_resize_split(shared: &Shared, p: TabResizeSplit) -> ApiResult {
     let events = inner.layout.resize_split(&p.tab_id, &p.split_id, p.ratio)?;
     shared.apply(&inner, events);
     Ok(json!({ "tab": tab_json(&inner, &p.tab_id) }))
-}
-
-/// `tab.focus`: shared by every client, the last one wins.
-fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
-    let mut inner = lock(&shared.inner);
-    let events = inner.layout.focus(&p.tab_id, p.terminal_id.as_deref())?;
-    shared.apply(&inner, events);
-    let tab = inner.layout.tab(&p.tab_id)?;
-    Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
 }
 
 fn now_millis() -> u64 {

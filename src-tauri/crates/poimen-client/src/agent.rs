@@ -3,10 +3,17 @@
 //! (`terminal.report_agent`), so both calls here are typed input plus a wait on the terminal's
 //! `agent` field.
 
+mod session;
+
 use std::fmt;
 use std::time::{Duration, Instant};
 
 use poimen_protocol::{AgentInfo, AgentStatus, Terminal, TerminalSetDraft, TerminalStatus};
+
+pub use session::{
+    CONFIRM_WAIT, RUN_ENV, SessionContext, SessionEnd, SessionError, SessionEvent, SessionRequest,
+    Watched, WriteAsk, WriteError, authorize_write, harnesses_of, run_session, watch_agent,
+};
 
 use crate::{AttachmentWriter, Client, ClientError, to_value};
 
