@@ -5,6 +5,11 @@
   "properties": {
     "layout": { "$ref": "#/$defs/layout" },
     "setup": { "$ref": "#/$defs/command" },
+    "setupPolicy": {
+      "enum": ["start", "wait"],
+      "default": "start",
+      "description": "What the root pane of a new space does while setup runs. start (default): its command starts at once, in parallel. wait: its command is typed only after setup exited 0; a failed setup leaves the pane at its prompt with a notice."
+    },
     "teardown": { "$ref": "#/$defs/command" },
     "tasks": {
       "type": "object",

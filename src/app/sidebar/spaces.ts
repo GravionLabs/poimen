@@ -315,7 +315,7 @@ export function renderRow(
       case "name":
         return name;
       case "state_text":
-        if (pane?.pane.hibernated) return "hibernated";
+        if (pane?.pane.hibernated) return pane.pane.ended ? "ended, can resume" : "hibernated";
         return stateLabel(
           status,
           pane

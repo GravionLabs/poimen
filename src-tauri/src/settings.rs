@@ -11,6 +11,11 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use serde_json::Value;
 
+#[path = "terminal_import.rs"]
+mod terminal_import;
+
+use terminal_import::{HomeSources, TerminalSources};
+
 pub use poimen_core::settings::{
     SidebarRows, SidebarSort, config_path, parse_space_templates, parse_tasks,
     parse_trusted_projects, resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort,
@@ -66,8 +71,11 @@ impl Serialize for SoundSetting {
     }
 }
 
+#[path = "settings_palette.rs"]
+mod palette_setting;
 #[path = "settings_usage.rs"]
 mod usage_setting;
+pub use palette_setting::set_text as set_palette_text;
 pub use usage_setting::Usage;
 use usage_setting::resolve_usage;
 
@@ -202,12 +210,16 @@ pub struct Settings {
     /// `get_agent_actions`); not sent to the frontend.
     #[serde(skip)]
     pub agent_actions: Vec<crate::agent_actions::Spec>,
+    /// Saved prompts and commands (`snippets[]`, #1007); invalid entries are skipped with a warning.
+    pub snippets: Vec<crate::snippets::Snippet>,
     /// The remote machines (`machines`); invalid entries are skipped with a warning.
     pub machines: Vec<crate::machines::MachineConfig>,
     /// What plays when an agent is blocked or done (`sounds`).
     pub sounds: Sounds,
     /// Which provider limits the status bar asks for (`usage`).
     pub usage: Usage,
+    /// Detected palette sources and hidden entries (`palette`, #1218).
+    pub palette: palette_setting::Palette,
     /// `agents.claude.classicRenderer`: new poimen terminals set
     /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
     pub claude_classic_renderer: bool,
@@ -229,8 +241,8 @@ const MAX_SCROLLBACK: u32 = 1_000_000;
 
 #[path = "settings_shortcuts.rs"]
 mod shortcuts;
-pub use shortcuts::default_shortcuts;
 use shortcuts::resolve_shortcuts;
+pub use shortcuts::{default_shortcuts, set_shortcut_text};
 
 impl Default for Settings {
     fn default() -> Self {
@@ -259,8 +271,10 @@ impl Default for Settings {
             harnesses: crate::harness::default_harnesses(),
             agent_actions: Vec::new(),
             machines: Vec::new(),
+            snippets: Vec::new(),
             sounds: Sounds::default(),
             usage: Usage::default(),
+            palette: Default::default(),
             claude_classic_renderer: false,
             keep_awake: false,
             terminal_history: Default::default(),
@@ -271,20 +285,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
-pub struct Ghostty {
-    pub font_family: Option<String>,
-    pub font_size: Option<f64>,
-    pub background: Option<String>,
-    pub foreground: Option<String>,
-    pub cursor: Option<String>,
-    pub selection_background: Option<String>,
-    pub selection_foreground: Option<String>,
-    /// Empty, or 16 entries once a `palette` line was read.
-    pub palette: Vec<Option<String>>,
-}
-
-fn valid_size(size: f64) -> bool {
+pub(crate) fn valid_size(size: f64) -> bool {
     size.is_finite() && (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&size)
 }
 
@@ -292,45 +293,10 @@ fn valid_ui_size(size: f64) -> bool {
     size.is_finite() && (MIN_UI_FONT_SIZE..=MAX_UI_FONT_SIZE).contains(&size)
 }
 
-fn hex_color(value: &str) -> Option<String> {
+pub(crate) fn hex_color(value: &str) -> Option<String> {
     let hex = value.trim().trim_start_matches('#');
     (matches!(hex.len(), 3 | 6) && hex.chars().all(|c| c.is_ascii_hexdigit()))
         .then(|| format!("#{hex}"))
-}
-
-/// Reads the keys poimen uses from a Ghostty config (`key = value`, `#` comments).
-pub fn parse_ghostty(text: &str) -> Ghostty {
-    let mut out = Ghostty::default();
-    for line in text.lines() {
-        let Some((key, value)) = line.trim().split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"');
-        match key.trim() {
-            // The first family wins; later ones are fallbacks.
-            "font-family" if out.font_family.is_none() && !value.is_empty() => {
-                out.font_family = Some(value.to_owned());
-            }
-            "font-size" => out.font_size = value.parse().ok().filter(|s| valid_size(*s)),
-            "background" => out.background = hex_color(value),
-            "foreground" => out.foreground = hex_color(value),
-            "cursor-color" => out.cursor = hex_color(value),
-            "selection-background" => out.selection_background = hex_color(value),
-            "selection-foreground" => out.selection_foreground = hex_color(value),
-            "palette" => {
-                if let Some((index, color)) = value.split_once('=')
-                    && let Ok(index) = index.trim().parse::<usize>()
-                    && index < 16
-                    && let Some(color) = hex_color(color.trim().trim_matches('"'))
-                {
-                    out.palette.resize(16, None);
-                    out.palette[index] = Some(color);
-                }
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 /// `agents.claude.classicRenderer`; anything but a boolean warns and keeps the default.
@@ -454,6 +420,11 @@ fn resolve_github(value: &Value, s: &mut Settings) {
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
+    resolve_with(json, &terminal_import::ghostty_only(read_ghostty))
+}
+
+/// Like `resolve`, with the Ghostty theme and Kitty files from `sources`.
+pub fn resolve_with(json: Option<&str>, sources: &dyn TerminalSources) -> Settings {
     let mut s = Settings::default();
     let Some(json) = json else { return s };
     let root: Value = match serde_json::from_str(json) {
@@ -545,8 +516,14 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     if let Some(value) = root.get("machines") {
         s.machines = crate::machines::parse(value, &mut s.warnings);
     }
+    if let Some(value) = root.get("snippets") {
+        s.snippets = crate::snippets::parse(value, &mut s.warnings);
+    }
     if let Some(value) = root.get("sounds") {
         s.sounds = resolve_sounds(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("palette") {
+        s.palette = palette_setting::resolve(value, &mut s.warnings);
     }
     if let Some(value) = root.get("usage") {
         s.usage = resolve_usage(value, &mut s.warnings);
@@ -583,6 +560,7 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
 
     let mut use_ghostty = false;
+    let mut use_kitty = false;
     let mut explicit_family = false;
     let mut explicit_size = false;
     if let Some(term) = root.get("terminal") {
@@ -631,50 +609,37 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
                     .warnings
                     .push(format!("terminal.ghostty {other} must be true or false")),
             }
+            match term.get("kitty") {
+                None => {}
+                Some(Value::Bool(b)) => use_kitty = *b,
+                Some(other) => s
+                    .warnings
+                    .push(format!("terminal.kitty {other} must be true or false")),
+            }
         } else {
             s.warnings.push("terminal must be an object".into());
         }
     }
 
-    if use_ghostty {
-        match read_ghostty() {
-            None => s
-                .warnings
-                .push("Ghostty config not found; ignoring terminal.ghostty".into()),
-            Some(text) => {
-                let g = parse_ghostty(&text);
-                // Explicit poimen entries win over Ghostty.
-                if !explicit_family && g.font_family.is_some() {
-                    s.font_family = g.font_family;
-                }
-                if !explicit_size && let Some(size) = g.font_size {
-                    s.font_size = size;
-                }
-                if g.background.is_some()
-                    || g.foreground.is_some()
-                    || g.cursor.is_some()
-                    || g.selection_background.is_some()
-                    || g.selection_foreground.is_some()
-                    || !g.palette.is_empty()
-                {
-                    s.colors = Some(Colors {
-                        background: g.background,
-                        foreground: g.foreground,
-                        cursor: g.cursor,
-                        selection_background: g.selection_background,
-                        selection_foreground: g.selection_foreground,
-                        palette: g.palette,
-                    });
-                }
-            }
-        }
-    }
+    terminal_import::apply(
+        &mut s,
+        sources,
+        use_ghostty,
+        use_kitty,
+        explicit_family,
+        explicit_size,
+    );
     s
 }
 
 /// Ghostty's config. Ghostty has no Windows build, so this is intentionally Unix-only.
 pub fn ghostty_path(home: &Path) -> PathBuf {
     home.join(".config").join("ghostty").join("config")
+}
+
+/// Kitty's config (`kitty.conf`), unless `KITTY_CONFIG_DIRECTORY` names another directory.
+pub fn kitty_path(home: &Path) -> PathBuf {
+    terminal_import::kitty_dir(home).join("kitty.conf")
 }
 
 /// The keys of an older config that poimen ignores since the herdr backend is gone (#174): the
@@ -716,9 +681,7 @@ pub fn load(home: &Path) -> Settings {
             return s;
         }
     };
-    let mut s = resolve(json.as_deref(), || {
-        std::fs::read_to_string(ghostty_path(home)).ok()
-    });
+    let mut s = resolve_with(json.as_deref(), &HomeSources(home));
     if let Some(text) = &json {
         for key in ignored_herdr_keys(text) {
             eprintln!("poimen: ignoring {key} in config.json: the herdr backend was removed");
@@ -1035,8 +998,8 @@ pub fn remove_spaces_layout(home: &Path) -> Result<(), String> {
     save_with(home, remove_spaces_layout_text)
 }
 
-fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
-    [config_path(home), ghostty_path(home)]
+fn stamp(home: &Path) -> [Option<SystemTime>; 3] {
+    [config_path(home), ghostty_path(home), kitty_path(home)]
         .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
 }
 
@@ -1052,6 +1015,14 @@ pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "settings_templates_tests.rs"]
+mod templates_tests;
+
+#[cfg(test)]
+#[path = "settings_sounds_tests.rs"]
+mod sounds_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1535,86 +1506,6 @@ mod tests {
     }
 
     #[test]
-    fn sounds_default_to_off_and_parse_true_false_and_paths() {
-        assert_eq!(rows("{}").sounds, Sounds::default());
-        let s = rows(r#"{"sounds":{"blocked":true,"done":"~/ding.wav"}}"#);
-        assert_eq!(s.sounds.blocked, SoundSetting::Builtin);
-        assert_eq!(s.sounds.done, SoundSetting::File("~/ding.wav".into()));
-        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
-        let json = serde_json::to_value(&s.sounds).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({"blocked": true, "done": "~/ding.wav"})
-        );
-    }
-
-    #[test]
-    fn other_sound_values_warn_and_stay_off() {
-        let s = rows(r#"{"sounds":{"blocked":3,"done":""}}"#);
-        assert_eq!(s.sounds, Sounds::default());
-        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
-        assert_eq!(rows(r#"{"sounds":true}"#).warnings.len(), 1);
-    }
-
-    #[test]
-    fn set_sound_text_writes_one_key_and_refuses_other_values() {
-        let out = set_sound_text("{\"theme\":\"dark\"}", "done", &Value::Bool(true)).unwrap();
-        assert!(
-            out.contains("\"done\": true") || out.contains("\"done\":true"),
-            "{out}"
-        );
-        assert!(set_sound_text("{}", "other", &Value::Bool(true)).is_err());
-        assert!(set_sound_text("{}", "done", &Value::from(3)).is_err());
-    }
-
-    fn sound_home(name: &str, config: &str) -> PathBuf {
-        let home = std::env::temp_dir().join(format!("poimen-sound-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
-        std::fs::write(config_path(&home), config).unwrap();
-        home
-    }
-
-    #[test]
-    fn sound_file_reads_the_configured_file() {
-        let home = sound_home("ok", r#"{"sounds":{"done":"~/ding.wav"}}"#);
-        std::fs::write(home.join("ding.wav"), [1u8, 2, 3]).unwrap();
-        assert_eq!(read_sound_file(&home, "done").unwrap(), vec![1, 2, 3]);
-        // `blocked` is off: the caller cannot name a path, only a kind.
-        assert!(read_sound_file(&home, "blocked").is_err());
-        assert!(read_sound_file(&home, "/etc/passwd").is_err());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn sound_file_refuses_missing_large_and_directory() {
-        let home = sound_home(
-            "bad",
-            r#"{"sounds":{"blocked":"~/none.wav","done":"~/dir"}}"#,
-        );
-        assert!(read_sound_file(&home, "blocked").is_err());
-        std::fs::create_dir(home.join("dir")).unwrap();
-        assert!(
-            read_sound_file(&home, "done")
-                .unwrap_err()
-                .contains("regular")
-        );
-        std::fs::write(
-            home.join("none.wav"),
-            vec![0u8; MAX_SOUND_BYTES as usize + 1],
-        )
-        .unwrap();
-        assert!(
-            read_sound_file(&home, "blocked")
-                .unwrap_err()
-                .contains("1 MiB")
-        );
-        std::fs::write(home.join("none.wav"), vec![0u8; MAX_SOUND_BYTES as usize]).unwrap();
-        assert!(read_sound_file(&home, "blocked").is_ok());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
     fn explorer_settings_invalid_warn_and_keep_defaults() {
         for json in [
             r#"{"explorer":{"roots":[]}}"#,
@@ -2037,72 +1928,6 @@ mod tests {
     }
 
     #[test]
-    fn save_space_templates_writes_only_that_key_and_keeps_the_rest() {
-        let home = std::env::temp_dir().join(format!("poimen-tpls-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
-        std::fs::write(
-            config_path(&home),
-            "{\n  \"theme\": \"dark\",\n  \"spaceTemplates\": []\n}\n",
-        )
-        .unwrap();
-        let templates = serde_json::json!([
-            {"name": "work", "match": {"dir": "~/src", "remote": {"provider": "github", "owner": "acme"}},
-             "agent": "claude", "model": "opus",
-             "layout": {"panes": [{"name": "main", "command": "ls"}]}},
-            {"name": "az", "match": {"remote": {"provider": "azure-devops", "organization": "o", "project": "p"}},
-             "agent": "copilot"}
-        ]);
-        save_space_templates(&home, &templates).unwrap();
-        let text = std::fs::read_to_string(config_path(&home)).unwrap();
-        assert!(text.contains("\"theme\": \"dark\""));
-        let s = load(&home);
-        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
-        assert_eq!(s.theme, "dark");
-        assert_eq!(s.space_templates.len(), 2);
-        assert_eq!(s.space_templates[0].model.as_deref(), Some("opus"));
-        save_space_templates(&home, &serde_json::json!([])).unwrap();
-        assert!(load(&home).space_templates.is_empty());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn saving_templates_keeps_a_layout_name_reference_as_a_string() {
-        let t = serde_json::json!([{"name": "a", "agent": "claude", "layout": "review"}]);
-        let out = set_space_templates_text("{}", &t).unwrap();
-        let back: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(back["spaceTemplates"][0]["layout"], "review");
-        let bad = serde_json::json!([{"name": "a", "agent": "claude", "layout": 3}]);
-        assert!(set_space_templates_text("{}", &bad).is_err());
-    }
-
-    #[test]
-    fn save_space_templates_creates_the_file_and_rejects_invalid_input() {
-        let ok = serde_json::json!([{"name": "a", "match": {"dir": "~/a"}, "agent": "claude"}]);
-        assert!(
-            set_space_templates_text("{}", &ok)
-                .unwrap()
-                .contains("\"spaceTemplates\"")
-        );
-        for bad in [
-            serde_json::json!([
-                {"name": "a", "agent": "claude"},
-                {"name": "b", "match": {}, "agent": "claude"}
-            ]),
-            serde_json::json!([{"name": "a", "match": {"dir": "rel"}, "agent": "claude"}]),
-            serde_json::json!([{"name": "a", "match": {"dir": "~/a"}}]),
-            serde_json::json!([
-                {"name": "a", "match": {"dir": "~/a"}, "agent": "claude"},
-                {"name": "a", "match": {"dir": "~/b"}, "agent": "claude"}
-            ]),
-            serde_json::json!({"name": "a"}),
-        ] {
-            let err = set_space_templates_text("{}", &bad).unwrap_err();
-            assert!(err.starts_with("spaceTemplates: "), "{err}");
-        }
-    }
-
-    #[test]
     fn sidebar_rows_unknown_token_warns_and_keeps_the_default() {
         let s =
             rows(r#"{"sidebar":{"rows":{"workspace":[["name","nope"]],"terminal":[["name"]]}}}"#);
@@ -2231,28 +2056,6 @@ mod tests {
             assert_eq!(s.theme, "system");
             assert_eq!(s.warnings.len(), 1);
         }
-    }
-
-    #[test]
-    fn parses_ghostty_config() {
-        let g = parse_ghostty(
-            "# comment\nfont-family = \"JetBrains Mono\"\nfont-family = Menlo\nfont-size = 14\nbackground = #1e1e2e\nforeground = cdd6f4\ncursor-color = #f5e0dc\nselection-background = #585b70\nselection-foreground = #cdd6f4\npalette = 1=#f38ba8\npalette = 15 = \"a6adc8\"\npalette = 16=#000000\npalette = 2=red\nbad line\n",
-        );
-        assert_eq!(g.font_family.as_deref(), Some("JetBrains Mono"));
-        assert_eq!(g.font_size, Some(14.0));
-        assert_eq!(g.background.as_deref(), Some("#1e1e2e"));
-        assert_eq!(g.foreground.as_deref(), Some("#cdd6f4"));
-        assert_eq!(g.cursor.as_deref(), Some("#f5e0dc"));
-        assert_eq!(g.selection_background.as_deref(), Some("#585b70"));
-        assert_eq!(g.selection_foreground.as_deref(), Some("#cdd6f4"));
-        assert_eq!(g.palette.len(), 16);
-        assert_eq!(g.palette[1].as_deref(), Some("#f38ba8"));
-        assert_eq!(g.palette[15].as_deref(), Some("#a6adc8"));
-        assert_eq!(g.palette.iter().flatten().count(), 2);
-        assert_eq!(
-            parse_ghostty("background = red\nfont-size = x"),
-            Ghostty::default()
-        );
     }
 
     #[test]

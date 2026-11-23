@@ -167,6 +167,10 @@ pub struct Terminal {
     /// The server stopped the idle agent and resumes it on the next controller attach (#904).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hibernated: bool,
+    /// The process is gone and the terminal is its history; with `hibernated` its agent session
+    /// can be resumed by a controller attach (#1232).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ended: bool,
     /// The terminal whose agent started this one through `start_agent` (#982).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,

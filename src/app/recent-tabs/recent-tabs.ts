@@ -8,7 +8,15 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { changesDir, EditorTabs, flowPane, spaceOfTab, tabKind } from "../core/editor-tabs";
+import {
+  changesDir,
+  EditorTabs,
+  flowPane,
+  previewPath,
+  spaceOfTab,
+  tabKind,
+} from "../core/editor-tabs";
+import { fileName } from "../file-preview/preview-model";
 import { SpacesStore } from "../core/spaces-store";
 import { paneTitle } from "../core/snapshot";
 import { Keymap } from "../core/keymap";
@@ -66,6 +74,8 @@ export class RecentTabs {
         return `Space: ${spaceOfTab(id)}`;
       case "changes":
         return `Changes: ${changesDir(id)?.split("/").filter(Boolean).pop() ?? ""}`;
+      case "preview":
+        return `Preview: ${fileName(previewPath(id) ?? "")}`;
       case "flow":
         return `Flow: ${this.titleOf(flowPane(id) ?? id)}`;
       default:

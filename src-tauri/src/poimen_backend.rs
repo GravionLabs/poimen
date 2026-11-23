@@ -19,7 +19,7 @@ use poimen_client::protocol::{
     Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceCreate, SpaceCreateResult, SpaceCreated,
     SpaceList, Tab, TabSplit, Terminal, TerminalCreate, TrustAnswer, TrustRequired,
 };
-use poimen_client::{AttachmentWriter, Client, ClientError};
+use poimen_client::{Client, ClientError};
 use serde_json::{Value, json};
 
 use crate::agent_session::{AgentSession, PromptOutcome};
@@ -29,15 +29,12 @@ use crate::backend::{
     StreamRequest,
 };
 use stream_closed::{closed_silently, controller_held, history_ended, lost};
+use streams::Stream;
 mod stream_closed;
+mod streams;
 use crate::poimen_server;
 use crate::trust;
 use poimen_core::snapshot as snap;
-
-/// One open stream: the write half of its attachment.
-struct Stream {
-    writer: Mutex<AttachmentWriter>,
-}
 
 pub struct PoimenBackend {
     client: Client,
@@ -47,6 +44,8 @@ pub struct PoimenBackend {
     unreported: Mutex<HashSet<String>>,
     next_id: AtomicU32,
     streams: Arc<Mutex<HashMap<u32, Arc<Stream>>>>,
+    /// Terminals whose prompt bar holds text (#1163).
+    drafts: streams::Drafts,
     /// `agents.claude.classicRenderer`: see [`PoimenBackend::terminal_env`].
     classic_renderer: AtomicBool,
 }
@@ -72,6 +71,7 @@ impl PoimenBackend {
             unreported: Mutex::default(),
             next_id: AtomicU32::new(0),
             streams: Arc::default(),
+            drafts: Mutex::default(),
             classic_renderer: AtomicBool::new(false),
         }
     }
@@ -141,13 +141,6 @@ impl PoimenBackend {
         Ok(())
     }
 
-    fn stream(&self, id: u32) -> Result<Arc<Stream>, String> {
-        lock(&self.streams)
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| "the terminal stream is closed".to_owned())
-    }
-
     fn terminal(&self, terminal_id: &str) -> Result<Terminal, String> {
         self.client
             .list_terminals(None)
@@ -172,7 +165,6 @@ impl PoimenBackend {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
-
 fn text(err: ClientError) -> String {
     err.to_string()
 }
@@ -292,6 +284,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
         agent_status: status_of(terminal),
         hibernated: terminal.hibernated.is_some(),
+        ended: terminal.from_history,
         started_by: terminal.started_by.clone(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
@@ -506,10 +499,12 @@ impl Backend for PoimenBackend {
         &self,
         request: LayoutRequest<'_>,
     ) -> Option<Result<LaidOut, String>> {
+        let mut env = self.terminal_env();
+        env.extend(request.env.cloned().unwrap_or_default());
         let params = SpaceCreate {
             trust: request.decision.map(trust_answer),
             command: request.command.map(str::to_owned),
-            env: self.terminal_env(),
+            env,
             ..SpaceCreate::with_layout(request.label, request.cwd)
         };
         Some(
@@ -655,9 +650,10 @@ impl Backend for PoimenBackend {
     }
 
     fn send_input(&self, terminal_id: &str, text_: &str) -> Result<(), String> {
-        self.client
-            .input(terminal_id, &format!("{text_}\r"))
-            .map_err(text)
+        self.send_text(terminal_id, &format!("{text_}\r"))
+    }
+    fn send_text(&self, terminal_id: &str, text_: &str) -> Result<(), String> {
+        self.client.input(terminal_id, text_).map_err(text)
     }
 
     /// Runs the agent in the terminal and returns when its `SessionStart` report arrives (30 s); a kind
@@ -775,12 +771,12 @@ impl Backend for PoimenBackend {
             Err(err) => return Err(text(err)),
         };
         let writer = attachment.writer().map_err(text)?;
-        lock(&self.streams).insert(
-            id,
-            Arc::new(Stream {
-                writer: Mutex::new(writer),
-            }),
-        );
+        let stream = Arc::new(Stream {
+            terminal_id: request.target.to_owned(),
+            writer: Mutex::new(writer),
+        });
+        lock(&self.streams).insert(id, Arc::clone(&stream));
+        streams::restore(self, &stream);
         let streams = Arc::clone(&self.streams);
         let info = attachment.info.clone();
         let controls = request.mode == Mode::Control;
@@ -822,6 +818,10 @@ impl Backend for PoimenBackend {
     fn stream_input(&self, id: u32, text_: &str) -> Result<(), String> {
         let stream = self.stream(id)?;
         lock(&stream.writer).input(text_).map_err(text)
+    }
+
+    fn terminal_draft(&self, terminal_id: &str, draft: bool) -> Result<(), String> {
+        streams::set(self, terminal_id, draft)
     }
 
     fn stream_resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
@@ -2058,39 +2058,9 @@ mod tests {
         assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
     }
 
-    fn layout_request<'a>(
-        cwd: &'a str,
-        decision: Option<&'a trust::Decision>,
-        command: Option<&'a str>,
-    ) -> LayoutRequest<'a> {
-        LayoutRequest {
-            cwd,
-            label: "api",
-            decision,
-            command,
-        }
-    }
-
-    #[test]
-    fn a_new_space_with_layout_is_built_by_the_server() {
-        let (backend, log) = backend_for("space-layout", vec![], false);
-        let request = layout_request("/work/api", None, Some("claude 'x'"));
-        let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
-        assert_eq!(
-            outcome,
-            LaidOut::Created {
-                space_id: "s9".into(),
-                warnings: vec!["template app: harness codex is not installed".into()],
-                setup_started: true,
-            }
-        );
-        assert_eq!(
-            params_of(&log, "space.create"),
-            json!({"name": "api", "cwd": "/work/api", "layout": true, "command": "claude 'x'"})
-        );
-        // The server built the space: no terminal, split or input from the app.
-        assert_eq!(lock(&log).len(), 1);
-    }
+    #[path = "../../poimen_backend_env_tests.rs"]
+    mod env_tests;
+    use env_tests::layout_request;
 
     #[test]
     fn an_untrusted_project_is_the_trust_question_and_creates_nothing() {
@@ -2527,21 +2497,6 @@ mod tests {
             ),
             "{last:?}"
         );
-    }
-
-    #[test]
-    fn a_held_controller_is_reported_as_a_closed_record_not_an_error() {
-        let (backend, _) = backend_for("held", vec![], true);
-        let (opened, rx) = collect(&backend, Mode::Control, false);
-        assert!(opened.is_ok());
-        let (_, record) = rx.recv().unwrap();
-        assert!(matches!(
-            record,
-            StreamRecord::Closed {
-                code: Some(CloseCode::ControllerHeld),
-                ..
-            }
-        ));
     }
     mod more;
 }

@@ -163,6 +163,7 @@ describe("parseSettings", () => {
       explorerShowHidden: false,
       claudeClassicRenderer: false,
       keepAwake: false,
+      palette: { scripts: true, skills: true, hidden: {} },
       terminalHistory: { enabled: true, perTerminalMib: 8, totalMib: 256 },
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
@@ -181,6 +182,7 @@ describe("parseSettings", () => {
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       machines: [],
+      snippets: [],
       sounds: { blocked: false, done: false },
       usage: { claude: true },
       home: "/Users/x",
@@ -492,5 +494,16 @@ describe("parseHarnesses printArgs", () => {
     const [a, b] = parseHarnesses([{ id: "a", printArgs: ["-p", "{prompt}", 1] }, { id: "b" }]);
     expect(a.printArgs).toEqual(["-p", "{prompt}"]);
     expect(b.printArgs).toEqual([]);
+  });
+});
+
+describe("parseHarnesses slashSkills", () => {
+  it("reads whether the agent runs /<skill> and defaults to false", () => {
+    const [a, b, c] = parseHarnesses([
+      { id: "a", slashSkills: true },
+      { id: "b" },
+      { id: "c", slashSkills: "yes" },
+    ]);
+    expect([a.slashSkills, b.slashSkills, c.slashSkills]).toEqual([true, false, false]);
   });
 });

@@ -112,8 +112,16 @@
 @if (fileMenu(); as menu) {
   <app-context-menu
     [at]="menu.at"
-    [groups]="fileMenuGroups"
+    [groups]="fileMenuGroups(menu.changed)"
     (picked)="pickFileLink($event.id)"
     (closed)="fileMenu.set(null)"
+  />
+}
+@if (copyAt(); as menu) {
+  <app-context-menu
+    [at]="menu"
+    [groups]="copyGroups(menu.selected)"
+    (picked)="pickCopy()"
+    (closed)="copyAt.set(null)"
   />
 }

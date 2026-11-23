@@ -11,7 +11,9 @@ mod changes_files;
 mod changes_git;
 mod commit_message;
 mod deliver;
+mod deliver_command;
 mod editor;
+mod file_preview;
 mod git_sync;
 mod github_branches;
 mod github_issues;
@@ -34,7 +36,10 @@ mod server_install;
 mod server_paths;
 mod settings;
 mod settings_transfer;
+mod settings_write;
+mod snippets;
 mod spaces;
+mod stream_commands;
 mod task_start;
 mod terminal_colors;
 mod updater;
@@ -794,21 +799,6 @@ async fn resolve_space_template(cwd: String) -> Option<TemplateHint> {
     .flatten()
 }
 
-/// Writes only `layouts` after validating it (named layouts, ADR 0011); a layout a template uses
-/// cannot be dropped or renamed.
-#[tauri::command]
-fn set_layouts(layouts: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    poimen_core::settings::save_layouts(&home, &layouts)
-}
-
-/// Writes only `spaceTemplates` after validating it; the settings watcher emits the change.
-#[tauri::command]
-fn set_space_templates(templates: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_space_templates(&home, &templates)
-}
-
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
 /// exactly in it, else one labelled with its name whose panes report no other directory) that one
 /// is focused.
@@ -819,6 +809,7 @@ async fn create_space(
     label: Option<String>,
     decision: Option<trust::Decision>,
     command: Option<String>,
+    env: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<spaces::SpaceOutcome, String> {
     on_backend(backend.inner(), move |b| {
         create_space_with(
@@ -828,6 +819,7 @@ async fn create_space(
             label.as_deref(),
             decision,
             command.as_deref(),
+            env.as_ref(),
         )
     })
     .await
@@ -843,6 +835,7 @@ fn create_space_with(
     label: Option<&str>,
     decision: Option<trust::Decision>,
     root_command: Option<&str>,
+    env: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let dir = spaces::resolve_dir(cwd, home)?;
     let snapshot = backend.snapshot()?;
@@ -862,6 +855,7 @@ fn create_space_with(
         label: &label,
         decision: decision.as_ref(),
         command: root_command,
+        env,
     };
     if let Some(result) = backend.create_space_with_layout(request) {
         return match result? {
@@ -946,45 +940,6 @@ enum RebuildOutcome {
     NotEmpty,
 }
 
-/// Whether `command` starts one of the agent `harnesses`: its program (first word, without path
-/// and `.exe`) is a harness id or the program of a harness command.
-fn is_agent_command(command: &str, harnesses: &[harness::Harness]) -> bool {
-    fn program(word: &str) -> String {
-        let word = word.trim_matches(|c| c == '\'' || c == '"');
-        let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
-        let lower = base.to_ascii_lowercase();
-        lower.strip_suffix(".exe").unwrap_or(&lower).to_owned()
-    }
-    let Some(first) = command.split_whitespace().next() else {
-        return false;
-    };
-    let wanted = program(first);
-    harnesses.iter().any(|h| {
-        program(&h.id) == wanted || h.command.first().is_some_and(|c| program(c) == wanted)
-    })
-}
-
-/// Why rebuilding needs the user's go: every pane of `layout` that starts an agent, and `setup`.
-fn consent_reasons(
-    layout: Option<&layout::TabLayout>,
-    harnesses: &[harness::Harness],
-    setup: Option<&str>,
-) -> Vec<String> {
-    let mut reasons: Vec<String> = layout
-        .into_iter()
-        .flat_map(|l| l.panes())
-        .filter_map(|p| {
-            let command = p.command.as_deref()?;
-            is_agent_command(command, harnesses)
-                .then(|| format!("pane \"{}\" starts an agent: {command}", p.name))
-        })
-        .collect();
-    if let Some(setup) = setup {
-        reasons.push(format!("setup runs: {setup}"));
-    }
-    reasons
-}
-
 /// Rebuilds the layout of a space without terminals (after a server restart: spaces persist,
 /// terminals do not) in the space's own directory, through the path of `create_space`: the
 /// layout is resolved again (project file > template > `spaces.layout` > default), the project
@@ -1054,7 +1009,7 @@ fn rebuild_space_with(
         let setup = allow.then(|| project::setup_of(sources.refs().0)).flatten();
         let (planned, _) = plan();
         let layout = planned.as_ref().ok().map(|(l, _)| l);
-        let reasons = consent_reasons(layout, &harnesses, setup.as_deref());
+        let reasons = spaces::consent_reasons(layout, &harnesses, setup.as_deref());
         if !reasons.is_empty() {
             return Ok(RebuildOutcome::Consent { reasons });
         }
@@ -1160,13 +1115,6 @@ async fn settings_import_apply(
     .map_err(|e| e.to_string())?
 }
 
-/// Revokes the trust of the project file of `root`; the settings watcher emits the change.
-#[tauri::command]
-fn revoke_project(root: String) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::revoke_project(&home, &root)
-}
-
 /// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
 #[tauri::command]
 async fn project_config(dir: String) -> Result<project::Loaded, String> {
@@ -1209,52 +1157,6 @@ async fn project_save(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-/// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
-/// palette (names only), and whether the file still needs the user's trust.
-#[tauri::command]
-async fn project_entries(dir: String) -> project::Entries {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = git::toplevel(&dir).unwrap_or(dir);
-        let sources = trust::Sources::read(&root);
-        project::entries(&sources, &get_settings().trusted_projects)
-    })
-    .await
-    .unwrap_or_default()
-}
-
-/// Runs a palette entry of the project file in the space `space_id` (a user action). Goes
-/// through `trust::gate` with the one read of the file; an untrusted file answers `ask`.
-#[tauri::command]
-async fn project_run(
-    backend: State<'_, Shared>,
-    space_id: String,
-    dir: String,
-    entry: project::Entry,
-    decision: Option<trust::Decision>,
-) -> Result<project::EntryOutcome, String> {
-    on_backend(backend.inner(), move |b| {
-        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
-        let sources = trust::Sources::read(&root);
-        let home = home_dir();
-        let trusted = get_settings().trusted_projects;
-        let persist = |hash: &str| -> Result<(), String> {
-            let home = home.as_deref().ok_or("the home directory is not known")?;
-            settings::trust_project(home, &sources.root, hash)
-        };
-        project::run_entry(
-            b,
-            &sources,
-            &trusted,
-            decision.as_ref(),
-            &persist,
-            &space_id,
-            &dir,
-            &entry,
-        )
-    })
-    .await
 }
 
 /// Directories matching a typed path, for the completion of path fields.
@@ -1453,6 +1355,7 @@ async fn machine_create_space(
     cwd: String,
     label: Option<String>,
     command: Option<String>,
+    env: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let backend: Shared = machines.backend(&name)?;
     on_backend(&backend, move |b| {
@@ -1461,6 +1364,7 @@ async fn machine_create_space(
             &cwd,
             label.as_deref().unwrap_or_default(),
             command.as_deref(),
+            env.as_ref(),
         )
     })
     .await
@@ -1575,6 +1479,7 @@ fn remote_create_space(
     cwd: &str,
     label: &str,
     command: Option<&str>,
+    env: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let snapshot = backend.snapshot()?;
     let outcome = |space_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
@@ -1593,6 +1498,7 @@ fn remote_create_space(
         label,
         decision: None,
         command,
+        env,
     };
     match backend.create_space_with_layout(request) {
         None => Err("the machine's server cannot build a layout".into()),
@@ -2422,36 +2328,6 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Watches the deliver runs (progress events in `<git-common-dir>/.agents/events`, else the
-/// status file `.agents/deliver-loop/status.json`) of the repositories of `dirs` (one watch per
-/// repository: its worktrees count as one, named by the toplevel of the first), replacing the
-/// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
-/// content. Returns the watched roots. Read-only.
-#[tauri::command]
-async fn deliver_watch(
-    app: AppHandle,
-    watch: State<'_, DeliverWatch>,
-    dirs: Vec<String>,
-) -> Result<Vec<String>, String> {
-    let roots = tauri::async_runtime::spawn_blocking(move || git::repo_roots(&dirs))
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
-    let current = watches.keys().cloned().collect();
-    let (stop, start) = deliver::plan(&current, &roots);
-    for root in stop {
-        watches.remove(&root);
-    }
-    for root in start {
-        let (app, name) = (app.clone(), root.clone());
-        let handle = deliver::watch(PathBuf::from(&root), move |read| {
-            let _ = app.emit("deliver", json!({ "root": name, "read": read }));
-        });
-        watches.insert(root, handle);
-    }
-    Ok(roots)
-}
-
 /// What goes over the channel of a stream for one record. The PTY bytes (snapshot and
 /// output) are sent raw, which the webview receives as an `ArrayBuffer`; the other records are JSON.
 fn channel_messages(record: &backend::StreamRecord) -> Vec<InvokeResponseBody> {
@@ -2536,29 +2412,6 @@ fn stream_of(backend: &Shared, remote: &machines::RemoteStreams, id: u32) -> (Sh
         return found;
     }
     (backend.clone(), id)
-}
-
-#[tauri::command]
-fn terminal_input(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    text: String,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_input(id, &text)
-}
-
-#[tauri::command]
-fn terminal_resize(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_resize(id, cols, rows)
 }
 
 #[tauri::command]
@@ -2762,6 +2615,7 @@ pub fn run() {
         .manage(SubagentWatch::default())
         .manage(TokenWatch::default())
         .manage(DeliverWatch::default())
+        .manage(file_preview::Watches::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
@@ -2937,10 +2791,14 @@ pub fn run() {
             paste_image,
             usage_claude,
             set_spaces_layout,
-            set_layouts,
-            set_space_templates,
+            settings_write::set_layouts,
+            settings_write::set_shortcut,
+            snippets::set_snippets,
+            snippets::terminal_type,
+            stream_commands::terminal_draft,
+            settings_write::set_space_templates,
             resolve_space_template,
-            revoke_project,
+            settings_write::revoke_project,
             settings_export,
             layout_export,
             layout_import,
@@ -2952,17 +2810,24 @@ pub fn run() {
             project_config,
             project_file,
             project_save,
-            project_entries,
-            project_run,
+            project::project_entries,
+            project::project_run,
+            project::detected_entries,
+            project::repo_root,
+            settings_write::set_palette,
+            project::detected_run,
             repo_info,
             subagents_watch,
             subagents_unwatch,
             tokens_watch,
             tokens_unwatch,
-            deliver_watch,
+            deliver_command::deliver_watch,
+            file_preview::preview_read,
+            file_preview::preview_watch,
+            file_preview::preview_unwatch,
             open_terminal,
-            terminal_input,
-            terminal_resize,
+            stream_commands::terminal_input,
+            stream_commands::terminal_resize,
             close_terminal
         ])
         .build(tauri::generate_context!())
@@ -2976,64 +2841,14 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod subagent_watches_tests {
-    use super::Watches;
-
-    #[test]
-    fn a_newer_command_makes_an_older_result_stale() {
-        let mut watches = Watches::<&str>::default();
-        let older = watches.begin("panel");
-        let newer = watches.begin("panel");
-        assert!(watches.store("panel", newer, Some("new")));
-        assert!(!watches.store("panel", older, Some("old")));
-        assert_eq!(watches.slots["panel"].1, Some("new"));
-    }
-
-    #[test]
-    fn a_remove_before_a_watch_finishes_is_not_undone() {
-        let mut watches = Watches::<&str>::default();
-        let generation = watches.begin("panel");
-        watches.remove("panel");
-        assert!(!watches.store("panel", generation, Some("late")));
-        assert!(!watches.slots.contains_key("panel"));
-    }
-
-    #[test]
-    fn a_key_begun_again_after_a_remove_does_not_take_an_older_result() {
-        let mut watches = Watches::<&str>::default();
-        let older = watches.begin("flow");
-        watches.remove("flow");
-        let newer = watches.begin("flow");
-        assert!(!watches.store("flow", older, Some("old")));
-        assert!(watches.store("flow", newer, Some("new")));
-    }
-
-    #[test]
-    fn keys_do_not_make_each_other_stale() {
-        let mut watches = Watches::<&str>::default();
-        let panel = watches.begin("panel");
-        let flow = watches.begin("flow");
-        assert!(watches.store("panel", panel, Some("p")));
-        assert!(watches.store("flow", flow, Some("f")));
-        watches.remove("flow");
-        assert_eq!(watches.slots["panel"].1, Some("p"));
-    }
-
-    #[test]
-    fn a_current_result_replaces_the_value_and_none_clears_it() {
-        let mut watches = Watches::<&str>::default();
-        let g = watches.begin("panel");
-        assert!(watches.store("panel", g, Some("a")));
-        let g = watches.begin("panel");
-        assert!(watches.store("panel", g, None));
-        assert_eq!(watches.slots["panel"].1, None);
-    }
-}
+#[path = "watches_tests.rs"]
+mod subagent_watches_tests;
 
 #[cfg(test)]
 mod build_layout_tests {
     use super::*;
     use crate::backend_fake::FakeBackend;
+    use crate::spaces::is_agent_command;
     use backend::{Snapshot, StreamRecord};
     use serde_json::{Value, json};
 
@@ -3059,7 +2874,8 @@ mod build_layout_tests {
             "spaces": [{ "space_id": "w2", "label": "demo", "number": 1 }],
             "terminals": [{ "terminal_id": "w2:p1", "space_id": "w2", "cwd": dir }],
         }));
-        let outcome = create_space_with(&fake, None, &dir, None, None, Some("claude 'x'")).unwrap();
+        let outcome =
+            create_space_with(&fake, None, &dir, None, None, Some("claude 'x'"), None).unwrap();
         assert!(!outcome.created);
         assert_eq!(outcome.space_id, "w2");
         // Focused only: no layout, no command.
@@ -3083,8 +2899,16 @@ mod build_layout_tests {
             },
             &[],
         );
-        let outcome =
-            create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
+        let outcome = create_space_with(
+            &fake,
+            None,
+            &dir,
+            Some("#12 Add picker"),
+            None,
+            Some("c"),
+            None,
+        )
+        .unwrap();
         assert!(!outcome.created);
         assert_eq!(outcome.space_id, "s3");
         assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
@@ -3141,7 +2965,7 @@ mod build_layout_tests {
     #[test]
     fn a_backend_that_cannot_build_layouts_is_refused_and_creates_nothing() {
         let fake = FakeBackend::default();
-        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None, None).unwrap_err();
         assert_eq!(err, "this backend cannot build a layout");
         assert_eq!(fake.calls(), ["snapshot"]);
     }
@@ -3149,7 +2973,9 @@ mod build_layout_tests {
     #[test]
     fn create_space_rejects_a_missing_directory_before_calling_the_backend() {
         let fake = FakeBackend::default();
-        assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None, None).is_err());
+        assert!(
+            create_space_with(&fake, None, "/no/such/dir/at/all", None, None, None, None).is_err()
+        );
         assert!(fake.calls().is_empty());
     }
 
@@ -3200,7 +3026,8 @@ mod build_layout_tests {
     #[test]
     fn remote_create_space_builds_the_layout_without_checking_the_local_disk() {
         let fake = layout_backend(built("s1"));
-        let out = remote_create_space(&fake, "/srv/wt/app-12", "#12 x", Some("claude")).unwrap();
+        let out =
+            remote_create_space(&fake, "/srv/wt/app-12", "#12 x", Some("claude"), None).unwrap();
         assert!(out.created);
         assert_eq!(out.space_id, "s1");
         let calls = fake.calls();
@@ -3217,7 +3044,7 @@ mod build_layout_tests {
             "spaces": [{"space_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}],
             "terminals": [],
         }));
-        let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None).unwrap();
+        let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None, None).unwrap();
         assert!(!out.created);
         assert_eq!(out.space_id, "s7");
         assert!(!fake.calls().iter().any(|c| c.starts_with("create_space")));
@@ -3231,12 +3058,12 @@ mod build_layout_tests {
             hash: "h".into(),
             commands: Vec::new(),
         });
-        let err = remote_create_space(&layout_backend(ask), "/r", "l", None).unwrap_err();
+        let err = remote_create_space(&layout_backend(ask), "/r", "l", None, None).unwrap_err();
         assert!(err.contains("not trusted"), "{err}");
         let fake = layout_backend(built("s1"));
         fake.fail_on("create_space_with_layout");
         assert_eq!(
-            remote_create_space(&fake, "/r", "l", None),
+            remote_create_space(&fake, "/r", "l", None, None),
             Err("boom".into())
         );
     }
@@ -3271,7 +3098,7 @@ mod build_layout_tests {
     fn a_layout_backend_builds_the_new_space_and_the_app_only_focuses_it() {
         let fake = layout_backend(built("s9"));
         let dir = tmp_dir();
-        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None, None).unwrap();
         assert_eq!(
             outcome,
             spaces::SpaceOutcome {
@@ -3305,6 +3132,7 @@ mod build_layout_tests {
             Some("#12 x"),
             Some(decision),
             Some("claude 'x'"),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -3318,6 +3146,7 @@ mod build_layout_tests {
             &dir,
             None,
             Some(trust::Decision::Without),
+            None,
             None,
         )
         .unwrap();
@@ -3341,7 +3170,7 @@ mod build_layout_tests {
         };
         let fake = layout_backend(backend::LaidOut::Trust(request.clone()));
         let dir = tmp_dir();
-        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, None, None, None, None).unwrap();
         assert!(!outcome.created);
         assert_eq!(outcome.space_id, "");
         assert_eq!(outcome.trust, Some(request));
@@ -3353,7 +3182,7 @@ mod build_layout_tests {
         // The server asks for trust; the app creates the space as it is.
         let dir = untrusted_project();
         let fake = layout_backend(built("s9"));
-        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, None, None, None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());
     }
 
@@ -3365,7 +3194,7 @@ mod build_layout_tests {
             "spaces": [{ "space_id": "s2", "label": "demo", "number": 1 }],
             "terminals": [{ "terminal_id": "t1", "space_id": "s2", "cwd": dir }],
         }));
-        let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, None, None, Some("c"), None).unwrap();
         assert!(!outcome.created);
         assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
     }
@@ -3374,7 +3203,7 @@ mod build_layout_tests {
     fn a_failing_layout_create_is_an_error_and_focuses_nothing() {
         let fake = layout_backend(built("s9"));
         fake.fail_on("create_space_with_layout");
-        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None, None).unwrap_err();
         assert_eq!(err, "boom");
         assert_eq!(fake.calls(), ["snapshot"]);
     }

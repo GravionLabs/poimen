@@ -13,6 +13,7 @@ import {
 } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
+import { paneKindIcon } from "./pane-kind";
 import type { IconName } from "../ui/icon/icon";
 
 export const NEEDS_YOU_GROUP = "Needs you";
@@ -161,7 +162,7 @@ export class JumpPalette {
       changedAt: this.attention.changedAt().get(pane.terminal_id),
       key: `pane:${pane.terminal_id}`,
       kind: "pane",
-      icon: "terminal",
+      icon: paneKindIcon(pane),
       title: paneTitle(this.store.all(), pane),
       detail: this.detail(paneDir(pane)),
       pane,

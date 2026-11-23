@@ -31,6 +31,7 @@ import {
   type Terminal,
 } from "./core/snapshot";
 import { windowTitle, type Mode } from "./core/backend";
+import { paneKindIcon, paneKindLabel } from "./core/pane-kind";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
@@ -64,6 +65,7 @@ import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
   changesDir,
+  previewPath,
   flowPane,
   spaceOfTab,
   spaceTab,
@@ -83,6 +85,8 @@ import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
 import { ChangesView } from "./changes/changes-view";
+import { FilePreview } from "./file-preview/file-preview";
+import { specialTabItem } from "./tab-bar-special";
 import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
@@ -118,7 +122,7 @@ import { IssueTasks } from "./github/issue-task";
 import { GithubPulls } from "./github/pulls";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
-import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
+import { ProjectEntries, type PaletteEntry } from "./core/project-entries";
 import { AgentPicker as AgentPickerView } from "./agent-picker/agent-picker";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
@@ -157,6 +161,7 @@ const ZOOM_STEP = 1;
     BottomPanel,
     FlowTab,
     ChangesView,
+    FilePreview,
     SpaceOverview,
     NgTemplateOutlet,
     PaneDialog,
@@ -274,34 +279,8 @@ export class App {
       this.editor.groups().map((group) => [
         group.id,
         group.tabs.map((tab): TabBarItem => {
-          if (tabKind(tab.paneId) === "settings") {
-            return { id: tab.paneId, label: "Settings", title: "Settings" };
-          }
-          if (tabKind(tab.paneId) === "github") {
-            return {
-              id: tab.paneId,
-              label: "Pull requests",
-              group: "GitHub",
-              title: "GitHub pull requests",
-            };
-          }
-          if (tabKind(tab.paneId) === "deliver") {
-            return { id: tab.paneId, label: "Runs", title: "Agent runs" };
-          }
-          const spaceOf = spaceOfTab(tab.paneId);
-          if (spaceOf !== null) {
-            const name = snap.spaces.find((w) => w.space_id === spaceOf)?.label ?? spaceOf;
-            return { id: tab.paneId, label: `Space: ${name}`, title: `Overview of space ${name}` };
-          }
-          const changesOf = changesDir(tab.paneId);
-          if (changesOf !== null) {
-            const name = changesOf.split("/").filter(Boolean).pop() ?? changesOf;
-            return {
-              id: tab.paneId,
-              label: `Changes: ${name}`,
-              title: `Changes of ${changesOf}`,
-            };
-          }
+          const special = specialTabItem(tab.paneId, snap.spaces);
+          if (special) return special;
           const flowOf = flowPane(tab.paneId);
           const paneId = flowOf ?? tab.paneId;
           const pane = this.pane(paneId);
@@ -337,7 +316,9 @@ export class App {
       ]),
     );
   });
-  protected readonly groupItems = computed(() => withKindIcons(this.baseItems()));
+  protected readonly groupItems = computed(() =>
+    withKindIcons(this.baseItems(), (id) => paneKindIcon(this.pane(id))),
+  );
   /** The leaf the user focused last per split tab; the server's focus is the fallback. */
   private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
@@ -589,6 +570,12 @@ export class App {
       this.showChangesOfActiveSpace();
       return;
     }
+    if (id === "previewFile") {
+      if (!this.editor.previewSelectedFile()) {
+        this.spaceActions.notify("Preview File: select a file in a Changes tab first");
+      }
+      return;
+    }
     if (id === "startIssueTask") {
       const [t] = this.agentActions.current();
       if (t?.kind === "issue") void this.issueTasks.start(t.root, t.number);
@@ -745,11 +732,11 @@ export class App {
   }
 
   /** A command or preset of the project file, run in the space of the active pane. */
-  protected runEntry(entry: ProjectEntry): void {
+  protected runEntry(entry: PaletteEntry): void {
     const id = this.activePaneId();
     const pane = id ? this.pane(id) : undefined;
     const dir = pane ? paneDir(pane) : undefined;
-    if (pane && dir) void this.projectEntries.run(entry, pane.space_id, dir);
+    if (pane && dir) void this.projectEntries.start(entry, pane.space_id, dir);
     else this.spaceActions.notify(`Project: ${entry.name}: there is no focused space`);
   }
 
@@ -1000,6 +987,11 @@ export class App {
     return group.activeId === null ? null : changesDir(group.activeId);
   }
 
+  /** The file of the group's active tab when that is a preview tab. */
+  protected previewOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : previewPath(group.activeId);
+  }
+
   protected isDeliver(id: string | null): boolean {
     return id !== null && tabKind(id) === "deliver";
   }
@@ -1012,10 +1004,7 @@ export class App {
     this.editor.openSettings();
   }
 
-  protected tabPane(id: string): Terminal | undefined {
-    return this.pane(id);
-  }
-
+  protected readonly paneKindLabel = paneKindLabel;
   /** The mode a tab asks for; the terminal view falls back to read-only when it is not free. */
   protected wanted(paneId: string): Mode {
     return this.editor.wanted(paneId, this.prefs.settings().autoControl);

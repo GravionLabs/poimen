@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts, promptMessage, promptSucceeded } from "./agent-prompt";
+import { parseHarnesses } from "./settings";
 import { agentKind } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { SpaceActions, type TrustDecision, type TrustRequest } from "./space-actions";
@@ -13,8 +14,27 @@ export interface ProjectEntryList {
   locked: boolean;
 }
 
+/** Wire shape of `DetectedEntry` (`poimen_core::detect`): a command found in the repository. */
+export interface DetectedEntry {
+  source: string;
+  name: string;
+  /** The command line of the script, for the user. */
+  description: string;
+}
+
+/** The source of the skills of the repository (`poimen_core::detect::skills`). */
+export const SKILLS_SOURCE = "skills";
+
+/** Whether a detected entry is a skill: it is sent to an agent as `/<name>`, not run. */
+export function isSkill(entry: DetectedEntry): boolean {
+  return entry.source === SKILLS_SOURCE;
+}
+
 /** An entry of the project file picked in the palette (wire shape of `Entry`). */
 export type ProjectEntry = { kind: "command"; name: string } | { kind: "preset"; name: string };
+
+/** What the palette runs: an entry of the project file or a detected script. */
+export type PaletteEntry = ProjectEntry | DetectedEntry;
 
 /** Wire shape of `EntryOutcome` (`project.rs`). */
 export type EntryOutcome =
@@ -41,6 +61,12 @@ export class ProjectEntries {
 
   private readonly _entries = signal<ProjectEntryList>(NONE);
   readonly entries = this._entries.asReadonly();
+  private readonly _detected = signal<DetectedEntry[]>([]);
+  /** The commands detected in the repository (`package.json` scripts), for the Scripts tab. */
+  readonly detected = this._detected.asReadonly();
+  private readonly _root = signal<string | undefined>(undefined);
+  /** The repository root of the focused space: the key of its hidden detected entries. */
+  readonly root = this._root.asReadonly();
   private dir: string | undefined;
   private seq = 0;
 
@@ -57,15 +83,79 @@ export class ProjectEntries {
     const seq = ++this.seq;
     if (!dir) {
       this._entries.set(NONE);
+      this._detected.set([]);
+      this._root.set(undefined);
       return;
     }
-    let list: ProjectEntryList;
+    const [list, detected, root] = await Promise.all([
+      this.bridge.invoke<ProjectEntryList>("project_entries", { dir }).then(
+        (l) => l ?? NONE,
+        () => NONE,
+      ),
+      this.bridge.invoke<DetectedEntry[]>("detected_entries", { dir }).then(
+        (d) => d ?? [],
+        () => [],
+      ),
+      this.bridge.invoke<string>("repo_root", { dir }).then(
+        (r) => r || dir,
+        () => dir,
+      ),
+    ]);
+    if (seq !== this.seq) return;
+    this._root.set(root);
+    this._entries.set(list);
+    this._detected.set(detected);
+  }
+
+  /**
+   * Runs the detected `entry` in space `workspaceId` at `dir`: a tab named after it with the
+   * command typed. An explicit pick only; the backend builds the argv, no hash trust.
+   */
+  async runDetected(entry: DetectedEntry, workspaceId: string, dir: string): Promise<void> {
+    const label = `Script: ${entry.name}`;
     try {
-      list = (await this.bridge.invoke<ProjectEntryList>("project_entries", { dir })) ?? NONE;
-    } catch {
-      list = NONE;
+      const ran = await this.bridge.invoke<boolean>("detected_run", {
+        spaceId: workspaceId,
+        dir,
+        source: entry.source,
+        name: entry.name,
+      });
+      if (ran) {
+        await this.store.refresh();
+        return;
+      }
+      this.spaces.notify(`${label}: the script no longer exists`);
+      await this.reload();
+    } catch (err) {
+      const reason = err && typeof err === "object" && "message" in err ? err.message : err;
+      this.spaces.fail(`${label} failed: ${String(reason)}`);
     }
-    if (seq === this.seq) this._entries.set(list);
+  }
+
+  /** Runs a picked palette entry in space `workspaceId` at `dir`. */
+  start(entry: PaletteEntry, workspaceId: string, dir: string): Promise<void> {
+    if (!("source" in entry)) return this.run(entry, workspaceId, dir);
+    return isSkill(entry)
+      ? this.runSkill(entry, workspaceId)
+      : this.runDetected(entry, workspaceId, dir);
+  }
+
+  /**
+   * Sends `/<skill>` to an agent of the space whose harness takes slash skills (`slashSkills` of
+   * the registry); several: the agent picker. An explicit pick only.
+   */
+  async runSkill(entry: DetectedEntry, workspaceId: string): Promise<void> {
+    const harnesses = await this.bridge
+      .invoke<unknown>("get_harnesses")
+      .then(parseHarnesses, () => []);
+    const kinds = new Set(harnesses.filter((h) => h.slashSkills).map((h) => h.id));
+    await this.sendToAgent(
+      `Skill: ${entry.name}`,
+      `/${entry.name}`,
+      workspaceId,
+      (kind) => kinds.has(kind),
+      "the space has no agent that runs skills",
+    );
   }
 
   /** Runs `entry` in space `workspaceId` at `dir`; an untrusted file asks first. */
@@ -111,12 +201,19 @@ export class ProjectEntries {
     }
   }
 
-  private async sendToAgent(label: string, text: string, workspaceId: string): Promise<void> {
-    const agents = this.store
-      .snapshot()
-      .terminals.filter((t) => t.space_id === workspaceId && agentKind(t));
+  private async sendToAgent(
+    label: string,
+    text: string,
+    workspaceId: string,
+    accepts: (kind: string) => boolean = () => true,
+    none = "the space has no agent",
+  ): Promise<void> {
+    const agents = this.store.snapshot().terminals.filter((t) => {
+      const kind = agentKind(t);
+      return t.space_id === workspaceId && kind !== undefined && accepts(kind);
+    });
     if (agents.length === 0) {
-      this.spaces.notify(`${label}: the space has no agent`);
+      this.spaces.notify(`${label}: ${none}`);
       return;
     }
     const target =

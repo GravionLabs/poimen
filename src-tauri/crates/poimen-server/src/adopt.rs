@@ -102,6 +102,7 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
         .agent
         .clone()
         .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+    let hibernated = t.hibernated.clone().or_else(|| resumable(shared, t));
     Some(TerminalEntry {
         info: Terminal {
             id: t.id.clone(),
@@ -120,7 +121,7 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
             host_version: None,
             host_bundled_version: None,
             records: Vec::new(),
-            hibernated: None,
+            hibernated,
             started_by: t.started_by.clone(),
             report: t.report.clone(),
             agent_source: None,
@@ -139,6 +140,27 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
         tokens: Vec::new(),
         resuming: false,
         last_input_ms: None,
+        last_agent: t.last_agent.clone(),
+    })
+}
+
+/// The agent session an ended terminal can resume (#1232): the last one the terminal had (or
+/// the stored status's), when its harness has `resumeArgs`. `None` keeps the terminal read-only.
+fn resumable(shared: &Shared, t: &store::StoredTerminal) -> Option<poimen_protocol::Hibernated> {
+    let (agent, session_id) = match (&t.last_agent, &t.agent) {
+        (Some(last), _) => (last.agent.clone(), last.session_id.clone()),
+        (None, Some(a)) => (a.agent.clone()?, a.session_id.clone()?),
+        (None, None) => return None,
+    };
+    let harnesses = hibernate::harnesses_of(shared);
+    let h = harnesses.iter().find(|h| h.id == agent)?;
+    if h.resume_args.is_empty() || session_id.is_empty() {
+        return None;
+    }
+    Some(poimen_protocol::Hibernated {
+        agent,
+        session_id,
+        since: now_millis(),
     })
 }
 
@@ -234,6 +256,7 @@ fn adopted(
         tokens,
         resuming: false,
         last_input_ms: None,
+        last_agent: t.last_agent,
     }
 }
 

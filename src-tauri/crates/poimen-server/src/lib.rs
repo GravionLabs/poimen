@@ -32,12 +32,14 @@ mod pty;
 mod records;
 pub mod report;
 mod reports;
+mod revive;
 mod runs;
 mod settings_reread;
 pub mod stdio;
 mod store;
 mod stream;
 mod tabs;
+mod typing;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -49,6 +51,7 @@ use std::sync::mpsc::{self, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use typing::{Kind, Typing, type_commands};
 
 use emulator::Colors;
 use poimen_core::snapshot::{self, Snapshot};
@@ -176,6 +179,8 @@ struct TerminalEntry {
     /// When input last reached the terminal through `terminal.input` (#988), in ms; in memory,
     /// not persisted. Hibernation skips an agent that got input after its `done`.
     last_input_ms: Option<u64>,
+    /// The latest agent session of this terminal (#1232), kept after `/clear` and `gone`.
+    last_agent: Option<store::LastAgent>,
 }
 
 struct TokenEntry {
@@ -230,6 +235,7 @@ impl TerminalEntry {
             hibernated: self.info.hibernated.clone(),
             started_by: self.info.started_by.clone(),
             report: self.info.report.clone(),
+            last_agent: self.last_agent.clone(),
             tokens,
         })
     }
@@ -674,61 +680,6 @@ impl Shared {
             self.persist(&inner);
         }
     }
-
-    pub(crate) fn terminal_exited(&self, terminal_id: &str, exit_code: Option<u32>) {
-        let mut inner = lock(&self.inner);
-        let Some(entry) = inner
-            .terminals
-            .iter_mut()
-            .find(|t| t.info.id == terminal_id)
-        else {
-            return;
-        };
-        if entry.info.status == TerminalStatus::Exited {
-            return;
-        }
-        entry.info.status = TerminalStatus::Exited;
-        entry.info.exit_code = exit_code;
-        self.log(
-            "server",
-            &format!(
-                "terminal {terminal_id} ended, exit code {}",
-                exit_code.map_or("unknown".to_string(), |c| c.to_string())
-            ),
-        );
-        // Nothing of it is left for a restart to keep.
-        entry.info.survives_restart = false;
-        entry.info.host_version = None;
-        entry.info.host_bundled_version = None;
-        entry.host = None;
-        // A program's own `idle` or `done` stays; the rest of the status goes with the process.
-        entry.hook_agent = None;
-        entry.info.agent = entry
-            .osc
-            .take()
-            .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
-        if !entry.info.tokens.is_empty() {
-            entry.info.tokens.clear();
-            entry.tokens.clear();
-            self.publish(Event::TerminalTokensChanged {
-                terminal_id: terminal_id.to_string(),
-                tokens: Default::default(),
-            });
-        }
-        entry.records.exited();
-        if entry.sync_records() {
-            self.publish(records_event(entry));
-        }
-        entry.stream.exited(exit_code);
-        self.publish(Event::TerminalExited {
-            terminal_id: terminal_id.to_string(),
-            exit_code,
-        });
-        // An exited terminal is no longer in the tree, nor in the terminal list.
-        let events = inner.layout.remove_terminal(terminal_id);
-        publish_all(self, events);
-        self.persist(&inner);
-    }
 }
 
 type ApiResult = Result<Value, (ErrorCode, String)>;
@@ -1078,6 +1029,7 @@ fn attach(
             "this connection is already attached".into(),
         ));
     }
+    shared.revive_ended(&p.terminal_id, p.mode);
     let term = {
         let inner = lock(&shared.inner);
         let entry = inner
@@ -1220,8 +1172,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.report_done" => reports::terminal_report_done(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
         "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
-        "terminal.input" => input::terminal_input(shared, parsed(request)?, ctx),
-        "terminal.resize" => input::terminal_resize(shared, parsed(request)?, ctx),
+        m if input::METHODS.contains(&m) => input::dispatch(m, shared, request, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
     }
 }
@@ -1563,33 +1514,6 @@ fn space_apply_layout(shared: &Arc<Shared>, p: SpaceApplyLayout) -> ApiResult {
     Ok(json!(SpaceApplyLayoutResult::Applied(applied)))
 }
 
-/// Types the commands of a built layout once the lock is released (a write may block on a full
-/// PTY); one that cannot be typed is a warning.
-fn type_commands(typing: Vec<Typing>, created: &mut SpaceCreated) {
-    for typed in typing {
-        if let Err(e) = typed
-            .writer
-            .write(format!("{}\r", typed.command).as_bytes())
-        {
-            created.warnings.push(format!(
-                "pane \"{}\": the command was not typed: {e}",
-                typed.pane
-            ));
-            if typed.setup {
-                created.setup_started = false;
-            }
-        }
-    }
-}
-
-/// A command to type into a pane of a new space.
-struct Typing {
-    pane: String,
-    writer: pty::PtyWriter,
-    command: String,
-    setup: bool,
-}
-
 /// What [`build_tabs`] built.
 struct Built {
     tab_ids: Vec<String>,
@@ -1680,13 +1604,15 @@ fn build_tabs(
             .and_then(|t| t.host.as_ref())
             .map(host::Handle::writer)
     };
-    let mut queue = |inner: &Inner, pane: &str, id: &str, command: Option<&String>, setup| {
+    let mut queue = |inner: &Inner, pane: &str, id: &str, command: Option<&String>, kind: Kind| {
         if let (Some(command), Some(writer)) = (command, writer(inner, id)) {
             typing.push(Typing {
                 pane: pane.to_string(),
                 writer,
                 command: command.clone(),
-                setup,
+                setup: kind == Kind::Setup,
+                wait: None,
+                root: kind == Kind::Root,
             });
         }
     };
@@ -1746,7 +1672,7 @@ fn build_tabs(
             &root.name,
             &root.id,
             panes.first().and_then(|p| p.command.as_ref()),
-            false,
+            if index == 0 { Kind::Root } else { Kind::Pane },
         );
         let mut ids = vec![(root_name, root.id)];
         for spec in panes.iter().skip(1) {
@@ -1796,7 +1722,7 @@ fn build_tabs(
                 &spec.name,
                 &terminal.id,
                 spec.command.as_ref(),
-                false,
+                Kind::Pane,
             );
             ids.push((spec.name.clone(), terminal.id));
         }
@@ -1820,6 +1746,7 @@ fn build_tabs(
         publish_all(shared, events);
     }
     let mut setup_started = false;
+    let mut setup_terminal: Option<String> = None;
     if let Some(setup) = &build.setup {
         let label = poimen_core::project::SETUP_LABEL;
         match spawn_terminal(shared, inner, shell(label)) {
@@ -1832,7 +1759,8 @@ fn build_tabs(
                     Ok(events) => {
                         publish_all(shared, events);
                         tab_ids.push(tab_id);
-                        queue(inner, label, &t.id, Some(setup), true);
+                        queue(inner, label, &t.id, Some(setup), Kind::Setup);
+                        setup_terminal = Some(t.id.clone());
                         setup_started = true;
                     }
                     Err((_, e)) => {
@@ -1843,6 +1771,9 @@ fn build_tabs(
             }
             Err((_, e)) => warnings.push(format!("setup not started: {e}")),
         }
+    }
+    if let (true, Some(id)) = (build.setup_wait, &setup_terminal) {
+        typing::hold_root(&mut typing, id);
     }
     Ok(Built {
         tab_ids,
@@ -1959,6 +1890,16 @@ fn spawn_terminal(
 ) -> Result<Terminal, (ErrorCode, String)> {
     let space = inner.layout.space(&p.space_id)?;
     let cwd = p.cwd.clone().unwrap_or_else(|| space.cwd.clone());
+    // `POIMEN_ROOT_PATH`, `POIMEN_WORKTREE_PATH` and `POIMEN_SPACE` for every terminal of a space
+    // (the project's setup, teardown and commands read them); the client adds the task's
+    // `POIMEN_ISSUE` and `POIMEN_BRANCH` and cannot override these three.
+    let mut env = p.env.clone();
+    let space_dir = if space.cwd.is_empty() {
+        &cwd
+    } else {
+        &space.cwd
+    };
+    env.extend(poimen_core::project::dir_env(space_dir, &space.name));
     let command = match p.command {
         Some(c) if c.is_empty() || c[0].is_empty() => {
             return Err((ErrorCode::InvalidParams, "command must not be empty".into()));
@@ -1991,7 +1932,7 @@ fn spawn_terminal(
             rows,
             term: term.as_deref(),
             locale_set,
-            env: &p.env,
+            env: &env,
         },
         output_to(&stream),
         exit_to(shared, &id),
@@ -2036,6 +1977,7 @@ fn spawn_terminal(
         tokens: Vec::new(),
         resuming: false,
         last_input_ms: None,
+        last_agent: None,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -2178,6 +2120,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     if entry.info.status == TerminalStatus::Exited {
         return Ok(json!({ "accepted": true }));
     }
+    entry.note_session(&p);
     // Any report but `gone` means the agent runs again (the user came back): no longer hibernated.
     let came_back = p.status != AgentStatus::Gone && entry.info.hibernated.take().is_some();
     if came_back {

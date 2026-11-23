@@ -40,6 +40,17 @@ describe("Icon", () => {
     expect(el.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
   });
 
+  it("draws a monogram badge with its letters and a label (#1215)", () => {
+    const el = render(`<app-icon name="agent:Cc" label="Claude Code" [size]="16" />`);
+    expect(el.querySelector("svg rect")).not.toBeNull();
+    expect(el.querySelector("svg text")?.textContent?.trim()).toBe("Cc");
+    expect(el.querySelector("app-icon")?.getAttribute("aria-label")).toBe("Claude Code");
+  });
+
+  it("draws the lock", () => {
+    expect(render(`<app-icon name="lock" />`).querySelectorAll("svg path").length).toBe(2);
+  });
+
   it("is hidden from assistive technology without a label", () => {
     const icon = render(`<app-icon name="github" />`).querySelector("app-icon")!;
     expect(icon.getAttribute("aria-hidden")).toBe("true");

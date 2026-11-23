@@ -55,6 +55,9 @@ import {
 } from "../core/ui-font";
 import { MachinesPage } from "../machines-page/machines-page";
 import { LayoutsEditor } from "./layouts-editor";
+import { ShortcutsEditor } from "./shortcuts-editor";
+import { PaletteEditor } from "./palette-editor";
+import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsTransfer } from "../core/settings-transfer";
@@ -162,6 +165,9 @@ export function withRoot(
     HxTag,
     MachinesPage,
     LayoutsEditor,
+    ShortcutsEditor,
+    PaletteEditor,
+    SnippetsEditor,
     SpaceTemplatesEditor,
     SettingsImportPanel,
     HxInput,
@@ -169,6 +175,7 @@ export function withRoot(
   ],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
+  host: { class: "settings-root" },
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SettingsView {

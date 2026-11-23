@@ -21,6 +21,7 @@ const harness = (over: Partial<HarnessInfo> & { id: string }): HarnessInfo => ({
   exitInput: null,
   resumeArgs: ["--resume", "{session}"],
   printArgs: [],
+  slashSkills: false,
   available: true,
   ...over,
 });

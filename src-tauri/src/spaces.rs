@@ -207,6 +207,45 @@ pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> 
     dirs
 }
 
+/// Whether `command` starts one of the agent `harnesses`: its program (first word, without path
+/// and `.exe`) is a harness id or the program of a harness command.
+pub(crate) fn is_agent_command(command: &str, harnesses: &[crate::harness::Harness]) -> bool {
+    fn program(word: &str) -> String {
+        let word = word.trim_matches(|c| c == '\'' || c == '"');
+        let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
+        let lower = base.to_ascii_lowercase();
+        lower.strip_suffix(".exe").unwrap_or(&lower).to_owned()
+    }
+    let Some(first) = command.split_whitespace().next() else {
+        return false;
+    };
+    let wanted = program(first);
+    harnesses.iter().any(|h| {
+        program(&h.id) == wanted || h.command.first().is_some_and(|c| program(c) == wanted)
+    })
+}
+
+/// Why rebuilding needs the user's go: every pane of `layout` that starts an agent, and `setup`.
+pub(crate) fn consent_reasons(
+    layout: Option<&crate::layout::TabLayout>,
+    harnesses: &[crate::harness::Harness],
+    setup: Option<&str>,
+) -> Vec<String> {
+    let mut reasons: Vec<String> = layout
+        .into_iter()
+        .flat_map(|l| l.panes())
+        .filter_map(|p| {
+            let command = p.command.as_deref()?;
+            is_agent_command(command, harnesses)
+                .then(|| format!("pane \"{}\" starts an agent: {command}", p.name))
+        })
+        .collect();
+    if let Some(setup) = setup {
+        reasons.push(format!("setup runs: {setup}"));
+    }
+    reasons
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

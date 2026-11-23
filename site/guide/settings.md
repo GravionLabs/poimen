@@ -8,7 +8,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 - `theme`: `light`, `dark` or `system`. The button in the top bar cycles them.
 - `colorSchema`: a bundled scheme, or a pair `{ "light": "...", "dark": "..." }`. Bundled: `poimen` (default), `catppuccin`, `tokyo-night`, `dracula`, `gruvbox`, `one-dark`, `solarized` and more. Your own WezTerm color schemes go into `~/.config/poimen/themes/` and are picked up without a restart.
-- `terminal.fontFamily`, `terminal.fontSize` (6 to 72), `terminal.scrollback` (default 10000) and `terminal.ghostty` to take font and colors from your Ghostty config.
+- `terminal.fontFamily`, `terminal.fontSize` (6 to 72), `terminal.scrollback` (default 10000) and `terminal.ghostty` and `terminal.kitty` to take font and colors from your Ghostty config (including `theme = <name>`) or `kitty.conf` (including `include`d themes).
 - `sounds`: a tone or sound file for blocked and done agents.
 
 ## Terminals and keys
@@ -34,6 +34,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 <Screenshot src="settings-server-dark.png" light="settings-server-light.png" alt="Settings, Backend, Server: the version, state, socket and log of poimen-server, and the hook and MCP state of Claude Code and Copilot CLI" caption="Settings > Backend > Server: the server, and the hooks and MCP entries of your agents (demo data)." />
 
 - `terminalHistory`: `{ "enabled": true, "perTerminalMiB": 8, "totalMiB": 256 }`. The server writes what each terminal prints to a file in its state directory (readable only by you), so a terminal can show its output after a reboot. **This stores terminal output on disk, including anything secret that appears on screen.** Set `enabled` to `false` (or use **Settings > Backend > Server**) to stop writing; logs that exist stay until their terminal is closed. Closing a terminal removes its log, and the server removes logs without a terminal when it starts. When a log passes `perTerminalMiB` the oldest output is dropped; `totalMiB` limits all logs together. Changes apply to new output without a restart.
+- `snippets`: saved prompts and commands, `[{ "label": "Run the tests", "text": "cargo test", "enter": true, "target": "terminal" }]`. `target` is `terminal` (typed into the pane, with Enter unless `enter` is `false`) or `agent` (sent to the agent as a prompt, always submitted). They show in the command palette as `Snippet: <label>` and in the menu of a pane in the sidebar; an `agent` snippet is offered for agent panes only. Edit them in **Settings > Workspace > Snippets**. The `commands` of a project file are separate.
 - `machines`: see [Remote machines](/guide/remote-machines).
 - `trustedProjects`: managed by the trust dialog and **Settings > Workspace > Trusted projects**, never imported.
 - `console.prefix` and `console.keys`: the TUI keys, see [Console](/guide/console#configuration).

@@ -64,7 +64,7 @@ ul {
   list-style: none;
 }
 
-li button {
+li button.row {
   all: unset;
   box-sizing: border-box;
   display: flex;
@@ -103,6 +103,16 @@ li.selected {
   white-space: pre;
 }
 
+.description {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 mark {
   background: transparent;
   color: var(--h-primary-color);
@@ -139,4 +149,62 @@ mark {
   stroke: currentColor;
   stroke-width: 1.4;
   opacity: 0.7;
+}
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--h-content-border-color);
+}
+
+.tabs button {
+  all: unset;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border-radius: 3px;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  color: var(--h-text-color);
+}
+
+.tabs button.active {
+  color: var(--h-primary-color);
+  font-weight: 600;
+}
+
+.source {
+  flex: none;
+  margin-left: auto;
+}
+
+.source + .shortcut {
+  margin-left: 8px;
+}
+
+li:has(.hide) {
+  display: flex;
+  align-items: center;
+}
+
+li:has(.hide) .row {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.hide {
+  flex: none;
+  visibility: hidden;
+  margin-right: 4px;
+}
+
+li.selected .hide,
+li:hover .hide {
+  visibility: visible;
 }

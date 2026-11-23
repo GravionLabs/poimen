@@ -52,6 +52,8 @@ export interface TrustPending {
   label: string;
   /** The command a task runs in the root pane of the new space. */
   command: string | null;
+  /** Extra environment of the new terminals (a task's `POIMEN_ISSUE` and `POIMEN_BRANCH`). */
+  env?: Record<string, string>;
   /** Runs once the space exists, also after the trust answer (a task tab in the space). */
   after?: (outcome: SpaceOutcome) => Promise<void>;
   /** Set when no space is created: "trust" calls it with the answer instead of `create_space`. */
@@ -167,7 +169,14 @@ export class SpaceActions {
     resume: (decision: TrustDecision) => Promise<void>,
     without = false,
   ): void {
-    this._trust.set({ cwd: request.root, label: "", command: null, request, resume, without });
+    this._trust.set({
+      cwd: request.root,
+      label: "",
+      command: null,
+      request,
+      resume,
+      without,
+    });
   }
 
   /** Shows `message` as a toast: the result of an action the user did not watch, or why it failed. */
@@ -219,7 +228,11 @@ export class SpaceActions {
           { cwd },
         );
         if (raw && typeof raw.name === "string" && typeof raw.agent === "string") {
-          hint = { name: raw.name, agent: raw.agent, default: raw.default === true };
+          hint = {
+            name: raw.name,
+            agent: raw.agent,
+            default: raw.default === true,
+          };
         }
       } catch {
         hint = null;
@@ -254,6 +267,7 @@ export class SpaceActions {
     decision: TrustDecision | null = null,
     command: string | null = null,
     after?: (outcome: SpaceOutcome) => Promise<void>,
+    env?: Record<string, string>,
   ): Promise<SpaceOutcome | undefined> {
     this._error.set(null);
     this._busy.set(true);
@@ -263,6 +277,7 @@ export class SpaceActions {
         label: label.trim() || null,
         decision,
         command,
+        ...(env ? { env } : {}),
       });
       this._open.set(false);
       if (outcome.trust) {
@@ -271,6 +286,7 @@ export class SpaceActions {
           cwd: cwd.trim(),
           label: label.trim(),
           command,
+          env,
           after,
           request: outcome.trust,
         });
@@ -309,7 +325,14 @@ export class SpaceActions {
     if (answer === "cancel") return undefined;
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
-    return this.create(pending.cwd, pending.label, decision, pending.command, pending.after);
+    return this.create(
+      pending.cwd,
+      pending.label,
+      decision,
+      pending.command,
+      pending.after,
+      pending.env,
+    );
   }
 
   /** Opens the rename dialog for a space, prefilled with its label. */

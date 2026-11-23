@@ -4,6 +4,9 @@ import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { layoutConfig, parseNamedLayouts, type NamedLayout } from "./named-layouts";
 import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
+import { parseTrusted } from "./trusted-projects";
+import { DEFAULT_PALETTE, parsePalette, type PaletteSettings } from "./palette-settings";
+import { parseSnippets, type Snippet } from "./snippets-model";
 import { TauriBridge } from "./tauri";
 import {
   MAX_TERMINAL_FONT_SIZE,
@@ -107,6 +110,8 @@ export interface HarnessInfo {
   resumeArgs: string[];
   /** Argv template appended to the command for a headless one-shot call (`{prompt}`); empty: none. */
   printArgs: string[];
+  /** The agent runs a skill typed as `/<skill>` (the palette Skills tab sends to such agents). */
+  slashSkills: boolean;
   /** The program was found on the `PATH` of a child. */
   available: boolean;
 }
@@ -129,6 +134,7 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
         exitInput: typeof r["exitInput"] === "string" ? r["exitInput"] : null,
         resumeArgs: strings(r["resumeArgs"]),
         printArgs: strings(r["printArgs"]),
+        slashSkills: r["slashSkills"] === true,
         available: r["available"] === true,
       },
     ];
@@ -283,10 +289,14 @@ export interface Settings {
   tasks: TaskModes;
   /** `machines`: remote machines reached over SSH; invalid entries are settings warnings. */
   machines: Machine[];
+  /** `snippets`: saved prompts and commands for the palette and the pane menu (#1007). */
+  snippets: Snippet[];
   /** `sounds`: what plays when an agent is blocked or done and not viewed. */
   sounds: SoundSettings;
   /** `usage`: which provider limits the status bar asks for (#784). */
   usage: UsageSettings;
+  /** `palette`: detected sources and hidden entries (#1218). */
+  palette: PaletteSettings;
   /** `terminalHistory`: the server logs terminal output to disk (#1196). */
   terminalHistory: TerminalHistorySettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
@@ -412,20 +422,14 @@ export const DEFAULT_SETTINGS: Settings = {
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
   machines: [],
+  snippets: [],
   sounds: { blocked: false, done: false },
   usage: { claude: true },
+  palette: DEFAULT_PALETTE,
   terminalHistory: DEFAULT_TERMINAL_HISTORY,
   home: null,
   warnings: [],
 };
-
-/** The `trustedProjects` map; entries that are not strings are skipped. */
-function parseTrusted(raw: unknown): Record<string, string> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-  return Object.fromEntries(
-    Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"),
-  );
-}
 
 /** A valid list of lines of tokens, or `null`. */
 function parseRowLines(raw: unknown): RowLines | null {
@@ -526,8 +530,10 @@ export function parseSettings(raw: unknown): Settings {
     machines: Array.isArray(r["machines"])
       ? r["machines"].map(parseMachine).filter((m) => m !== null)
       : [],
+    snippets: parseSnippets(r["snippets"]),
     sounds: parseSounds(r["sounds"]),
     usage: parseUsage(r["usage"]),
+    palette: parsePalette(r["palette"]),
     terminalHistory: parseTerminalHistory(r["terminalHistory"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
@@ -749,6 +755,11 @@ export class SettingsStore {
     });
   }
 
+  /** Writes `snippets` (validated again by the backend); `false` when the write failed. */
+  setSnippets(snippets: Snippet[]): Promise<boolean> {
+    return this.write({ snippets }, "the snippets", "set_snippets", { snippets });
+  }
+
   /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */
   async revokeProject(root: string): Promise<void> {
     const rest = Object.fromEntries(
@@ -758,7 +769,7 @@ export class SettingsStore {
   }
 
   /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */
-  private async write(
+  async write(
     patch: Partial<Settings>,
     what: string,
     command: string,

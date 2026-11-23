@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { goToNextChunk, goToPreviousChunk } from "@codemirror/merge";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Attention } from "../core/attention";
+import { EditorTabs, previewTab } from "../core/editor-tabs";
 import type { AgentStatus, Terminal } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
 import { tauri } from "../core/tauri.mock";
@@ -731,5 +732,29 @@ describe("Stage, commit and push", () => {
     await settle(f);
     f.detectChanges();
     expect(el(f).querySelector(".result.failed")!.textContent).toContain("Refused");
+  });
+});
+
+describe("Changes tab preview (#1004)", () => {
+  it("opens the preview tab of the selected file and remembers the selection", async () => {
+    const f = await render();
+    const tabs = TestBed.inject(EditorTabs);
+    expect(tabs.changesSelection().get("/repo")).toBe("src/a.ts");
+    click(button(f, "Preview"));
+    expect(tabs.activeId()).toBe(previewTab("/repo/src/a.ts"));
+    f.destroy();
+    expect(tabs.changesSelection().has("/repo")).toBe(false);
+  });
+
+  it("has Preview in the context menu of a file", async () => {
+    const f = await render();
+    const tabs = TestBed.inject(EditorTabs);
+    const row = el(f).querySelectorAll(".file")[2];
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+    f.detectChanges();
+    const entries = [...el(f).querySelectorAll('[role="menuitem"]')];
+    expect(entries.map((e) => e.textContent!.trim())).toEqual(["Open in editor", "Preview"]);
+    click(entries[1]);
+    expect(tabs.activeId()).toBe(previewTab("/repo/big.txt"));
   });
 });

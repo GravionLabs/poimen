@@ -280,6 +280,7 @@ export const HARNESSES = [
     exitInput: "/exit",
     resumeArgs: ["--resume", "{session}"],
     printArgs: ["-p"],
+    slashSkills: true,
     available: true,
   },
   {
@@ -290,6 +291,7 @@ export const HARNESSES = [
     exitInput: "/exit",
     resumeArgs: ["--resume={session}"],
     printArgs: ["-p"],
+    slashSkills: true,
     available: true,
   },
 ];

@@ -31,6 +31,7 @@ All of these hold, else nothing happens:
 - The session id is known (from the hooks), so the resume goes to the same session.
 - No controller is typing: a terminal with a controller attached is not hibernated.
 - No input reached the terminal after the `done` report (#988): text in the agent's input box (a draft) would be lost under the exit input. The server keeps the time of the last input in memory; a new status report starts a new `done` period.
+- No unsent prompt draft in the app (#1163): text in the app's prompt bar is not input to the terminal, so the server cannot see it. The app tells it with `terminal.set_draft` on its attached connection; the server keeps the draft in memory per attached client and drops it when that client detaches or disconnects. `hibernate_sweep` skips a terminal with a draft, and once it is cleared the idle time counts as for any `done` terminal (the `done` period did not restart).
 
 ### How an agent is stopped
 

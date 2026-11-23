@@ -75,10 +75,10 @@ export function sidebarMenuItems(
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
               : []),
+            { action: "open-in-editor" as const, label: "Open in editor" },
             ...(pinned === null
               ? []
               : [
-                  { action: "open-in-editor" as const, label: "Open in editor" },
                   pinned
                     ? { action: "unpin-space" as const, label: "Unpin space" }
                     : { action: "pin-space" as const, label: "Pin space" },

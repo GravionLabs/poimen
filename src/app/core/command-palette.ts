@@ -2,11 +2,27 @@ import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentActions } from "../github/agent-actions";
 import { IssueTasks } from "../github/issue-task";
 import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
+import { EditorTabs, tabKind } from "./editor-tabs";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
-import { ProjectEntries, type ProjectEntry } from "./project-entries";
+import { PaletteVisibility } from "./palette-visibility";
+import { isHidden, sourceShown } from "./palette-settings";
+import { ProjectEntries, isSkill, type DetectedEntry, type ProjectEntry } from "./project-entries";
+import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
 import { SettingsStore } from "./settings";
+import {
+  ALL_TAB,
+  PALETTE_TABS,
+  SOURCE_LABELS,
+  inTab,
+  stepTab,
+  visibleTabs,
+  type PaletteSource,
+  type PaletteTab,
+} from "./palette-tabs";
+import { offeredFor, type Snippet } from "./snippets-model";
+import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
@@ -24,6 +40,7 @@ export interface PoimenCommand {
     | "githubMilestones"
     | "openDeliver"
     | "showChanges"
+    | "previewFile"
     | "markUnread"
     | "showSpaceOverview"
     | "closeSpace"
@@ -45,7 +62,9 @@ export interface PoimenCommand {
     | "projectTeardown"
     | "quitAndStopServer"
     | "projectEntry"
+    | "detectedEntry"
     | "agentAction"
+    | "snippet"
     | "prAction";
   title: string;
 }
@@ -89,6 +108,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubMilestones", title: "GitHub: Milestones" },
   { id: "openDeliver", title: "Open Runs" },
   { id: "showChanges", title: "Show Changes" },
+  { id: "previewFile", title: "Preview File" },
   { id: "markUnread", title: "Mark Agent as Unread" },
   { id: "showSpaceOverview", title: "Show Space Overview" },
   { id: "startTask", title: "Start task from issue…" },
@@ -106,12 +126,20 @@ export interface PaletteItem {
   title: string;
   shortcut: string;
   command: PoimenCommand["id"];
+  /** Where the entry comes from (the tab it belongs to, its tag in All). */
+  source: PaletteSource;
   /** A command or preset of the project file (`command` is `projectEntry`). */
   entry?: ProjectEntry;
+  /** A detected script (`command` is `detectedEntry`). */
+  detected?: DetectedEntry;
+  /** The line under the title: the command line a detected entry runs. */
+  description?: string;
   /** An agent action of the GitHub view (`command` is `agentAction`). */
   agentActionId?: string;
   /** A write on the open pull request (`command` is `prAction`). */
   prAction?: PrAction;
+  /** A saved prompt or command (`command` is `snippet`). */
+  snippet?: Snippet;
   /** The project file is not trusted: running the entry asks first. */
   locked?: boolean;
 }
@@ -134,6 +162,9 @@ export const POIMEN_GROUP = "Poimen";
 export const RECENT_GROUP = "Recent";
 export const PROJECT_GROUP = "Project";
 export const GITHUB_GROUP = "GitHub";
+export const SNIPPET_GROUP = "Snippets";
+export const SCRIPTS_GROUP = "Scripts";
+export const SKILLS_GROUP = "Skills";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -144,13 +175,18 @@ export class CommandPalette {
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
+  private readonly visibility = inject(PaletteVisibility);
   private readonly agentActions = inject(AgentActions);
   private readonly issueTasks = inject(IssueTasks);
   private readonly pulls = inject(GithubPulls);
+  private readonly tabs = inject(EditorTabs, { optional: true });
+  private readonly store = inject(SpacesStore);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
   private readonly _selected = signal(0);
+  /** The last tab picked; lives as long as the app session, not saved. */
+  private readonly _tab = signal(ALL_TAB);
 
   readonly isOpen = this._open.asReadonly();
   readonly query = this._query.asReadonly();
@@ -174,6 +210,7 @@ export class CommandPalette {
         c.id === "githubMilestones" ||
         c.id === "openDeliver" ||
         c.id === "showChanges" ||
+        c.id === "previewFile" ||
         c.id === "markUnread" ||
         c.id === "showSpaceOverview" ||
         c.id === "closeSpace" ||
@@ -195,20 +232,26 @@ export class CommandPalette {
         c.id === "projectTeardown" ||
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
+        c.id === "detectedEntry" ||
         c.id === "agentAction" ||
+        c.id === "snippet" ||
         c.id === "startIssueTask" ||
         c.id === "prAction"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
+      source: "poimen",
     })),
     ...this.projectItems(),
+    ...this.detectedItems(),
+    ...this.snippetItems(),
     ...this.issueTaskItems(),
     ...this.agentActions.entries().map((e): PaletteItem => ({
       key: `agentAction:${e.action.id}`,
       title: e.title,
       shortcut: "",
       command: "agentAction",
+      source: "github",
       agentActionId: e.action.id,
     })),
     ...this.pulls.actions().map((a): PaletteItem => ({
@@ -216,6 +259,7 @@ export class CommandPalette {
       title: `GitHub: ${PR_ACTION_LABELS[a]} #${this.pulls.detailRow()?.number}`,
       shortcut: "",
       command: "prAction",
+      source: "github",
       prAction: a,
     })),
   ]);
@@ -227,6 +271,7 @@ export class CommandPalette {
       title,
       shortcut: "",
       command: "projectEntry",
+      source: "project",
       entry,
       locked,
     });
@@ -236,7 +281,68 @@ export class CommandPalette {
     ];
   }
 
-  private readonly ranked = computed(() => fuzzyRank(this.all(), this._query(), (i) => i.title));
+  /**
+   * The detected scripts and skills; a `commands[]` entry of the same name wins and hides the
+   * detected script. A skill is sent to an agent, so a command of its name does not hide it.
+   * A source turned off in the settings and an entry hidden for this repository are left out (#1218).
+   */
+  private detectedItems(): PaletteItem[] {
+    const own = new Set(this.project.entries().commands.map((c) => c.name));
+    const palette = this.settings.settings().palette;
+    const root = this.project.root() ?? "";
+    return this.project
+      .detected()
+      .filter((d) => sourceShown(palette, d) && !isHidden(palette, root, d))
+      .filter((d) => isSkill(d) || !own.has(d.name))
+      .map((d) => ({
+        key: `detected:${d.source}:${d.name}`,
+        title: `${isSkill(d) ? "Skill" : "Script"}: ${d.name}`,
+        shortcut: "",
+        command: "detectedEntry",
+        source: isSkill(d) ? "skills" : "scripts",
+        detected: d,
+        description: d.description,
+      }));
+  }
+
+  /** The pane of the active tab, or `undefined` (no tab, or not a pane). */
+  activePane(): Terminal | undefined {
+    const id = this.tabs?.activeId();
+    return id != null && tabKind(id) === "pane" ? this.store.panes().get(id) : undefined;
+  }
+
+  /** "Snippet: <label>" per saved snippet that suits the active pane (an agent one needs an agent). */
+  private snippetItems(): PaletteItem[] {
+    const pane = this.activePane();
+    return this.settings
+      .settings()
+      .snippets.filter((s) => offeredFor(s, pane))
+      .map((snippet) => ({
+        key: `snippet:${snippet.label}`,
+        title: `Snippet: ${snippet.label}`,
+        shortcut: "",
+        command: "snippet",
+        source: "snippet",
+        snippet,
+      }));
+  }
+
+  /** The tabs with entries for the focused space; All is always there. */
+  readonly sourceTabs = computed<PaletteTab[]>(() =>
+    visibleTabs(new Set(this.all().map((i) => i.source))),
+  );
+
+  /** The tab shown: the remembered one, or All while that one has no entries. */
+  readonly tab = computed(() => {
+    const id = this._tab();
+    return this.sourceTabs().some((t) => t.id === id) ? id : ALL_TAB;
+  });
+
+  private readonly ranked = computed(() => {
+    const tab = PALETTE_TABS.find((t) => t.id === this.tab());
+    const items = tab ? this.all().filter((i) => inTab(tab, i.source)) : this.all();
+    return fuzzyRank(items, this._query(), (i) => i.title);
+  });
 
   /** The lines of the list. With an empty query: Recent, then Poimen. */
   readonly rows = computed<PaletteRow[]>(() => {
@@ -263,9 +369,12 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction)],
-      [GITHUB_GROUP, rest.filter((i) => i.agentActionId || i.prAction)],
-      [PROJECT_GROUP, rest.filter((i) => i.entry)],
+      [POIMEN_GROUP, rest.filter((i) => i.source === "poimen")],
+      [SNIPPET_GROUP, rest.filter((i) => i.source === "snippet")],
+      [GITHUB_GROUP, rest.filter((i) => i.source === "github")],
+      [PROJECT_GROUP, rest.filter((i) => i.source === "project")],
+      [SCRIPTS_GROUP, rest.filter((i) => i.source === "scripts")],
+      [SKILLS_GROUP, rest.filter((i) => i.source === "skills")],
     ];
     for (const [label, members] of groups) {
       if (members.length === 0) continue;
@@ -293,6 +402,7 @@ export class CommandPalette {
         title: `GitHub: ${this.issueTasks.label(t.root, t.number)} #${t.number}`,
         shortcut: "",
         command: "startIssueTask",
+        source: "poimen",
       },
     ];
   }
@@ -315,6 +425,23 @@ export class CommandPalette {
     else this.open();
   }
 
+  /** Shows tab `id` (the query stays) and remembers it for the session. */
+  selectTab(id: string): void {
+    if (!this.sourceTabs().some((t) => t.id === id)) return;
+    this._tab.set(id);
+    this._selected.set(0);
+  }
+
+  /** Switches to the next (`1`) or previous (`-1`) visible tab, wrapping around. */
+  stepTab(delta: number): void {
+    this.selectTab(stepTab(this.sourceTabs(), this.tab(), delta));
+  }
+
+  /** The label of the source of `item`, for the tag in All with a query. */
+  sourceLabel(item: PaletteItem): string {
+    return SOURCE_LABELS[item.source];
+  }
+
   setQuery(query: string): void {
     this._query.set(query);
     this._selected.set(0);
@@ -334,6 +461,14 @@ export class CommandPalette {
   /** The highlighted row, if any. */
   current(): PaletteItem | undefined {
     return this.items()[this.selected()];
+  }
+
+  /** Hides the detected entry of `item` for this repository; it can be shown again in the settings. */
+  async hideDetected(item: PaletteItem): Promise<void> {
+    const root = this.project.root();
+    if (item.detected && root) {
+      await this.visibility.setHidden(root, item.detected, true);
+    }
   }
 
   /** Remembers `item` as the most recently run entry. */

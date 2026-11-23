@@ -5,11 +5,22 @@ import { TauriBridge } from "../core/tauri";
 import { plainGroups } from "../ui/context-menu/menu-model";
 import type { FileLinkTarget, ResolvedFile } from "./file-links";
 
-/** The entries of the menu a link to a changed file opens: the editor first, then the Changes tab. */
-export const FILE_LINK_MENU = plainGroups([
+/**
+ * The entries of the menu a link to a file opens: the editor, the preview tab (#1004), and for a
+ * changed file the Changes tab. Two constants: the menu takes the same groups on every check.
+ */
+const PLAIN_ENTRIES = [
   { id: "open", label: "Open in editor" },
-  { id: "changes", label: "Show in Changes" },
-]);
+  { id: "preview", label: "Preview" },
+];
+const FILE_LINK_MENUS = {
+  plain: plainGroups(PLAIN_ENTRIES),
+  changed: plainGroups([...PLAIN_ENTRIES, { id: "changes", label: "Show in Changes" }]),
+};
+
+export function fileLinkMenu(changed: boolean) {
+  return changed ? FILE_LINK_MENUS.changed : FILE_LINK_MENUS.plain;
+}
 
 /** What clicking a file path in a terminal does (#1003). */
 @Injectable({ providedIn: "root" })
@@ -40,6 +51,18 @@ export class FileLinkActions {
 
   open(target: FileLinkTarget): void {
     void this.editor.open(target.file.path, { line: target.line, column: target.column });
+  }
+
+  /** The entry `id` of the menu (`fileLinkMenu`) for `target`. */
+  pick(id: string, target: FileLinkTarget): void {
+    if (id === "changes") this.showInChanges(target);
+    else if (id === "preview") this.preview(target);
+    else this.open(target);
+  }
+
+  /** Opens the read-only preview tab of the file. */
+  preview(target: FileLinkTarget): void {
+    this.tabs.openPreview(target.file.path);
   }
 
   showInChanges(target: FileLinkTarget): void {
