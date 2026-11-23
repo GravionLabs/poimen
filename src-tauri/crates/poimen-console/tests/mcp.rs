@@ -148,6 +148,7 @@ fn initialize_and_tools_list() {
             "list_runs",
             "get_events",
             "start_agent",
+            "start_shell",
             "prompt_agent",
             "wait_agent",
             "report_done",

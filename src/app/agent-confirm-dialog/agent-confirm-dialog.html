@@ -8,12 +8,16 @@
     <ng-container dialogHeading>
       <strong>{{ request.callerName }}</strong>
       {{
-        request.action === "start_agent" ? "wants to start an agent" : "wants to prompt an agent"
+        request.action === "start_agent"
+          ? "wants to start an agent"
+          : request.action === "start_shell"
+            ? "wants to run a command"
+            : "wants to prompt an agent"
       }}
       in <strong>{{ request.spaceName }}</strong>
     </ng-container>
     <p class="hint">
-      {{ request.action === "start_agent" ? "It runs:" : "It types:" }}
+      {{ request.action === "prompt_agent" ? "It types:" : "It runs:" }}
     </p>
     <pre class="text">{{ request.text }}</pre>
     <p class="hint">
