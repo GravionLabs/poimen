@@ -5,7 +5,7 @@ import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
 import { EditorTabs, tabKind } from "./editor-tabs";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
-import { ProjectEntries, type DetectedEntry, type ProjectEntry } from "./project-entries";
+import { ProjectEntries, isSkill, type DetectedEntry, type ProjectEntry } from "./project-entries";
 import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
 import { SettingsStore } from "./settings";
@@ -162,6 +162,7 @@ export const PROJECT_GROUP = "Project";
 export const GITHUB_GROUP = "GitHub";
 export const SNIPPET_GROUP = "Snippets";
 export const SCRIPTS_GROUP = "Scripts";
+export const SKILLS_GROUP = "Skills";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -277,18 +278,21 @@ export class CommandPalette {
     ];
   }
 
-  /** The detected scripts; a `commands[]` entry of the same name wins and hides the detected one. */
+  /**
+   * The detected scripts and skills; a `commands[]` entry of the same name wins and hides the
+   * detected script. A skill is sent to an agent, so a command of its name does not hide it.
+   */
   private detectedItems(): PaletteItem[] {
     const own = new Set(this.project.entries().commands.map((c) => c.name));
     return this.project
       .detected()
-      .filter((d) => !own.has(d.name))
+      .filter((d) => isSkill(d) || !own.has(d.name))
       .map((d) => ({
         key: `detected:${d.source}:${d.name}`,
-        title: `Script: ${d.name}`,
+        title: `${isSkill(d) ? "Skill" : "Script"}: ${d.name}`,
         shortcut: "",
         command: "detectedEntry",
-        source: "scripts",
+        source: isSkill(d) ? "skills" : "scripts",
         detected: d,
         description: d.description,
       }));
@@ -363,6 +367,7 @@ export class CommandPalette {
       [GITHUB_GROUP, rest.filter((i) => i.source === "github")],
       [PROJECT_GROUP, rest.filter((i) => i.source === "project")],
       [SCRIPTS_GROUP, rest.filter((i) => i.source === "scripts")],
+      [SKILLS_GROUP, rest.filter((i) => i.source === "skills")],
     ];
     for (const [label, members] of groups) {
       if (members.length === 0) continue;

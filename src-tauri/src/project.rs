@@ -33,7 +33,7 @@ pub fn run_detected(
 ) -> Result<bool, String> {
     let found = poimen_core::detect::detect_all(std::path::Path::new(root))
         .into_iter()
-        .find(|e| e.source == source && e.name == name);
+        .find(|e| e.source == source && e.name == name && !e.argv.is_empty());
     let Some(entry) = found else {
         return Ok(false);
     };
@@ -249,6 +249,21 @@ mod detected {
         );
         assert_eq!(
             run_detected(&fake, &root, "w1", &root, "cargo", "build"),
+            Ok(false)
+        );
+        assert!(fake.calls().is_empty());
+    }
+
+    #[test]
+    fn a_skill_is_not_a_command() {
+        let root = repo(r#"{"scripts": {}}"#);
+        let skill = std::path::Path::new(&root).join(".agents/skills/deliver");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "---\nname: deliver\n---\n").unwrap();
+        assert_eq!(detect_all(std::path::Path::new(&root))[0].source, "skills");
+        let fake = FakeBackend::default();
+        assert_eq!(
+            run_detected(&fake, &root, "w1", &root, "skills", "deliver"),
             Ok(false)
         );
         assert!(fake.calls().is_empty());

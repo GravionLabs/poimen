@@ -3,6 +3,7 @@
 //! Nothing here runs a command: an entry carries the argv a user pick would run.
 
 pub mod npm;
+pub mod skills;
 
 use std::path::Path;
 
@@ -17,7 +18,8 @@ pub struct DetectedEntry {
     pub name: String,
     /// What the entry runs, for the user (for npm the command line of the script).
     pub description: String,
-    /// The program and its arguments; never sent to the frontend, a pick names the entry and the
+    /// The program and its arguments; empty for an entry that is not a command (a skill, which
+    /// the app sends to an agent). Never sent to the frontend, a pick names the entry and the
     /// backend detects again.
     #[serde(skip)]
     pub argv: Vec<String>,
@@ -31,7 +33,7 @@ pub trait Detector {
 
 /// The detectors, in the order their entries are listed.
 pub fn detectors() -> Vec<Box<dyn Detector>> {
-    vec![Box::new(npm::Npm)]
+    vec![Box::new(npm::Npm), Box::new(skills::Skills)]
 }
 
 /// The entries of every detector at `root`.

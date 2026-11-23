@@ -108,6 +108,8 @@ export interface HarnessInfo {
   resumeArgs: string[];
   /** Argv template appended to the command for a headless one-shot call (`{prompt}`); empty: none. */
   printArgs: string[];
+  /** The agent runs a skill typed as `/<skill>` (the palette Skills tab sends to such agents). */
+  slashSkills: boolean;
   /** The program was found on the `PATH` of a child. */
   available: boolean;
 }
@@ -130,6 +132,7 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
         exitInput: typeof r["exitInput"] === "string" ? r["exitInput"] : null,
         resumeArgs: strings(r["resumeArgs"]),
         printArgs: strings(r["printArgs"]),
+        slashSkills: r["slashSkills"] === true,
         available: r["available"] === true,
       },
     ];

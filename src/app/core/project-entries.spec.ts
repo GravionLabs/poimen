@@ -219,3 +219,83 @@ describe("ProjectEntries detected scripts", () => {
     expect(lastToast(injector)).toContain("Script: build failed");
   });
 });
+
+describe("ProjectEntries skills", () => {
+  let entries: ProjectEntries;
+  let picker: AgentPicker;
+  const skill = {
+    source: "skills",
+    name: "deliver",
+    description: "Ship an issue",
+  };
+  const harness = (id: string, slashSkills: boolean) => ({
+    id,
+    command: [id],
+    slashSkills,
+    available: true,
+  });
+
+  async function setup(snap: Snapshot) {
+    tauri.reset();
+    tauri.answer("snapshot", () => snap);
+    tauri.answer("agent_prompt", () => ({
+      kind: "started",
+      status: "working",
+    }));
+    tauri.answer("get_harnesses", () => [
+      harness("claude", true),
+      harness("copilot", true),
+      harness("gemini", false),
+    ]);
+    injector = Injector.create({
+      providers: [
+        testMessages(),
+        { provide: UI_STORAGE, useValue: null },
+        TauriBridge,
+        SpacesStore,
+        UiState,
+        SpaceActions,
+        AgentPrompts,
+        AgentPicker,
+        ProjectEntries,
+      ],
+    });
+    await injector.get(SpacesStore).refresh();
+    entries = injector.get(ProjectEntries);
+    picker = injector.get(AgentPicker);
+  }
+
+  it("sends /<skill> to the only agent that takes slash skills, never running a command", async () => {
+    await setup(snapshot(pane("w1:p1", "w1", "gemini"), pane("w1:p2", "w1", "claude")));
+    await entries.start(skill, "w1", "/work/app");
+    expect(tauri.calls("agent_prompt")).toEqual([{ target: "w1:p2", text: "/deliver" }]);
+    expect(tauri.calls("detected_run")).toEqual([]);
+  });
+
+  it("lets the user pick among several such agents", async () => {
+    await setup(snapshot(pane("w1:p1", "w1", "claude"), pane("w1:p2", "w1", "copilot")));
+    const run = entries.start(skill, "w1", "/work/app");
+    await vi.waitFor(() => expect(picker.choices()).toHaveLength(2));
+    picker.answer("w1:p2");
+    await run;
+    expect(tauri.calls("agent_prompt")).toEqual([{ target: "w1:p2", text: "/deliver" }]);
+  });
+
+  it("says so when the space has no agent that runs skills", async () => {
+    await setup(snapshot(pane("w1:p1", "w1", "gemini"), pane("w1:p2", "w1")));
+    await entries.start(skill, "w1", "/work/app");
+    expect(lastToast(injector)).toBe("Skill: deliver: the space has no agent that runs skills");
+    expect(tauri.calls("agent_prompt")).toEqual([]);
+  });
+
+  it("ignores agents of other spaces and harnesses that cannot be read", async () => {
+    await setup(snapshot(pane("w2:p1", "w2", "claude")));
+    await entries.start(skill, "w1", "/work/app");
+    expect(tauri.calls("agent_prompt")).toEqual([]);
+    tauri.answer("get_harnesses", () => {
+      throw new Error("x");
+    });
+    await entries.start(skill, "w2", "/work/app");
+    expect(tauri.calls("agent_prompt")).toEqual([]);
+  });
+});

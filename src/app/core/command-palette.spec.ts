@@ -346,6 +346,50 @@ describe("CommandPalette", () => {
     });
   });
 
+  describe("detected skills", () => {
+    const found = [
+      { source: "npm", name: "build", description: "tsc" },
+      { source: "skills", name: "deliver", description: "Ship an issue" },
+      { source: "skills", name: "build", description: "Build skill" },
+    ];
+    async function load() {
+      tauri.answer("project_entries", () => ({
+        commands: [{ name: "build", target: "terminal" }],
+        presets: [],
+        locked: false,
+      }));
+      tauri.answer("detected_entries", () => found);
+      project.setDir("/a");
+      await project.reload();
+      palette.open();
+    }
+
+    it("shows a Skills tab with name and description, apart from the scripts", async () => {
+      await load();
+      expect(palette.sourceTabs().map((t) => t.id)).toContain("skills");
+      palette.selectTab("skills");
+      expect(palette.items().map((i) => [i.title, i.description])).toEqual([
+        ["Skill: deliver", "Ship an issue"],
+        ["Skill: build", "Build skill"],
+      ]);
+      expect(palette.items()[0].detected).toEqual(found[1]);
+    });
+
+    it("keeps a skill that a commands[] entry shares its name with", async () => {
+      await load();
+      const titles = palette.items().map((i) => i.title);
+      expect(titles).toContain("Skill: build");
+      expect(titles).not.toContain("Script: build");
+    });
+
+    it("has no Skills tab without skills", async () => {
+      tauri.answer("detected_entries", () => [found[0]]);
+      project.setDir("/a");
+      await project.reload();
+      expect(palette.sourceTabs().map((t) => t.id)).not.toContain("skills");
+    });
+  });
+
   describe("project entries", () => {
     const list = (locked: boolean) => ({
       commands: [
