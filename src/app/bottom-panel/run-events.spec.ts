@@ -312,9 +312,21 @@ describe("foldSkipped", () => {
     link: null,
     ...over,
   });
-  const skip = (task: string, tone: RunEventRow["tone"] = "neutral", reason = "blocked") => [
-    row({ type: "task.started", task, subject: `PBI ${task}`, tone }),
-    row({ type: "task.finished", task, outcome: "skipped", reason, text: `why ${task}`, tone }),
+  const skip = (
+    task: string,
+    tone: RunEventRow["tone"] = "neutral",
+    reason = "blocked",
+    text?: string,
+  ) => [
+    row({ type: "task.started", task, subject: `PBI ${task}`, text: `what ${task}`, tone }),
+    row({
+      type: "task.finished",
+      task,
+      outcome: "skipped",
+      reason,
+      ...(text ? { text } : {}),
+      tone,
+    }),
   ];
 
   it("folds consecutive skipped pairs into one item with count and reason", () => {
@@ -329,9 +341,16 @@ describe("foldSkipped", () => {
     if (fold.kind !== "skipped") throw new Error("fold");
     expect(fold.label).toBe("2 skipped (blocked)");
     expect(fold.tasks).toEqual([
-      { task: "a", subject: "PBI a", text: "why a", reason: "blocked" },
-      { task: "b", subject: "PBI b", text: "why b", reason: "blocked" },
+      { task: "a", subject: "PBI a", text: "what a", reason: "blocked" },
+      { task: "b", subject: "PBI b", text: "what b", reason: "blocked" },
     ]);
+  });
+
+  it("shows the text of the finished task instead of its reason code (#622)", () => {
+    const fold = foldSkipped([...skip("a", "neutral", "blocked", "Blocked by #12")])[0]!;
+    if (fold.kind !== "skipped") throw new Error("fold");
+    expect(fold.tasks[0]!.reason).toBe("Blocked by #12");
+    expect(fold.label).toBe("1 skipped (Blocked by #12)");
   });
 
   it("lists several reasons and none", () => {

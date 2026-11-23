@@ -282,8 +282,9 @@ function skippedPair(started: RunEventRow | undefined, finished: RunEventRow | u
   return {
     task: started.task,
     subject: started.subject || finished.subject || "",
-    text: finished.text || started.text || "",
-    reason: finished.reason || "",
+    text: started.text || "",
+    // The outcome says `text ?? reason` (#622): `reason` is a code, `text` the human sentence.
+    reason: finished.text || finished.reason || "",
   } satisfies SkippedTask;
 }
 
