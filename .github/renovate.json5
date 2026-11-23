@@ -27,8 +27,9 @@
   baseBranchPatterns: ["release/next"],
   labels: ["dependencies"],
   enabledManagers: ["npm", "cargo", "github-actions"],
-  // The vendored copy of portable-pty is changed by hand (src-tauri/vendor/portable-pty/POIMEN.md).
-  ignorePaths: ["src-tauri/vendor/**", "**/node_modules/**", "**/target/**"],
+  // The vendored copy of portable-pty is changed by hand (src-tauri/vendor/portable-pty/POIMEN.md); .agents/ holds skills
+  // and project templates for other repositories, whose `@v1` references stay as they are.
+  ignorePaths: ["src-tauri/vendor/**", ".agents/**", "**/node_modules/**", "**/target/**"],
   // A known vulnerability gets a pull request at once, outside the schedule; all alerts share one pull request.
   vulnerabilityAlerts: {
     enabled: true,
