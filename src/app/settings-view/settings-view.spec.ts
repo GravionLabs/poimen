@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import type { Type } from "@angular/core";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -22,13 +21,8 @@ import {
   SettingsView,
   withRoot,
 } from "./settings-view";
+import { overrideEditors } from "./settings-editors.mock";
 import { allPages, SETTINGS_GROUPS } from "./settings-categories";
-import { LayoutTabsEditor } from "./layout-tabs-editor";
-import { LayoutsEditor } from "./layouts-editor";
-import { ShortcutsEditor } from "./shortcuts-editor";
-import { SnippetsEditor } from "./snippets-editor";
-import { SpaceTemplatesEditor } from "./space-templates-editor";
-import { SettingsImportPanel } from "./settings-import-panel";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -144,24 +138,7 @@ function setup(
       template: readFileSync("src/app/settings-view/settings-view.html", "utf8"),
     },
   });
-  const editors: [Type<unknown>, string][] = [
-    [LayoutTabsEditor, "layout-tabs-editor"],
-    [LayoutsEditor, "layouts-editor"],
-    [SettingsImportPanel, "settings-import-panel"],
-    [SpaceTemplatesEditor, "space-templates-editor"],
-    [SnippetsEditor, "snippets-editor"],
-    [ShortcutsEditor, "shortcuts-editor"],
-  ];
-  for (const [component, name] of editors) {
-    TestBed.overrideComponent(component, {
-      set: {
-        templateUrl: undefined,
-        styleUrl: undefined,
-        styleUrls: undefined,
-        template: readFileSync(`src/app/settings-view/${name}.html`, "utf8"),
-      },
-    });
-  }
+  overrideEditors();
   TestBed.inject(UiState).selectSettingsPage(page);
   const store = TestBed.inject(SettingsStore);
   store["_settings"].set({ ...DEFAULT_SETTINGS, colorSchema, explorerRoots });
@@ -622,6 +599,7 @@ describe("SettingsView categories", () => {
       "Templates",
       "Layouts",
       "Snippets",
+      "Palette",
       "Keyboard",
       "Trusted projects",
       "Backend",
@@ -836,7 +814,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(15);
+    expect(titles(host)).toHaveLength(16);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -989,6 +967,7 @@ describe("SettingsView categories", () => {
       spaces: read("space-templates-editor"),
       machines: machinesPage,
       snippets: read("snippets-editor"),
+      palette: read("palette-editor"),
       keyboard: read("shortcuts-editor"),
     };
     for (const page of allPages()) {

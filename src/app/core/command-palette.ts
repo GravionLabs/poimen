@@ -5,6 +5,8 @@ import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
 import { EditorTabs, tabKind } from "./editor-tabs";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
+import { PaletteVisibility } from "./palette-visibility";
+import { isHidden, sourceShown } from "./palette-settings";
 import { ProjectEntries, isSkill, type DetectedEntry, type ProjectEntry } from "./project-entries";
 import type { Terminal } from "./snapshot";
 import type { ShortcutAction } from "./shortcuts";
@@ -173,6 +175,7 @@ export class CommandPalette {
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
+  private readonly visibility = inject(PaletteVisibility);
   private readonly agentActions = inject(AgentActions);
   private readonly issueTasks = inject(IssueTasks);
   private readonly pulls = inject(GithubPulls);
@@ -281,11 +284,15 @@ export class CommandPalette {
   /**
    * The detected scripts and skills; a `commands[]` entry of the same name wins and hides the
    * detected script. A skill is sent to an agent, so a command of its name does not hide it.
+   * A source turned off in the settings and an entry hidden for this repository are left out (#1218).
    */
   private detectedItems(): PaletteItem[] {
     const own = new Set(this.project.entries().commands.map((c) => c.name));
+    const palette = this.settings.settings().palette;
+    const root = this.project.root() ?? "";
     return this.project
       .detected()
+      .filter((d) => sourceShown(palette, d) && !isHidden(palette, root, d))
       .filter((d) => isSkill(d) || !own.has(d.name))
       .map((d) => ({
         key: `detected:${d.source}:${d.name}`,
@@ -454,6 +461,14 @@ export class CommandPalette {
   /** The highlighted row, if any. */
   current(): PaletteItem | undefined {
     return this.items()[this.selected()];
+  }
+
+  /** Hides the detected entry of `item` for this repository; it can be shown again in the settings. */
+  async hideDetected(item: PaletteItem): Promise<void> {
+    const root = this.project.root();
+    if (item.detected && root) {
+      await this.visibility.setHidden(root, item.detected, true);
+    }
   }
 
   /** Remembers `item` as the most recently run entry. */

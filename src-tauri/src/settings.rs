@@ -71,8 +71,11 @@ impl Serialize for SoundSetting {
     }
 }
 
+#[path = "settings_palette.rs"]
+mod palette_setting;
 #[path = "settings_usage.rs"]
 mod usage_setting;
+pub use palette_setting::set_text as set_palette_text;
 pub use usage_setting::Usage;
 use usage_setting::resolve_usage;
 
@@ -215,6 +218,8 @@ pub struct Settings {
     pub sounds: Sounds,
     /// Which provider limits the status bar asks for (`usage`).
     pub usage: Usage,
+    /// Detected palette sources and hidden entries (`palette`, #1218).
+    pub palette: palette_setting::Palette,
     /// `agents.claude.classicRenderer`: new poimen terminals set
     /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
     pub claude_classic_renderer: bool,
@@ -269,6 +274,7 @@ impl Default for Settings {
             snippets: Vec::new(),
             sounds: Sounds::default(),
             usage: Usage::default(),
+            palette: Default::default(),
             claude_classic_renderer: false,
             keep_awake: false,
             terminal_history: Default::default(),
@@ -515,6 +521,9 @@ pub fn resolve_with(json: Option<&str>, sources: &dyn TerminalSources) -> Settin
     }
     if let Some(value) = root.get("sounds") {
         s.sounds = resolve_sounds(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("palette") {
+        s.palette = palette_setting::resolve(value, &mut s.warnings);
     }
     if let Some(value) = root.get("usage") {
         s.usage = resolve_usage(value, &mut s.warnings);
@@ -1012,6 +1021,10 @@ pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
 mod templates_tests;
 
 #[cfg(test)]
+#[path = "settings_sounds_tests.rs"]
+mod sounds_tests;
+
+#[cfg(test)]
 mod tests {
     use super::shortcuts::normalize_accelerator;
     use super::*;
@@ -1490,86 +1503,6 @@ mod tests {
         assert!(s.usage.claude);
         assert_eq!(s.warnings.len(), 1);
         assert_eq!(rows(r#"{"usage":3}"#).warnings.len(), 1);
-    }
-
-    #[test]
-    fn sounds_default_to_off_and_parse_true_false_and_paths() {
-        assert_eq!(rows("{}").sounds, Sounds::default());
-        let s = rows(r#"{"sounds":{"blocked":true,"done":"~/ding.wav"}}"#);
-        assert_eq!(s.sounds.blocked, SoundSetting::Builtin);
-        assert_eq!(s.sounds.done, SoundSetting::File("~/ding.wav".into()));
-        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
-        let json = serde_json::to_value(&s.sounds).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({"blocked": true, "done": "~/ding.wav"})
-        );
-    }
-
-    #[test]
-    fn other_sound_values_warn_and_stay_off() {
-        let s = rows(r#"{"sounds":{"blocked":3,"done":""}}"#);
-        assert_eq!(s.sounds, Sounds::default());
-        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
-        assert_eq!(rows(r#"{"sounds":true}"#).warnings.len(), 1);
-    }
-
-    #[test]
-    fn set_sound_text_writes_one_key_and_refuses_other_values() {
-        let out = set_sound_text("{\"theme\":\"dark\"}", "done", &Value::Bool(true)).unwrap();
-        assert!(
-            out.contains("\"done\": true") || out.contains("\"done\":true"),
-            "{out}"
-        );
-        assert!(set_sound_text("{}", "other", &Value::Bool(true)).is_err());
-        assert!(set_sound_text("{}", "done", &Value::from(3)).is_err());
-    }
-
-    fn sound_home(name: &str, config: &str) -> PathBuf {
-        let home = std::env::temp_dir().join(format!("poimen-sound-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
-        std::fs::write(config_path(&home), config).unwrap();
-        home
-    }
-
-    #[test]
-    fn sound_file_reads_the_configured_file() {
-        let home = sound_home("ok", r#"{"sounds":{"done":"~/ding.wav"}}"#);
-        std::fs::write(home.join("ding.wav"), [1u8, 2, 3]).unwrap();
-        assert_eq!(read_sound_file(&home, "done").unwrap(), vec![1, 2, 3]);
-        // `blocked` is off: the caller cannot name a path, only a kind.
-        assert!(read_sound_file(&home, "blocked").is_err());
-        assert!(read_sound_file(&home, "/etc/passwd").is_err());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn sound_file_refuses_missing_large_and_directory() {
-        let home = sound_home(
-            "bad",
-            r#"{"sounds":{"blocked":"~/none.wav","done":"~/dir"}}"#,
-        );
-        assert!(read_sound_file(&home, "blocked").is_err());
-        std::fs::create_dir(home.join("dir")).unwrap();
-        assert!(
-            read_sound_file(&home, "done")
-                .unwrap_err()
-                .contains("regular")
-        );
-        std::fs::write(
-            home.join("none.wav"),
-            vec![0u8; MAX_SOUND_BYTES as usize + 1],
-        )
-        .unwrap();
-        assert!(
-            read_sound_file(&home, "blocked")
-                .unwrap_err()
-                .contains("1 MiB")
-        );
-        std::fs::write(home.join("none.wav"), vec![0u8; MAX_SOUND_BYTES as usize]).unwrap();
-        assert!(read_sound_file(&home, "blocked").is_ok());
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

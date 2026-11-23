@@ -11,6 +11,7 @@ import { GithubMilestones } from "../github/milestones";
 import { GithubPulls } from "../github/pulls";
 import { CommandPalette, POIMEN_COMMANDS } from "./command-palette";
 import { EditorTabs } from "./editor-tabs";
+import { PaletteVisibility } from "./palette-visibility";
 import { ProjectEntries } from "./project-entries";
 import { SpaceActions } from "./space-actions";
 import type { Snapshot } from "./snapshot";
@@ -67,6 +68,7 @@ describe("CommandPalette", () => {
         AgentPrompts,
         AgentPicker,
         ProjectEntries,
+        PaletteVisibility,
         GithubFilter,
         GithubMilestones,
         GithubPulls,
@@ -387,6 +389,78 @@ describe("CommandPalette", () => {
       project.setDir("/a");
       await project.reload();
       expect(palette.sourceTabs().map((t) => t.id)).not.toContain("skills");
+    });
+  });
+
+  describe("hiding detected entries (#1218)", () => {
+    const found = [
+      { source: "npm", name: "build", description: "tsc" },
+      { source: "npm", name: "test", description: "vitest" },
+      { source: "skills", name: "deliver", description: "Ship" },
+    ];
+    async function load(dir = "/a") {
+      tauri.answer("project_entries", () => ({ commands: [], presets: [], locked: false }));
+      tauri.answer("detected_entries", () => found);
+      tauri.answer("repo_root", () => "/repo");
+      tauri.answer("set_palette", () => null);
+      project.setDir(dir);
+      await project.reload();
+      palette.open();
+    }
+    const titles = () => palette.items().map((i) => i.title);
+
+    it("leaves out a source turned off, with its tab", async () => {
+      await load();
+      settings["_settings"].set({
+        ...DEFAULT_SETTINGS,
+        palette: { scripts: false, skills: true, hidden: {} },
+      });
+      expect(titles()).toEqual(expect.arrayContaining(["Skill: deliver"]));
+      expect(titles()).not.toContain("Script: build");
+      expect(palette.sourceTabs().map((t) => t.id)).not.toContain("scripts");
+      expect(palette.sourceTabs().map((t) => t.id)).toContain("skills");
+    });
+
+    it("hides a single entry for its repository root and writes it to the settings", async () => {
+      await load();
+      expect(project.root()).toBe("/repo");
+      const item = palette.items().find((i) => i.title === "Script: build")!;
+      await palette.hideDetected(item);
+      expect(tauri.calls("set_palette")).toEqual([
+        {
+          palette: {
+            sources: { scripts: true, skills: true },
+            hidden: { "/repo": [{ source: "npm", name: "build" }] },
+          },
+        },
+      ]);
+      expect(titles()).not.toContain("Script: build");
+      expect(titles()).toContain("Script: test");
+    });
+
+    it("keeps an entry hidden in another repository visible", async () => {
+      await load();
+      settings["_settings"].set({
+        ...DEFAULT_SETTINGS,
+        palette: {
+          scripts: true,
+          skills: true,
+          hidden: { "/elsewhere": [{ source: "npm", name: "build" }] },
+        },
+      });
+      expect(titles()).toContain("Script: build");
+    });
+
+    it("shows an entry again once it is removed from the hidden list", async () => {
+      await load();
+      const hidden = { "/repo": [{ source: "npm", name: "build" }] };
+      settings["_settings"].set({
+        ...DEFAULT_SETTINGS,
+        palette: { scripts: true, skills: true, hidden },
+      });
+      expect(titles()).not.toContain("Script: build");
+      settings["_settings"].set({ ...DEFAULT_SETTINGS });
+      expect(titles()).toContain("Script: build");
     });
   });
 

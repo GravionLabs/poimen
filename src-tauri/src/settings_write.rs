@@ -32,3 +32,12 @@ pub fn revoke_project(root: String) -> Result<(), String> {
     let home = crate::home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     crate::settings::revoke_project(&home, &root)
 }
+
+/// Writes only `palette` (detected sources and hidden entries, #1218) after validating it.
+#[tauri::command]
+pub fn set_palette(palette: serde_json::Value) -> Result<(), String> {
+    let home = crate::home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    poimen_core::settings::save_with(&home, |text| {
+        crate::settings::set_palette_text(text, &palette)
+    })
+}

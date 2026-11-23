@@ -56,6 +56,7 @@ import {
 import { MachinesPage } from "../machines-page/machines-page";
 import { LayoutsEditor } from "./layouts-editor";
 import { ShortcutsEditor } from "./shortcuts-editor";
+import { PaletteEditor } from "./palette-editor";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
@@ -165,6 +166,7 @@ export function withRoot(
     MachinesPage,
     LayoutsEditor,
     ShortcutsEditor,
+    PaletteEditor,
     SnippetsEditor,
     SpaceTemplatesEditor,
     SettingsImportPanel,

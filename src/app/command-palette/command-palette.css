@@ -64,7 +64,7 @@ ul {
   list-style: none;
 }
 
-li button {
+li button.row {
   all: unset;
   box-sizing: border-box;
   display: flex;
@@ -185,4 +185,26 @@ mark {
 
 .source + .shortcut {
   margin-left: 8px;
+}
+
+li:has(.hide) {
+  display: flex;
+  align-items: center;
+}
+
+li:has(.hide) .row {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.hide {
+  flex: none;
+  visibility: hidden;
+  margin-right: 4px;
+}
+
+li.selected .hide,
+li:hover .hide {
+  visibility: visible;
 }

@@ -1,0 +1,50 @@
+<p class="hint">
+  The command palette lists the scripts of <code>package.json</code> and the skills of a repository
+  as detected entries. Turn a source off to hide its tab and its entries, or hide single entries
+  from the palette (Shift+Delete or the Hide button). Nothing is written to the repository.
+</p>
+@if (writeError(); as m) {
+  <p class="field-error" role="alert">{{ m }}</p>
+}
+<section aria-label="Detected sources">
+  <h3>Detected sources</h3>
+  @for (s of sources(); track s.id) {
+    <label class="check">
+      <input
+        hx-checkbox
+        type="checkbox"
+        [name]="'palette-source-' + s.id"
+        [checked]="s.shown"
+        (change)="toggle(s.id, $event)"
+      />
+      Show {{ s.label.toLowerCase() }} in the palette
+    </label>
+  }
+</section>
+<section aria-label="Hidden entries">
+  <h3>Hidden entries</h3>
+  @for (repo of repositories(); track repo.root) {
+    <h4 class="repo-root">{{ repo.root }}</h4>
+    <ul class="rows" [attr.aria-label]="'Hidden entries of ' + repo.root">
+      @for (e of repo.entries; track e.source + ":" + e.name) {
+        <li class="row-item">
+          <strong>{{ e.name }}</strong>
+          <span class="hint">{{ e.source === "skills" ? "Skill" : "Script" }}</span>
+          <span class="spacer"></span>
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            (click)="show(repo.root, e)"
+          >
+            Show
+          </button>
+        </li>
+      }
+    </ul>
+  } @empty {
+    <p class="hint">No entry is hidden.</p>
+  }
+</section>

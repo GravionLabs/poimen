@@ -17,14 +17,14 @@ import type { PrAction } from "../github/pulls";
 import { EditorTabs } from "../core/editor-tabs";
 import { SnippetRunner } from "../core/snippets";
 import type { PaletteEntry } from "../core/project-entries";
-import { HxTag } from "@gravionlabs/helix-ui";
+import { HxButton, HxTag } from "@gravionlabs/helix-ui";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
 @Component({
   selector: "app-command-palette",
-  imports: [HxTag],
+  imports: [HxButton, HxTag],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./command-palette.html",
   styleUrl: "./command-palette.css",
@@ -106,8 +106,14 @@ export class CommandPalette {
       const item = this.palette.current();
       if (item) this.run(item);
     } else if (event.key === "Escape") this.palette.close();
+    else if (event.key === "Delete" && event.shiftKey) this.hide(this.palette.current());
     else return;
     event.preventDefault();
+  }
+
+  /** Hides a detected entry for its repository (a no-op for any other row). */
+  protected hide(item: PaletteItem | undefined): void {
+    if (item?.detected) void this.palette.hideDetected(item);
   }
 
   protected run(item: PaletteItem): void {

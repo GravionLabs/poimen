@@ -15,11 +15,11 @@ src-tauri/crates/poimen-server/src/tabs.rs	986
 src-tauri/src/changes.rs	908
 src-tauri/src/deliver.rs	952
 src-tauri/src/github_issues.rs	1396
-src-tauri/src/lib.rs	3661
+src-tauri/src/lib.rs	3612
 src-tauri/src/machines.rs	1938
 src-tauri/src/poimen_backend.rs	2516
 src-tauri/src/poimen_server.rs	1319
-src-tauri/src/settings.rs	2391
+src-tauri/src/settings.rs	2324
 src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1045
 src/app/core/snapshot.spec.ts	1040
@@ -28,5 +28,5 @@ src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879
 src/app/github/github-view.spec.ts	853
 src/app/github/issues.ts	1019
-src/app/settings-view/settings-view.spec.ts	1071
+src/app/settings-view/settings-view.spec.ts	1050
 src/app/terminal-view/terminal-view.spec.ts	1262

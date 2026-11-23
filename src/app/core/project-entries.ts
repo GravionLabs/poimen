@@ -64,6 +64,9 @@ export class ProjectEntries {
   private readonly _detected = signal<DetectedEntry[]>([]);
   /** The commands detected in the repository (`package.json` scripts), for the Scripts tab. */
   readonly detected = this._detected.asReadonly();
+  private readonly _root = signal<string | undefined>(undefined);
+  /** The repository root of the focused space: the key of its hidden detected entries. */
+  readonly root = this._root.asReadonly();
   private dir: string | undefined;
   private seq = 0;
 
@@ -81,9 +84,10 @@ export class ProjectEntries {
     if (!dir) {
       this._entries.set(NONE);
       this._detected.set([]);
+      this._root.set(undefined);
       return;
     }
-    const [list, detected] = await Promise.all([
+    const [list, detected, root] = await Promise.all([
       this.bridge.invoke<ProjectEntryList>("project_entries", { dir }).then(
         (l) => l ?? NONE,
         () => NONE,
@@ -92,8 +96,13 @@ export class ProjectEntries {
         (d) => d ?? [],
         () => [],
       ),
+      this.bridge.invoke<string>("repo_root", { dir }).then(
+        (r) => r || dir,
+        () => dir,
+      ),
     ]);
     if (seq !== this.seq) return;
+    this._root.set(root);
     this._entries.set(list);
     this._detected.set(detected);
   }
