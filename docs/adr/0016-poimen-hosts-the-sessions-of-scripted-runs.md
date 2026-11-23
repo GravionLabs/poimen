@@ -1,6 +1,6 @@
 # ADR 0016: poimen hosts the sessions of scripted runs
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-23
 - Issues: #743
 - Builds on: [ADR 0006](0006-poimen-console-with-herdr-scope.md), [ADR 0008](0008-remote-machines-over-ssh.md), [ADR 0010](0010-terminal-panel-for-shells-in-the-app.md), [ADR 0012](0012-mcp-server-for-agent-sessions.md)

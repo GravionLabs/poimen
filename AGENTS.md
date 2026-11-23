@@ -56,7 +56,7 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - MCP server for agent sessions: `poimen mcp` over `poimen-client`; writes are free in the caller's own space, any other space needs a confirmation in the app (proposed, [ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)).
 - Install `poimen-server` on a machine from the app after a confirmation, over the ssh connection, checksum verified; amends ADR 0008 (proposed, [ADR 0013](docs/adr/0013-install-poimen-server-on-a-machine-from-the-app.md)).
 - Hibernate idle agents: the server stops the agent process of a `done` terminal after a set idle time and resumes the session on the first controller attach, off by default, an exception to the non-destructive rule (proposed, [ADR 0014](docs/adr/0014-hibernate-idle-agents.md)).
-- poimen hosts the sessions of scripted runs: one `poimen-client` operation, interactive sessions, JSON-line records, permissions as ADR 0012 (proposed, [ADR 0016](docs/adr/0016-poimen-hosts-the-sessions-of-scripted-runs.md)).
+- poimen hosts the sessions of scripted runs: one `poimen-client` operation, interactive sessions, JSON-line records, permissions as ADR 0012 (accepted, [ADR 0016](docs/adr/0016-poimen-hosts-the-sessions-of-scripted-runs.md)).
 
 ## Verification
 
