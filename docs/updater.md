@@ -15,6 +15,8 @@ Each terminal is owned by its own small process, `poimen-pty-host` ([ADR 0009](a
 - Windows and AppImage: from a per-version copy next to the server copy, `%LOCALAPPDATA%\poimen-server\bin\<version>\` or `$XDG_DATA_HOME/poimen-server/bin/<version>/`, so an update can replace the installed file while a host runs.
 - macOS and the Linux packages: the installed binary.
 
+On Linux with systemd the app starts the server in a transient user scope of its own (`systemd-run --user --scope`), so server and hosts are not in the cgroup of the app's scope that the desktop stops on logout (#1231). Terminals then survive closing or updating the app and logging out, as long as the user manager keeps running (lingering, `loginctl enable-linger`); a reboot ends them. Without systemd or when `systemd-run` fails the server is a plain child as before (`docs/protocol.md`, Lifecycle).
+
 Copies of other versions are removed only when neither a server nor a host runs from them, so an update never touches a running host; a directory that is still in use is left whole and checked again at the next start.
 
 **The first update to the version that ships the host ends the existing terminals once**, because the older server owns its terminals itself and ends them when it is restarted (the confirmation names them). From then on an update keeps the terminals: the new server reconnects to the running hosts.
