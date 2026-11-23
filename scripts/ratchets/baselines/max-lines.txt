@@ -8,7 +8,7 @@ src-tauri/crates/poimen-core/src/layout.rs	1186
 src-tauri/crates/poimen-core/src/settings.rs	1101
 src-tauri/crates/poimen-core/src/transcripts.rs	1115
 src-tauri/crates/poimen-core/src/worktree.rs	1893
-src-tauri/crates/poimen-protocol/src/lib.rs	1650
+src-tauri/crates/poimen-protocol/src/lib.rs	1646
 src-tauri/crates/poimen-server/src/lib.rs	2501
 src-tauri/crates/poimen-server/src/tabs.rs	986
 src-tauri/src/changes.rs	908

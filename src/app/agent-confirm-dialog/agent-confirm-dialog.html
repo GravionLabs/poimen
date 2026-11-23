@@ -14,13 +14,15 @@
             ? "wants to run a command"
             : request.action === "stop_terminal"
               ? "wants to stop a terminal"
-              : "wants to prompt an agent"
+              : request.action === "write_terminal"
+                ? "wants to type into a terminal"
+                : "wants to prompt an agent"
       }}
       in <strong>{{ request.spaceName }}</strong>
     </ng-container>
     <p class="hint">
       {{
-        request.action === "prompt_agent"
+        request.action === "prompt_agent" || request.action === "write_terminal"
           ? "It types:"
           : request.action === "stop_terminal"
             ? "It does:"
@@ -29,8 +31,12 @@
     </p>
     <pre class="text">{{ request.text }}</pre>
     <p class="hint">
-      That space is not the one of {{ request.callerName }}. It waits up to 60 seconds for your
-      answer.
+      @if (request.action === "write_terminal") {
+        This text runs in your shell, with your rights. poimen always asks for it.
+      } @else {
+        That space is not the one of {{ request.callerName }}.
+      }
+      It waits up to 60 seconds for your answer.
     </p>
     @if (confirm.waiting() > 1) {
       <p class="hint">{{ confirm.waiting() - 1 }} more waiting.</p>

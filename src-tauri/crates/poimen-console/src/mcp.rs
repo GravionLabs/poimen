@@ -17,6 +17,7 @@ mod shell;
 mod stop;
 mod terminal;
 mod worktree;
+mod write;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -244,6 +245,7 @@ fn tools() -> Value {
             }, "required": ["command"], "additionalProperties": false},
         },
         stop::tool(),
+        write::tool(),
         {
             "name": "prompt_agent",
             "description": "Types a prompt into the agent of a terminal. Refused while that agent is working or blocked. In another space than your own the user must confirm in the poimen app (waits up to 60 s).",
@@ -352,6 +354,7 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         "start_agent" => start_agent(client, env, args),
         "start_shell" => shell::start_shell(client, env, args),
         "stop_terminal" => stop::stop_terminal(client, env, args),
+        "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
         "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
         "report_done" => report::report_done(client, env, args),
