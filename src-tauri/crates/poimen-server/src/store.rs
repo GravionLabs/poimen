@@ -79,8 +79,20 @@ pub(crate) struct StoredTerminal {
     /// The agent's `report_done` (#980); survives a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) report: Option<poimen_protocol::report::AgentReport>,
+    /// The last agent session seen in the terminal (#1232); kept after `/clear` or `gone`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_agent: Option<LastAgent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tokens: Vec<StoredToken>,
+}
+
+/// What a resume of an agent needs after its terminal's host is gone (#1232): the latest
+/// session id wins. Not on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LastAgent {
+    pub(crate) agent: String,
+    pub(crate) session_id: String,
+    pub(crate) cwd: String,
 }
 
 /// A token with its owner and the end of its TTL.
@@ -521,6 +533,11 @@ mod tests {
             }),
             started_by: Some("t0".into()),
             report: None,
+            last_agent: Some(LastAgent {
+                agent: "claude".into(),
+                session_id: "abc".into(),
+                cwd: "/w".into(),
+            }),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),
                 value: "review".into(),

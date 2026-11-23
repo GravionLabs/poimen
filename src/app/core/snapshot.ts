@@ -6,9 +6,10 @@ import type { BranchPull } from "./branch-pull";
 import type { ChildRecord } from "./child-record";
 import type { SidebarSort } from "./settings";
 import { naturalCompare } from "./natural-compare";
+import { plainText } from "./plain-text";
 import { markStarters } from "./started-by";
 
-export { naturalCompare };
+export { naturalCompare, plainText };
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "error" | "unknown";
 
@@ -33,21 +34,6 @@ export function paneWarning(pane: Pick<Terminal, "agent_status" | "agent_tone">)
 /** The pane's agent waits for the user, failed, or finished with a warning: it needs a look. */
 export function paneNeedsAttention(pane: Pick<Terminal, "agent_status" | "agent_tone">): boolean {
   return needsAttention(pane.agent_status) || paneWarning(pane);
-}
-
-/**
- * Text a program reported (OSC 7501, hooks) as plain text for display: bidi overrides, isolates,
- * zero-width and other invisible formatting characters and control characters are removed, so
- * a report cannot reorder or hide what the user reads (#682).
- */
-export function plainText(text: string | undefined): string {
-  return (text ?? "")
-    .replace(
-      // oxlint-disable-next-line no-control-regex
-      /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|\udb40[\udc00-\udc7f]/g,
-      "",
-    )
-    .trim();
 }
 
 /** 0 to 100 as the backend reports it; anything else is no progress. */
@@ -217,6 +203,8 @@ export interface Terminal {
   agent_title?: string;
   /** The server stopped the idle agent; the next controller attach resumes it (poimen backend, #904). */
   hibernated?: boolean;
+  /** The process is gone, the terminal is its history; with `hibernated` a control attach resumes the agent session (#1232). */
+  ended?: boolean;
   started_by?: string;
   /** Child records, least recently updated first (poimen backend, #684). */
   records?: ChildRecord[];
@@ -680,7 +668,7 @@ export function flowSession(pane: Terminal | undefined): string | null {
  * message, so plain terminals and agents with an unknown state have no text.
  */
 export function statusText(pane: Terminal): string | undefined {
-  if (pane.hibernated) return "hibernated";
+  if (pane.hibernated) return pane.ended ? "ended, can resume" : "hibernated";
   if (!agentKind(pane)) return undefined;
   const state = stateText(pane.agent_status, {
     kind: pane.agent_kind,

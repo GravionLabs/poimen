@@ -405,7 +405,15 @@ pub fn status_text(app: &App) -> (String, String) {
                 .terminal(&p.terminal_id)
                 .is_some_and(|t| t.from_history) =>
         {
-            "ended, history (read-only)".into()
+            if app
+                .model
+                .terminal(&p.terminal_id)
+                .is_some_and(|t| t.hibernated.is_some())
+            {
+                "ended, can resume".into()
+            } else {
+                "ended, history (read-only)".into()
+            }
         }
         Some(p) if p.exited.is_some() => match p.exited {
             Some(Some(code)) => format!("exited with {code}"),

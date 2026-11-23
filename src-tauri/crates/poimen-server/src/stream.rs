@@ -207,6 +207,17 @@ impl TermStream {
         st.read_only = true;
     }
 
+    /// A new process runs in the ended terminal (#1232): attaching is no longer read-only. The
+    /// log goes on; the grid so far is a checkpoint that covers no host record, because the new
+    /// host counts its records from 1 again.
+    pub fn revive(&self) {
+        let mut st = self.lock();
+        st.read_only = false;
+        st.exited = None;
+        st.host_seq = 0;
+        self.checkpoint_locked(&mut st);
+    }
+
     /// Queues a checkpoint of the grid as it is now to the history log (#1194).
     pub fn checkpoint(&self) {
         let mut st = self.lock();
