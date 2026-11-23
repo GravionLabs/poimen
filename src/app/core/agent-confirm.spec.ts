@@ -121,6 +121,9 @@ describe("agent confirmations", () => {
     expect(writeMessage("lead", "start_shell", "web", true)).toBe(
       "lead started a command in web (you allowed it)",
     );
+    expect(writeMessage("lead", "stop_terminal", "web", false)).toBe(
+      "lead stopped a terminal in web",
+    );
   });
 
   it("ignores other events", () => {
