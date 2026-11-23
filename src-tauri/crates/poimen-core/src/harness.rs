@@ -30,6 +30,9 @@ pub struct Harness {
     /// Appended to `command` for a headless one-shot call that prints its answer and exits;
     /// `{prompt}` is replaced inside an element. Empty: the harness cannot be called headless.
     pub print_args: Vec<String>,
+    /// The agent runs a skill typed as `/<skill>` at its prompt (Claude Code, Copilot CLI); the
+    /// palette sends the skills of a repository only to such agents.
+    pub slash_skills: bool,
 }
 
 /// A harness with whether its program was found on the `PATH` of a child.
@@ -59,6 +62,7 @@ pub fn default_harnesses() -> Vec<Harness> {
             exit_input: Some("/exit".into()),
             resume_args: strings(&["--resume", "{session}"]),
             print_args: strings(&["-p", "{prompt}"]),
+            slash_skills: true,
         },
         Harness {
             id: "copilot".into(),
@@ -70,6 +74,7 @@ pub fn default_harnesses() -> Vec<Harness> {
             exit_input: Some("/exit".into()),
             resume_args: strings(&["--resume", "{session}"]),
             print_args: strings(&["-p", "{prompt}"]),
+            slash_skills: true,
         },
     ]
 }
@@ -116,6 +121,11 @@ fn parse_one(id: &str, value: &Value) -> Result<Harness, String> {
         exit_input,
         resume_args: optional_list(obj, "resumeArgs")?,
         print_args: optional_list(obj, "printArgs")?,
+        slash_skills: match obj.get("slashSkills") {
+            None => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return Err("slashSkills must be a boolean".into()),
+        },
     })
 }
 
@@ -248,6 +258,28 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&h[2]).unwrap()["printArgs"][0],
             "--print"
+        );
+    }
+
+    #[test]
+    fn defaults_take_slash_skills_and_a_config_entry_sets_it() {
+        for h in default_harnesses() {
+            assert!(h.slash_skills, "{}", h.id);
+        }
+        let (h, w) = resolved(json!({
+            "claude": {"command": ["claude"]},
+            "other": {"command": ["other"], "slashSkills": true},
+            "plain": {"command": ["plain"]},
+            "bad": {"command": ["bad"], "slashSkills": "yes"}
+        }));
+        assert_eq!(w.len(), 1);
+        assert!(!h[0].slash_skills, "an entry replaces the default");
+        let by_id = |id: &str| h.iter().find(|x| x.id == id).unwrap();
+        assert!(by_id("other").slash_skills);
+        assert!(!by_id("plain").slash_skills);
+        assert_eq!(
+            serde_json::to_value(by_id("other")).unwrap()["slashSkills"],
+            true
         );
     }
 

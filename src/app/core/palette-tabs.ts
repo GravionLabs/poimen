@@ -1,5 +1,5 @@
 /** Where a palette entry comes from; the tabs and the source label in "All" read it. */
-export type PaletteSource = "poimen" | "snippet" | "github" | "project" | "scripts";
+export type PaletteSource = "poimen" | "snippet" | "github" | "project" | "scripts" | "skills";
 
 /** The label of a source: the group heading without a query, the tag with one. */
 export const SOURCE_LABELS: Readonly<Record<PaletteSource, string>> = {
@@ -8,6 +8,7 @@ export const SOURCE_LABELS: Readonly<Record<PaletteSource, string>> = {
   github: "GitHub",
   project: "Project",
   scripts: "Scripts",
+  skills: "Skills",
 };
 
 /** A tab of the palette; `sources` is `null` for All (every source). */
@@ -25,6 +26,7 @@ export const PALETTE_TABS: readonly PaletteTab[] = [
   { id: "commands", label: "Commands", sources: ["poimen", "snippet", "github"] },
   { id: "project", label: "Project", sources: ["project"] },
   { id: "scripts", label: "Scripts", sources: ["scripts"] },
+  { id: "skills", label: "Skills", sources: ["skills"] },
 ];
 
 /** Whether an entry of `source` belongs on `tab`. */

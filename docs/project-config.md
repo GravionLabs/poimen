@@ -107,6 +107,27 @@ own Scripts tab; each is `Script: <name>` with the command line of the script as
 - A script whose name contains a control character is not listed (the command is typed into a terminal).
 - Local spaces only; a remote space shows no detected entries.
 
+## Skills
+
+The skills of the repository are palette entries too, in their own Skills tab; each is
+`Skill: <name>` with the description of the skill. They are detected by `poimen_core::detect::skills`
+and are not commands: nothing runs in a tab.
+
+- Source: `.agents/skills/*/SKILL.md` and `.claude/skills/*/SKILL.md` at the repository root of the
+  focused space. `name` and `description` come from the front matter (plain, quoted or folded
+  text). A skill in both directories is listed once (`.agents/skills` first). A file without a
+  closed front matter, or with a `name` that is empty or has characters other than letters,
+  digits, `.`, `_`, `:` and `-`, is skipped. User skills (`~/.claude/skills`) are not listed:
+  the agent has them in its own `/` menu.
+- Running: sends `/<name>` as a prompt to an agent of the focused space whose harness takes slash
+  skills (`slashSkills` in the `harnesses` registry: `true` for `claude` and `copilot`, a custom
+  harness sets it in `config.json`). With several such agents the agent picker asks, as for a
+  `commands[]` entry with `target: "agent"`; with none a notice says "the space has no agent that
+  runs skills". Skill arguments are not sent.
+- Trust: there is no hash trust; the prompt is sent only on an explicit pick.
+- A `commands[]` entry of the same name does not hide a skill.
+- Local spaces only; a remote space shows no skills.
+
 ## Environment variables
 
 `setup`, `teardown`, `commands[]` and the task command run with these variables:

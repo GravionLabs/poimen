@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts, promptMessage, promptSucceeded } from "./agent-prompt";
+import { parseHarnesses } from "./settings";
 import { agentKind } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { SpaceActions, type TrustDecision, type TrustRequest } from "./space-actions";
@@ -19,6 +20,14 @@ export interface DetectedEntry {
   name: string;
   /** The command line of the script, for the user. */
   description: string;
+}
+
+/** The source of the skills of the repository (`poimen_core::detect::skills`). */
+export const SKILLS_SOURCE = "skills";
+
+/** Whether a detected entry is a skill: it is sent to an agent as `/<name>`, not run. */
+export function isSkill(entry: DetectedEntry): boolean {
+  return entry.source === SKILLS_SOURCE;
 }
 
 /** An entry of the project file picked in the palette (wire shape of `Entry`). */
@@ -116,9 +125,28 @@ export class ProjectEntries {
 
   /** Runs a picked palette entry in space `workspaceId` at `dir`. */
   start(entry: PaletteEntry, workspaceId: string, dir: string): Promise<void> {
-    return "source" in entry
-      ? this.runDetected(entry, workspaceId, dir)
-      : this.run(entry, workspaceId, dir);
+    if (!("source" in entry)) return this.run(entry, workspaceId, dir);
+    return isSkill(entry)
+      ? this.runSkill(entry, workspaceId)
+      : this.runDetected(entry, workspaceId, dir);
+  }
+
+  /**
+   * Sends `/<skill>` to an agent of the space whose harness takes slash skills (`slashSkills` of
+   * the registry); several: the agent picker. An explicit pick only.
+   */
+  async runSkill(entry: DetectedEntry, workspaceId: string): Promise<void> {
+    const harnesses = await this.bridge
+      .invoke<unknown>("get_harnesses")
+      .then(parseHarnesses, () => []);
+    const kinds = new Set(harnesses.filter((h) => h.slashSkills).map((h) => h.id));
+    await this.sendToAgent(
+      `Skill: ${entry.name}`,
+      `/${entry.name}`,
+      workspaceId,
+      (kind) => kinds.has(kind),
+      "the space has no agent that runs skills",
+    );
   }
 
   /** Runs `entry` in space `workspaceId` at `dir`; an untrusted file asks first. */
@@ -164,12 +192,19 @@ export class ProjectEntries {
     }
   }
 
-  private async sendToAgent(label: string, text: string, workspaceId: string): Promise<void> {
-    const agents = this.store
-      .snapshot()
-      .terminals.filter((t) => t.space_id === workspaceId && agentKind(t));
+  private async sendToAgent(
+    label: string,
+    text: string,
+    workspaceId: string,
+    accepts: (kind: string) => boolean = () => true,
+    none = "the space has no agent",
+  ): Promise<void> {
+    const agents = this.store.snapshot().terminals.filter((t) => {
+      const kind = agentKind(t);
+      return t.space_id === workspaceId && kind !== undefined && accepts(kind);
+    });
     if (agents.length === 0) {
-      this.spaces.notify(`${label}: the space has no agent`);
+      this.spaces.notify(`${label}: ${none}`);
       return;
     }
     const target =

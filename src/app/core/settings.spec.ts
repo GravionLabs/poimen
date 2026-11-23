@@ -495,3 +495,14 @@ describe("parseHarnesses printArgs", () => {
     expect(b.printArgs).toEqual([]);
   });
 });
+
+describe("parseHarnesses slashSkills", () => {
+  it("reads whether the agent runs /<skill> and defaults to false", () => {
+    const [a, b, c] = parseHarnesses([
+      { id: "a", slashSkills: true },
+      { id: "b" },
+      { id: "c", slashSkills: "yes" },
+    ]);
+    expect([a.slashSkills, b.slashSkills, c.slashSkills]).toEqual([true, false, false]);
+  });
+});
