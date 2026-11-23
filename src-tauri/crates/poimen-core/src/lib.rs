@@ -18,6 +18,8 @@ pub mod keep_awake;
 pub mod layout;
 pub mod order;
 pub mod project;
+pub mod project_env;
+pub mod project_runner;
 pub mod remote;
 pub mod repos;
 pub mod schemes;

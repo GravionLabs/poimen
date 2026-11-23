@@ -12,6 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::layout::{Layout, TabLayout, parse_layout_value, parse_tabs_value};
+pub use crate::project_env::{SetupPolicy, dir_env, setup_policy_of, workspace_env};
+pub use crate::project_runner::SystemRunner;
 
 /// The project file, relative to the repository root.
 pub const PROJECT_FILE: &str = ".poimen/config.json";
@@ -44,6 +46,7 @@ pub struct Preset {
 pub struct ProjectConfig {
     pub layout: Option<Layout>,
     pub setup: Option<String>,
+    pub setup_policy: SetupPolicy,
     pub teardown: Option<String>,
     pub commands: Vec<ProjectCommand>,
     pub presets: Vec<Preset>,
@@ -115,6 +118,7 @@ pub trait ProcessRunner {
         &self,
         argv: &[String],
         cwd: &Path,
+        env: &std::collections::BTreeMap<String, String>,
         timeout: Duration,
         cap: usize,
     ) -> Result<RunResult, String>;
@@ -142,93 +146,6 @@ pub fn shell_argv(
     argv
 }
 
-/// The real [`ProcessRunner`]: stdin closed, the login-shell `PATH`, stdout and stderr read on
-/// their own threads into one capped buffer, the child killed after `timeout`.
-pub struct SystemRunner;
-
-impl ProcessRunner for SystemRunner {
-    fn run(
-        &self,
-        argv: &[String],
-        cwd: &Path,
-        timeout: Duration,
-        cap: usize,
-    ) -> Result<RunResult, String> {
-        use std::io::Read;
-        use std::process::Stdio;
-        use std::sync::{Arc, Mutex};
-        use std::time::Instant;
-
-        let (program, args) = argv.split_first().ok_or("no command to run")?;
-        let mut child = crate::gui_path::command(program)
-            .args(args)
-            .current_dir(cwd)
-            .env("PATH", crate::gui_path::child_path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("{program} could not be started: {e}"))?;
-        let buffer = Arc::new(Mutex::new((Vec::<u8>::new(), false)));
-        let readers: Vec<_> = [
-            child
-                .stdout
-                .take()
-                .map(|s| Box::new(s) as Box<dyn Read + Send>),
-            child
-                .stderr
-                .take()
-                .map(|s| Box::new(s) as Box<dyn Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|mut stream| {
-            let buffer = Arc::clone(&buffer);
-            std::thread::spawn(move || {
-                let mut chunk = [0u8; 8192];
-                while let Ok(n) = stream.read(&mut chunk) {
-                    if n == 0 {
-                        break;
-                    }
-                    let mut b = buffer.lock().unwrap();
-                    let room = cap.saturating_sub(b.0.len());
-                    b.0.extend_from_slice(&chunk[..n.min(room)]);
-                    if n > room {
-                        b.1 = true;
-                    }
-                }
-            })
-        })
-        .collect();
-        let start = Instant::now();
-        let mut timed_out = false;
-        let status = loop {
-            match child.try_wait().map_err(|e| e.to_string())? {
-                Some(status) => break status,
-                None if start.elapsed() >= timeout => {
-                    timed_out = true;
-                    let _ = child.kill();
-                    break child.wait().map_err(|e| e.to_string())?;
-                }
-                None => std::thread::sleep(Duration::from_millis(10)),
-            }
-        };
-        // A killed shell can leave grandchildren holding the pipes; do not wait for them.
-        if !timed_out {
-            for r in readers {
-                let _ = r.join();
-            }
-        }
-        let b = buffer.lock().unwrap();
-        Ok(RunResult {
-            exit_code: status.code(),
-            timed_out,
-            output: String::from_utf8_lossy(&b.0).into_owned(),
-            truncated: b.1,
-        })
-    }
-}
-
 /// Runs the `teardown` `command` in `worktree` through the user's shell. The caller has passed
 /// `trust::gate`.
 pub fn run_teardown(
@@ -244,7 +161,8 @@ pub fn run_teardown(
         has_pwsh,
         command,
     );
-    runner.run(&argv, worktree, TEARDOWN_TIMEOUT, OUTPUT_CAP)
+    let env = crate::project_env::teardown_env(worktree);
+    runner.run(&argv, worktree, &env, TEARDOWN_TIMEOUT, OUTPUT_CAP)
 }
 
 /// Whether and how the teardown of a repository may run.
@@ -388,6 +306,11 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
             Ok(None) => warn(&mut out, key, format!("no command for {platform}; skipped")),
             Err(e) => warn(&mut out, key, e),
         }
+    }
+
+    match crate::project_env::parse_policy(&data["setupPolicy"]) {
+        Ok(policy) => out.config.setup_policy = policy,
+        Err(e) => warn(&mut out, "setupPolicy", e),
     }
 
     if !data["tasks"].is_null() {
@@ -763,6 +686,7 @@ mod tests {
             &self,
             argv: &[String],
             cwd: &Path,
+            _env: &std::collections::BTreeMap<String, String>,
             t: Duration,
             cap: usize,
         ) -> Result<RunResult, String> {
@@ -792,65 +716,5 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1, wt);
         assert_eq!(calls[0].0.last().map(String::as_str), Some("make down"));
-    }
-
-    #[cfg(unix)]
-    mod process {
-        use super::super::*;
-
-        fn sh(script: &str, timeout_ms: u64, cap: usize) -> RunResult {
-            let argv = shell_argv("linux", Some("/bin/sh"), false, script);
-            SystemRunner
-                .run(
-                    &argv,
-                    Path::new("/tmp"),
-                    Duration::from_millis(timeout_ms),
-                    cap,
-                )
-                .unwrap()
-        }
-
-        #[test]
-        fn captures_stdout_stderr_and_the_exit_code() {
-            let r = sh("echo out; echo err >&2; exit 3", 10_000, 1024);
-            assert_eq!(r.exit_code, Some(3));
-            assert!(!r.timed_out && !r.success());
-            assert!(r.output.contains("out") && r.output.contains("err"));
-        }
-
-        #[test]
-        fn runs_in_the_given_directory() {
-            let r = sh("pwd", 10_000, 1024);
-            assert!(r.success());
-            assert!(r.output.trim().ends_with("tmp"));
-        }
-
-        #[test]
-        fn a_command_over_the_timeout_is_killed() {
-            let r = sh("sleep 30", 200, 1024);
-            assert!(r.timed_out && !r.success());
-            assert_eq!(r.exit_code, None);
-        }
-
-        #[test]
-        fn output_is_capped() {
-            let r = sh("yes x | head -c 5000", 10_000, 100);
-            assert!(r.success());
-            assert_eq!(r.output.len(), 100);
-            assert!(r.truncated);
-        }
-
-        #[test]
-        fn a_missing_program_is_an_error() {
-            let err = SystemRunner
-                .run(
-                    &["/no/such/shell".into()],
-                    Path::new("/tmp"),
-                    Duration::from_secs(1),
-                    10,
-                )
-                .unwrap_err();
-            assert!(err.contains("could not be started"));
-        }
     }
 }
