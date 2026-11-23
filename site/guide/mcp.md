@@ -56,6 +56,7 @@ Terminal output can hold secrets: `read_terminal` shows what the terminal shows,
 | Tool | Parameters | Does |
 | :-- | :-- | :-- |
 | `start_agent` | `harness`, `space?`, `model?`, `prompt?`, `name?`, `worktree?` | Starts a [harness](/guide/agents) (for example `claude`, `copilot`) in a new terminal, in your own space when `space` is absent. With `worktree: {issue, title?, mode?}` or `{branch}` it first creates the task worktree and a new space on it; an existing worktree of that branch is reused unchanged. Returns the terminal, and for a worktree its space, path and branch. |
+| `start_shell` | `command`, `cwd?`, `name?`, `space?`, `env?` | Runs a long-running command, such as the deliver loop (`["node", "deliver-loop.mts", "--milestone", "M005"]`), in a new shell pane. `command` is an argument list, never a shell string; `cwd` defaults to the directory of the space, `space` to your own space. Returns the terminal id. The pane stays after the command ends, so you can read the output with `read_terminal` and `get_terminal` (exit code) and follow the work with `get_events` and `list_runs`. Not for short commands: use your own shell for those. |
 | `prompt_agent` | `terminal`, `text` | Types a prompt into another agent. Refused while that agent is working or blocked. |
 | `report_done` | `outcome`, `summary`, `files?` | Called once by an agent that another agent started: `outcome` is `succeeded`, `failed` or `cancelled`, `summary` at most three sentences. poimen types one line with it into the starting agent as soon as that one is idle, hands it to its `wait_agent`, and closes the run in the [Runs](/guide/runs) view. |
 
@@ -63,7 +64,7 @@ Terminal output can hold secrets: `read_terminal` shows what the terminal shows,
 
 ### Confirmation
 
-- In the **calling agent's own space**, `start_agent` (without `worktree`) and `prompt_agent` just run.
+- In the **calling agent's own space**, `start_agent` (without `worktree`), `start_shell` and `prompt_agent` just run.
 - In **any other space**, and for every **new worktree space**, poimen asks you in the app and waits up to 60 seconds. A declined or unanswered request, or one while the app is not open, is refused.
 - Every write shows in the notification center with the terminal that made it.
 

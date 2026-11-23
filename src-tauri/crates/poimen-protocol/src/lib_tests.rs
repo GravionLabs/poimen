@@ -106,6 +106,11 @@ fn agent_confirmation_wire_shapes() {
     }))
     .unwrap();
     assert_eq!((c.action, c.wait_ms), (AgentWriteAction::PromptAgent, None));
+    let shell: AgentConfirm = serde_json::from_value(json!({
+        "caller_terminal_id": "t1", "action": "start_shell", "space_id": "s2", "text": "node x"
+    }))
+    .unwrap();
+    assert_eq!(shell.action, AgentWriteAction::StartShell);
     assert_eq!(
         serde_json::to_value(ConfirmResult {
             approved: false,

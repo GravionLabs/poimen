@@ -118,6 +118,9 @@ describe("agent confirmations", () => {
     expect(writeMessage("lead", "prompt_agent", "web", false)).toBe(
       "lead prompted an agent in web",
     );
+    expect(writeMessage("lead", "start_shell", "web", true)).toBe(
+      "lead started a command in web (you allowed it)",
+    );
   });
 
   it("ignores other events", () => {
