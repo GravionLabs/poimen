@@ -15,9 +15,12 @@ describe("settings page styles", () => {
     expect(text).toMatch(/:host\(\.settings-root\)\s*\{[^}]*display:\s*flex/);
   });
 
-  it("does not cap the page width, so controls use the space", () => {
+  it("caps the page width with one shared rule, wider for opted-in pages", () => {
     const text = css("src/app/settings-view/settings-view.css");
-    expect(text).not.toMatch(/\.page\s*\{[^}]*max-width/);
+    const page = /\n\.page\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
+    expect(page).toMatch(/max-width:\s*800px/);
+    const wide = /\n\.page\.wide\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
+    expect(wide).toMatch(/max-width:\s*1200px/);
   });
 });
 
