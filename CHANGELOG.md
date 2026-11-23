@@ -5,6 +5,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.34.0] — 2026-11-23
+
+### Bug Fixes
+- **settings**: Refuse a shortcut reset while another action has the default (#1009)
+- **palette**: Keep focus in the input on a tab click (#1099)
+- **app**: Order a draft restore against set on the same lock (#1163)
+- **tabs**: Derive a monogram for any agent kind without one (#1215)
+- **palette**: Skip detected scripts whose name has a control character (#1216)
+- **palette**: Isolate the detected-run test directories and answer detected_entries in the e2e fake (#1216)
+- **ci**: BaseBranchPatterns, the renamed Renovate option (#1242)
+- **palette**: Shift+Delete hides the highlighted detected entry (#1218)
+- **server**: Revive the stream before the new host starts; failed start ends the resume (#1232)
+- Text cannot be copied from the history of an ended terminal (#1233) (#1249)
+- **terminal**: Copy from the history of an ended terminal (#1233)
+- Release/next is red (ci) (#1251) (#1252)
+- Logout ends all terminals, server and hosts share the app's systemd scope (#1231) (#1247)
+- **server**: Start poimen-server in its own systemd scope so logout keeps terminals (#1231)
+
+
+### Features
+- **app**: Read-only file preview tab (#1004) (#1220)
+- **machines**: Open a remote space in VS Code Remote-SSH or Zed (#1005) (#1222)
+- **machines**: Open a remote space in VS Code Remote-SSH or Zed (#1005)
+- **machines**: Disable remote Open in editor for an editor without remote support (#1005)
+- **prompts**: Saved prompts and commands (#1007) (#1223)
+- **settings**: Ghostty theme by name and Kitty colors (#1008) (#1224)
+- **settings**: Record a shortcut in the settings view (#1009) (#1225)
+- **settings**: Record a shortcut in the settings view (#1009)
+- **palette**: Tabs per source in the command palette (#1099) (#1226)
+- **palette**: Tabs per source in the command palette (#1099)
+- **server**: Do not hibernate an agent whose terminal has a prompt draft in the app (#1163) (#1227)
+- **server**: Do not hibernate an agent whose terminal has a prompt draft in the app (#1163)
+- **tabs**: Icon per agent kind on pane tabs (#1215) (#1228)
+- **tabs**: Icon per agent kind on pane tabs (#1215)
+- **project**: Environment variables for setup, teardown and task commands, and wait for setup (#992) (#1219)
+- **palette**: Package.json scripts as detected palette entries (#1216) (#1241)
+- **palette**: Package.json scripts as detected palette entries (#1216)
+- **palette**: Skills of the repository as palette entries (#1217) (#1245)
+- **palette**: Skills of the repository as palette entries (#1217)
+- **settings**: Hide detected palette sources and entries (#1218) (#1246)
+- **settings**: Hide detected palette sources and entries (#1218)
+- **server**: Resume the agent session of a terminal whose host is gone (#1232) (#1248)
+- **server**: Resume the agent session of a terminal whose host is gone (#1232)
+
+
+### Security
+- **ci**: Renovate targets release/next and groups security updates (#1242) (#1243)
+
+
 ## [0.33.0] — 2026-11-22
 
 ### Bug Fixes
@@ -25,6 +74,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **site**: Add the features of 2026-11-21 to the guide (#1179) (#1192)
 - **server**: TerminalHistory setting and log cleanup (#1196) (#1202)
+- Update CHANGELOG.md for v0.33.0 [skip ci]
 
 
 ### Features
