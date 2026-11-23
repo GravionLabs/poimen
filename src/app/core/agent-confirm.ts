@@ -5,7 +5,7 @@ import { NotificationCenter } from "./notification-center";
 import { TauriBridge } from "./tauri";
 
 /** What an agent does through `poimen mcp`. */
-export type AgentWriteAction = "start_agent" | "prompt_agent" | "start_shell";
+export type AgentWriteAction = "start_agent" | "prompt_agent" | "start_shell" | "stop_terminal";
 
 /** An agent asks to write into a space other than its own (`agent.confirm_requested`). */
 export interface ConfirmRequest {
@@ -53,7 +53,9 @@ export function writeMessage(
       ? "started an agent"
       : action === "start_shell"
         ? "started a command"
-        : "prompted an agent";
+        : action === "stop_terminal"
+          ? "stopped a terminal"
+          : "prompted an agent";
   return `${caller} ${what} in ${space}${confirmed ? " (you allowed it)" : ""}`;
 }
 

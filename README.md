@@ -65,6 +65,7 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
 - `start_agent` (`harness`, `space?`, `model?`, `prompt?`, `name?`): a new terminal running a harness of your `harnesses` config.
 - `start_shell` (`command` argv list, `cwd?`, `name?`, `space?`, `env?`): a new terminal that runs a long command (for example the deliver loop); it stays listed after the command ends.
+- `stop_terminal` (`terminal`, `mode?` `interrupt` (default, Ctrl-C) or `close`, `force?`): ends what a terminal runs; answers `ended`, `running` or `gone`. `close` of a terminal with a running agent needs `force`.
 - `prompt_agent` (`terminal`, `text`): types a prompt into the agent of a terminal, refused while it works or waits.
 - `wait_agent` (`terminal`, `timeout_s?`): waits until the agent of a terminal is done, blocked, in error or gone, or the timeout (default 300 s, at most 3600 s) passed; answers with the status and, when blocked, the notification text. Read tool; it includes the agent's report when there is one.
 - `report_done` (`outcome`, `summary`, `files?`): an agent that was started with `start_agent` calls it once at its end (`start_agent` adds a short preamble with this rule to the prompt). poimen stores the report on the terminal, types one line (terminal and outcome) into the starting agent when it is idle (it waits while it works), and the Runs view shows the outcome and summary as the finished run.

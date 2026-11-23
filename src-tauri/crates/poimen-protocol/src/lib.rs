@@ -915,14 +915,14 @@ pub struct WorktreeCreateResult {
     pub created: bool,
 }
 
-/// What an agent writes through `poimen mcp` (ADR 0012, #615): starts an agent in a terminal of the
-/// space, types a prompt into one, or runs a command in a new terminal (`StartShell`, #1181).
+/// What an agent writes through `poimen mcp` (ADR 0012, #615, #1181, #1183).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentWriteAction {
     StartAgent,
     PromptAgent,
     StartShell,
+    StopTerminal,
 }
 
 /// Params of `agent.confirm` (#615): an agent (the terminal `caller_terminal_id`) wants to write
