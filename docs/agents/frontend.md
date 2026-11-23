@@ -91,3 +91,7 @@ Done with a warning (#1152): `agent_tone: "warning"` (only with `done`; `plainTe
 
 New pane dialog (#1185): each type is a `label.type` row (icon, name, muted second line: Terminal "Shell in the space's directory", an agent its `command` plus `statusNote`) around a visually hidden radio, so arrow keys, Tab and screen readers stay native; the selected row (`:has(input:checked)`), hover and `:focus-visible` (on the row) use tokens only; a double click on the row (the label, not the hidden radio) submits the form. In `styles.css`, `dialog.dialog label:has(> input[type="radio"])` has the row layout of checkbox labels for every dialog.
 - Tab width (2026-11-23): `--tab-width` is only the maximum a tab may take (`max-width`); a tab is as wide as its content (`width: auto`), so a short title leaves no empty space after the close button.
+
+## Ended terminal history (#1233)
+
+An ended terminal (host gone, #1195) arrives as a snapshot and a `closed` record with `code: "exited"`; `TerminalView` sets `ended`, keeps the xterm grid and its scrollback, and takes the focus so Ctrl+Shift+C / the Edit menu `copy` event reach it. Only then does a right click open the one-entry Copy menu (`copy-menu.ts`, disabled without a selection). A running terminal keeps the webview's own menu. Spec: `terminal-view-ended.spec.ts` (a separate file because `terminal-view.spec.ts` is at its line baseline).
