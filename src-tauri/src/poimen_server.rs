@@ -11,12 +11,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use poimen_client::protocol::{CHANNEL, Channel};
@@ -28,6 +23,7 @@ use crate::backend::Outcome;
 pub const START_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 use crate::gui_path;
+mod systemd_scope;
 
 /// This build's server program: `poimen-server`, on rc `poimen-server-rc` (the sidecar of the rc
 /// bundle, `tauri.rc.conf.json`), so a stable and an rc installation never start each other's.
@@ -505,30 +501,7 @@ impl Runner for SystemRunner {
         // Own process group, no terminal, no pipes, never waited on: the server outlives poimen.
         let staged = prepare_here(program);
         let program = staged.as_ref().map_or(program, |s| s.program.as_path());
-        let command = |flags: u32| {
-            let mut command = gui_path::command(program);
-            if !cfg!(windows) {
-                command.env("PATH", gui_path::child_path());
-            }
-            command
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            #[cfg(unix)]
-            {
-                let _ = flags;
-                command.process_group(0);
-            }
-            #[cfg(windows)]
-            command.creation_flags(flags);
-            command
-        };
-        let mut child = spawn_breaking_away(|flags| command(flags).spawn())?;
-        // Reap it if it exits (a second server exits at once); it is never killed.
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        Ok(())
+        systemd_scope::spawn_detached(program)
     }
 
     fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {

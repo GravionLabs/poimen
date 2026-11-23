@@ -18,7 +18,7 @@ src-tauri/src/github_issues.rs	1396
 src-tauri/src/lib.rs	3612
 src-tauri/src/machines.rs	1938
 src-tauri/src/poimen_backend.rs	2502
-src-tauri/src/poimen_server.rs	1319
+src-tauri/src/poimen_server.rs	1292
 src-tauri/src/settings.rs	2324
 src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1045
