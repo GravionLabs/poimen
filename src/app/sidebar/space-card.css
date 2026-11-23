@@ -577,3 +577,10 @@
     inset 3px 0 0 transparent,
     inset 7px 0 0 var(--h-primary-color);
 }
+
+/* The space name reads like the group label of its tabs (`tab-bar.css` `.group`). */
+.title .name {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
