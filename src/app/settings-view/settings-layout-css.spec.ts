@@ -18,9 +18,9 @@ describe("settings page styles", () => {
   it("caps the page width with one shared rule, wider for opted-in pages", () => {
     const text = css("src/app/settings-view/settings-view.css");
     const page = /\n\.page\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
-    expect(page).toMatch(/max-width:\s*var\(--settings-page-width,\s*800px\)/);
+    expect(page).toMatch(/max-width:\s*800px/);
     const wide = /\n\.page\.wide\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
-    expect(wide).toMatch(/max-width:\s*var\(--settings-page-width-wide,\s*1200px\)/);
+    expect(wide).toMatch(/max-width:\s*1200px/);
   });
 });
 
