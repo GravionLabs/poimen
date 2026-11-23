@@ -12,6 +12,7 @@ mod changes_git;
 mod commit_message;
 mod deliver;
 mod deliver_command;
+mod deliver_start;
 mod editor;
 mod file_preview;
 mod git_sync;
@@ -1824,23 +1825,6 @@ async fn project_teardown(dir: String) -> Result<project::TeardownReport, String
     .map_err(|e| e.to_string())?
 }
 
-/// Opens the tab `name` in a space and runs `command` in it (a task mode without a worktree).
-/// The command comes from the webview (already expanded by `task_plan`) because the frontend is
-/// the only caller; like the `command` of `create_space` it is not a surface for other clients.
-#[tauri::command]
-async fn task_tab(
-    backend: State<'_, Shared>,
-    space_id: String,
-    dir: String,
-    name: String,
-    command: String,
-) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        task_start::start_tab(b, &space_id, &dir, &name, &command)
-    })
-    .await
-}
-
 /// The task modes for the repository of `dir` (the user's `tasks` in config.json with the trusted
 /// project file's `tasks` merged over them); without `dir` only the user's.
 #[tauri::command]
@@ -2772,7 +2756,7 @@ pub fn run() {
             pr_worktree,
             worktree_branches,
             task_plan,
-            task_tab,
+            task_start::task_tab,
             task_cleanup,
             project_teardown,
             get_color_schemes,
@@ -2822,6 +2806,8 @@ pub fn run() {
             tokens_watch,
             tokens_unwatch,
             deliver_command::deliver_watch,
+            deliver_start::deliver_plan,
+            deliver_start::deliver_start,
             file_preview::preview_read,
             file_preview::preview_watch,
             file_preview::preview_unwatch,

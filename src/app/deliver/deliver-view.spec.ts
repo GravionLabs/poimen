@@ -11,7 +11,8 @@ import { tauri } from "../core/tauri.mock";
 import { UI_STATE_KEY, UI_STORAGE, UiState } from "../core/ui-state";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
-import { Deliver, loopPane, milestoneNumber } from "./deliver";
+import { Deliver, loopPane } from "./deliver";
+import { DeliverLauncher } from "./deliver-launcher";
 import { Overview } from "./overview";
 import { DeliverView, linkLabel, prLabel, stepText } from "./deliver-view";
 import { cardsOf, type DeliverCard, type DeliverRead, type DeliverStatus } from "./deliver-status";
@@ -118,7 +119,7 @@ describe("Runs view", () => {
     );
     const empty = text(el.querySelector("[data-testid=empty]"));
     expect(empty).toContain(".agents/events/<run>.jsonl");
-    expect(empty).toContain("Start task");
+    expect(empty).toContain("Deliver milestone");
     expect(el.querySelectorAll("[data-testid=group]")).toHaveLength(0);
     expect(el.querySelector("[data-testid=needs-you]")).toBeNull();
   });
@@ -151,8 +152,8 @@ describe("Runs view", () => {
     expect(focus.classList).toContain("primary");
     focus.click();
     expect(chosen).toEqual(["t7"]);
-    // A running loop is not started again.
-    expect(group!.querySelector("[data-testid=start]")).toBeNull();
+    // A running loop has the action too: its dialog refuses a second start (#746).
+    expect(group!.querySelector("[data-testid=start]")).not.toBeNull();
     expect(el.querySelector("[data-testid=history]")).toBeNull();
   });
 
@@ -312,24 +313,33 @@ describe("Runs view", () => {
     ]);
   });
 
-  it("offers Start loop once per milestone group, only while none of its runs runs", async () => {
-    tauri.answer("task_plan", () => {
-      throw new Error("no task mode named deliver-loop");
-    });
+  it("offers Deliver milestone once per local milestone group and opens the dialog (#746)", async () => {
+    tauri.answer("github_milestones", () => [
+      {
+        root: "/s",
+        repo: "o/s",
+        status: "ok",
+        milestones: [{ title: "M4 (0.2.0)" }, { title: "Roadmap" }],
+      },
+    ]);
     const { el, deliver, show } = await render();
     deliver.apply("/r", FOUR);
-    deliver.apply("/s", events("milestone", "session"));
+    deliver.apply("/s", events("milestone"));
     deliver.now.set(AT);
     await show();
     const starts = [...el.querySelectorAll<HTMLButtonElement>("[data-testid=start]")];
-    expect(starts).toHaveLength(1);
-    expect(starts[0]!.closest("[data-testid=group]")!.textContent).toContain("M014.1 Runs view");
-    starts[0]!.click();
-    await vi.waitFor(() => expect(tauri.calls("task_plan")).toHaveLength(1));
-    expect(tauri.calls("task_plan")[0]).toMatchObject({
-      repoDir: "/r",
-      mode: "deliver-loop",
-      issue: { nr: 14, title: "M014.1 Runs view" },
+    // The group of a running loop has the action too: the dialog refuses a second start.
+    expect(starts).toHaveLength(2);
+    expect(starts[0]!.textContent).toContain("Deliver milestone");
+    const mine = starts.find((b) =>
+      b.closest("[data-testid=group]")!.textContent!.includes("M4 Deliver loop"),
+    )!;
+    mine.click();
+    const launcher = TestBed.inject(DeliverLauncher);
+    await vi.waitFor(() => expect(launcher.opened()).not.toBeNull());
+    expect(launcher.opened()).toMatchObject({
+      root: "/s",
+      target: { kind: "milestone", name: "M4" },
     });
   });
 
@@ -611,12 +621,10 @@ describe("remote runs (#692)", () => {
     deliver.apply("/remote", events("session"), "box");
     await deliver.watch(["/a"]);
     expect(deliver.cards().map((c) => c.root)).toEqual(["/a", "/remote"]);
-    expect(await deliver.startLoop(MILESTONE_STATUS(), "/remote", "box")).toBe(false);
+    // A remote run has no start action and no launcher state of this Mac (#746).
+    expect(deliver.activeLoop("/remote")).toBeUndefined();
   });
 });
-
-const MILESTONE_STATUS = (): DeliverStatus =>
-  (cardsOf("/r", events("milestone"))[0]!.state as { status: DeliverStatus }).status;
 
 describe("helpers", () => {
   const pane = (id: string, cwd: string, agent?: string): Terminal =>
@@ -632,14 +640,6 @@ describe("helpers", () => {
     expect(loopPane(panes, "/src/skills", "claude")).toBe("loop");
     expect(loopPane(panes, "/src/skills", "codex")).toBe("other");
     expect(loopPane([panes[0], panes[3]], "/src/skills", "claude")).toBeUndefined();
-  });
-
-  it("reads the milestone number of a subject: the M<n> name, else the #<number> of the id", () => {
-    expect(milestoneNumber({ id: "M5", title: "t" })).toBe(5);
-    expect(milestoneNumber({ id: "M5.1", title: "t" })).toBe(5);
-    expect(milestoneNumber({ id: "o/r#12", title: "M7 Roadmap" })).toBe(7);
-    expect(milestoneNumber({ id: "o/r#12", title: "Roadmap" })).toBe(12);
-    expect(milestoneNumber({ id: "x", title: "y" })).toBe(0);
   });
 
   it("names a link by its title, a pull request number or its rel", () => {

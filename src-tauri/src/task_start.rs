@@ -15,6 +15,23 @@ pub fn start_tab(
     crate::project::start_tab(backend, space_id, dir, name, command)
 }
 
+/// Opens the tab `name` in a space and runs `command` in it (a task mode without a worktree).
+/// The command comes from the webview (already expanded by `task_plan`) because the frontend is
+/// the only caller; like the `command` of `create_space` it is not a surface for other clients.
+#[tauri::command]
+pub async fn task_tab(
+    backend: tauri::State<'_, crate::Shared>,
+    space_id: String,
+    dir: String,
+    name: String,
+    command: String,
+) -> Result<(), String> {
+    crate::on_backend(backend.inner(), move |b| {
+        start_tab(b, &space_id, &dir, &name, &command)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

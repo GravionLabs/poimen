@@ -102,6 +102,17 @@ describe("CommandPalette", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("offers Deliver milestone… for a local pane and not for a pane on a machine (#746)", () => {
+    const titles = () => palette.items().map((i) => i.title);
+    palette.open();
+    expect(titles()).toContain("Deliver milestone…");
+    const local = palette.activePane();
+    vi.spyOn(palette, "activePane").mockReturnValue({ ...local!, machine: "box" });
+    // The list is a computed over its sources: a changed active tab recomputes it.
+    active.set("w1:p2");
+    expect(titles()).not.toContain("Deliver milestone…");
+  });
+
   describe("tabs", () => {
     const entries = (commands: string[], presets: string[] = []) => {
       tauri.answer("project_entries", () => ({
