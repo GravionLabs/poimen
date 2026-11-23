@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   linkedSignal,
+  signal,
   untracked,
   output,
 } from "@angular/core";
@@ -17,6 +18,9 @@ import { eventTime, toneStyle } from "../bottom-panel/run-events";
 import { errorText, type GhError } from "../github/pulls";
 import { compactTotal, totalsTip } from "../core/token-totals";
 import { Deliver } from "./deliver";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups, type MenuGroup } from "../ui/context-menu/menu-model";
+import { rowName, type Terminal } from "../core/snapshot";
 import { DeliverLauncher } from "./deliver-launcher";
 import { milestoneName } from "./deliver-start";
 import { OVERVIEW_REFRESH_MS, Overview } from "./overview";
@@ -103,7 +107,7 @@ export function lineCounts(line: TimelineLine): string[] {
  */
 @Component({
   selector: "app-deliver-view",
-  imports: [LoadingRows, NgTemplateOutlet, HxButton],
+  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -132,6 +136,13 @@ export class DeliverView {
   protected readonly lineCounts = lineCounts;
   /** The terminal of a run was asked for. */
   readonly paneChosen = output<string>();
+
+  /** The menu of the terminals of a task that has more than one (a retry), at the click. */
+  protected readonly taskMenu = signal<{
+    x: number;
+    y: number;
+    terminals: Terminal[];
+  } | null>(null);
 
   constructor() {
     // The overview follows every run event of the open repositories and is read again at least
@@ -221,6 +232,38 @@ export class DeliverView {
   /** The terminal of a group's running run, else of its newest run. */
   protected paneOf(group: RunGroup): string | undefined {
     return this.deliver.paneOf((this.running(group) ?? group.runs[0]!).card);
+  }
+
+  /** The terminals poimen started for a task of a run, newest first (#745). */
+  protected terminalsOf(run: GroupRun, task: string): Terminal[] {
+    return this.deliver.terminalsOfTask(run.card, task);
+  }
+
+  /** One terminal: focus it. Several: open the menu of them, newest first. */
+  protected showTerminal(event: MouseEvent, terminals: readonly Terminal[]): void {
+    if (terminals.length === 1) this.paneChosen.emit(terminals[0]!.terminal_id);
+    else if (terminals.length > 1) {
+      this.taskMenu.set({
+        x: event.clientX,
+        y: event.clientY,
+        terminals: [...terminals],
+      });
+    }
+  }
+
+  protected taskMenuGroups(terminals: readonly Terminal[]): MenuGroup[] {
+    return plainGroups(
+      terminals.map((t) => ({
+        id: t.terminal_id,
+        label: `${rowName(t)} · ${t.agent_status}`,
+        testId: "task-terminal-entry",
+      })),
+    );
+  }
+
+  protected chooseTaskTerminal(id: string): void {
+    this.taskMenu.set(null);
+    this.paneChosen.emit(id);
   }
 
   protected step(step: Step): { n: number; total: number } | null {
