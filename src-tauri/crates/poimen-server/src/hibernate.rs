@@ -116,6 +116,8 @@ impl Shared {
                 if entry.info.hibernated.is_some()
                     || entry.osc.is_some()
                     || entry.stream.has_controller()
+                    // Text in the app's prompt bar is not input to the terminal (#1163).
+                    || entry.stream.has_draft()
                 {
                     continue;
                 }

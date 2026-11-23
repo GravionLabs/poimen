@@ -82,3 +82,94 @@
   border-radius: 3px;
   font-size: 0.8rem;
 }
+
+/* Nested rows (split, terminal, place): flex rows that use the full width, labels fully visible. */
+.layout-form .pane-grid .leaf,
+.layout-form .pane-grid .place,
+.layout-form .pane-grid .split-node > .pane-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  grid-column: 1 / -1;
+  gap: 8px 12px;
+}
+
+.layout-form .pane-grid .leaf .field,
+.layout-form .pane-grid .place .field,
+.layout-form .pane-grid .split-node .field {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.layout-form .pane-grid .leaf .field > span,
+.layout-form .pane-grid .place .field > span,
+.layout-form .pane-grid .split-node .field > span {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  white-space: nowrap;
+}
+
+.layout-form .pane-grid .leaf .field.grow {
+  flex: 2 1 14rem;
+}
+
+.layout-form .pane-grid .split-node .field.ratio,
+.layout-form .pane-grid .place .field.ratio {
+  flex: 0 0 6rem;
+}
+
+.layout-form .pane-grid .place .field:has(input[type="checkbox"]) {
+  flex: 0 0 auto;
+}
+
+.layout-form .pane-grid .split-node .field:has(select) {
+  flex: 0 1 12rem;
+}
+
+.layout-form .pane-grid .leaf .actions {
+  margin-left: auto;
+  align-self: flex-end;
+}
+
+.layout-form .pane-grid .split-node {
+  grid-column: 1 / -1;
+}
+
+.layout-form .pane-grid .leaf .actions,
+.layout-form .pane-grid .split-node .actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.layout-form .pane-grid .field input[type="text"],
+.layout-form .pane-grid .field select,
+.layout-form .pane-grid .field.ratio input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.layout-form .pane-grid .leaf .field,
+.layout-form .pane-grid .place .field,
+.layout-form .pane-grid .split-node .field {
+  align-items: stretch;
+  text-align: left;
+}
+
+.layout-form .pane-grid .split-node > .pane-fields .field {
+  flex: 0 0 12rem;
+}
+
+.layout-form .pane-grid .split-node > .pane-fields .field.ratio {
+  flex: 0 0 6rem;
+}
+
+.layout-form .pane-grid .place .field:has(input[type="checkbox"]) {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}

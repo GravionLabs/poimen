@@ -194,6 +194,15 @@ impl Backend for FakeBackend {
         self.record(format!("input {terminal_id} {text}")).map(drop)
     }
 
+    fn send_text(&self, terminal_id: &str, text: &str) -> Result<(), String> {
+        self.record(format!("text {terminal_id} {text}")).map(drop)
+    }
+
+    fn terminal_draft(&self, terminal_id: &str, draft: bool) -> Result<(), String> {
+        self.record(format!("draft {terminal_id} {draft}"))
+            .map(drop)
+    }
+
     fn agent_start(
         &self,
         terminal_id: &str,

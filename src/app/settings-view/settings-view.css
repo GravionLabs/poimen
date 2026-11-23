@@ -1,4 +1,5 @@
-:host {
+/* Only the settings view itself is the flex shell; the pages that share this file keep a block host. */
+:host(.settings-root) {
   display: flex;
   flex: 1;
   min-height: 0;
@@ -129,7 +130,6 @@
 }
 
 .page {
-  max-width: 720px;
   padding: 8px 24px 32px;
 }
 
@@ -167,6 +167,7 @@ h3 {
 }
 
 .hint {
+  max-width: 80ch;
   margin: 8px 0;
   font-size: 12px;
   color: var(--h-text-muted-color);

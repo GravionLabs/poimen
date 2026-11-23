@@ -1,6 +1,25 @@
 //! Input and resize of a terminal: who may send them and when a terminal cannot take them.
 
+use poimen_protocol::TerminalSetDraft;
+
 use super::*;
+
+/// The requests of a connection about the terminal it is attached to.
+pub(super) const METHODS: [&str; 3] = ["terminal.input", "terminal.resize", "terminal.set_draft"];
+
+/// Handles one of [`METHODS`].
+pub(super) fn dispatch(
+    method: &str,
+    shared: &Shared,
+    request: &Request,
+    ctx: Option<&Attachment>,
+) -> ApiResult {
+    match method {
+        "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
+        "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
+        _ => terminal_set_draft(parsed(request)?, ctx),
+    }
+}
 
 pub(super) fn running_host<'a>(
     entry: &'a mut TerminalEntry,
@@ -42,11 +61,7 @@ fn authorize(
     }
 }
 
-pub(super) fn terminal_input(
-    shared: &Shared,
-    p: TerminalInput,
-    ctx: Option<&Attachment>,
-) -> ApiResult {
+fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -> ApiResult {
     // The write may block on a full PTY; do it outside the global lock.
     let writer = {
         let mut inner = lock(&shared.inner);
@@ -67,11 +82,7 @@ pub(super) fn terminal_input(
     Ok(json!({}))
 }
 
-pub(super) fn terminal_resize(
-    shared: &Shared,
-    p: TerminalResize,
-    ctx: Option<&Attachment>,
-) -> ApiResult {
+fn terminal_resize(shared: &Shared, p: TerminalResize, ctx: Option<&Attachment>) -> ApiResult {
     if p.cols == 0 || p.rows == 0 {
         return Err((
             ErrorCode::InvalidParams,
@@ -88,5 +99,21 @@ pub(super) fn terminal_resize(
     entry.info.rows = p.rows;
     entry.stream.resized(p.cols, p.rows);
     shared.persist(&inner);
+    Ok(json!({}))
+}
+
+/// `terminal.set_draft`: the attached connection holds (or drops) an unsent prompt draft; the
+/// server does not hibernate the terminal meanwhile (#1163). The draft is memory only and ends
+/// with the attachment.
+fn terminal_set_draft(p: TerminalSetDraft, ctx: Option<&Attachment>) -> ApiResult {
+    let attached = ctx
+        .filter(|a| a.terminal_id == p.terminal_id)
+        .ok_or_else(|| {
+            (
+                ErrorCode::InvalidRequest,
+                format!("this connection is not attached to {}", p.terminal_id),
+            )
+        })?;
+    attached.stream.set_draft(attached.client_id, p.draft);
     Ok(json!({}))
 }

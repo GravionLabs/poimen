@@ -104,6 +104,30 @@ export function checkLabel(id: string): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./machines-page.html",
   styles: `
+    :host {
+      display: block;
+    }
+    .hint {
+      max-width: 80ch;
+      margin: 8px 0;
+      font-size: 12px;
+      color: var(--h-text-muted-color);
+    }
+    .rows {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .row-item {
+      padding: 8px 0;
+      align-items: center;
+    }
+    .row-item + .row-item {
+      border-top: 1px solid var(--h-content-border-color);
+    }
+    .name {
+      font-weight: 600;
+    }
     .toolbar {
       margin: 8px 0;
     }

@@ -14,7 +14,7 @@ describe("settings categories", () => {
     );
     expect(tree).toEqual({
       "Appearance & Behavior": ["Appearance"],
-      Workspace: ["Explorer", "Templates", "Layouts", "Trusted projects"],
+      Workspace: ["Explorer", "Templates", "Layouts", "Snippets", "Keyboard", "Trusted projects"],
       Backend: ["Server", "Machines", "Agents"],
       General: ["Export & import"],
     });
@@ -29,7 +29,7 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(9);
+    expect(allPages()).toHaveLength(11);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {

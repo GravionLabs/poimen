@@ -1,4 +1,6 @@
-import { Injectable, inject } from "@angular/core";
+import { Injectable, inject, signal } from "@angular/core";
+import { joinPath } from "./path";
+import { splitId } from "./snapshot";
 import { SpaceActions } from "./space-actions";
 import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
@@ -7,12 +9,6 @@ import { TauriBridge } from "./tauri";
 export interface EditorPosition {
   line?: number;
   column?: number;
-}
-
-/** The path `file` (relative to `dir`, or absolute as it is) as one path, with `/` between the parts. */
-export function joinPath(dir: string, file: string): string {
-  if (/^([\\/]|[A-Za-z]:[\\/])/.test(file)) return file;
-  return `${dir.replace(/[\\/]+$/, "")}/${file.replace(/^[\\/]+/, "")}`;
 }
 
 /**
@@ -25,6 +21,26 @@ export class ExternalEditor {
   private readonly bridge = inject(TauriBridge);
   private readonly actions = inject(SpaceActions);
   private readonly store = inject(SpacesStore);
+
+  private readonly _remoteBlock = signal<string | null>(null);
+  /** Why a space of a machine cannot be opened (the editor has no remote support); `null` when it can. */
+  readonly remoteBlock = this._remoteBlock.asReadonly();
+
+  /** Reads whether the editor of the setting can open a remote space (#1005); the setting is a file. */
+  async refreshRemote(): Promise<void> {
+    try {
+      await this.bridge.invoke("open_in_editor", {
+        path: "/",
+        line: null,
+        column: null,
+        machine: null,
+        probe: true,
+      });
+      this._remoteBlock.set(null);
+    } catch (e) {
+      this._remoteBlock.set(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async open(path: string, position: EditorPosition = {}): Promise<boolean> {
     try {
@@ -46,9 +62,32 @@ export class ExternalEditor {
     else this.actions.notify("Open in editor: there is no active tab");
   }
 
-  /** The entry of a space's menu: the directory of the (local) space. */
+  /**
+   * The entry of a space's menu: the directory of the space. A space of a machine (qualified id)
+   * opens over ssh in VS Code Remote-SSH or Zed (#1005); the menu disables the entry while the
+   * machine is not connected.
+   */
   openSpace(spaceId: string): void {
-    const cwd = this.store.snapshot().spaces.find((s) => s.space_id === spaceId)?.cwd;
+    const { machine, id } = splitId(spaceId);
+    if (machine !== undefined) {
+      const cwd = this.store.all().spaces.find((s) => s.space_id === spaceId)?.cwd;
+      if (cwd) void this.openRemote(machine, cwd);
+      return;
+    }
+    const cwd = this.store.snapshot().spaces.find((s) => s.space_id === id)?.cwd;
     if (cwd) void this.open(cwd);
   }
+
+  /** Opens `path` on `machine` (VS Code Remote-SSH or Zed); a failure is a notice. */
+  async openRemote(machine: string, path: string): Promise<boolean> {
+    try {
+      await this.bridge.invoke("open_in_editor", { path, line: null, column: null, machine });
+      return true;
+    } catch (e) {
+      this.actions.notify(`Open in editor: ${e instanceof Error ? e.message : String(e)}`, "error");
+      return false;
+    }
+  }
 }
+
+export { joinPath };

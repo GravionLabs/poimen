@@ -413,7 +413,7 @@
 
 .row.active .name,
 .row.active .text,
-.row.active .icon:not(.agent),
+.row.active .icon,
 .row.active .state-idle {
   color: var(--h-text-color);
 }
@@ -440,24 +440,7 @@
 }
 
 .icon {
-  flex: none;
-  box-sizing: border-box;
-  min-width: 20px;
-  height: 16px;
-  padding: 0 2px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--h-text-muted-color) 16%, transparent);
   color: var(--h-text-muted-color);
-  font:
-    600 10px/14px ui-monospace,
-    monospace;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.icon.agent {
-  background: var(--h-highlight-background);
-  color: var(--h-highlight-color);
 }
 
 .host-hint {
@@ -593,4 +576,11 @@
   box-shadow:
     inset 3px 0 0 transparent,
     inset 7px 0 0 var(--h-primary-color);
+}
+
+/* The space name reads like the group label of its tabs (`tab-bar.css` `.group`). */
+.title .name {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
 }

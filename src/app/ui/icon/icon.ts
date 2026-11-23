@@ -30,6 +30,14 @@ const STROKES = {
   runs: ["M6 3l14 9-14 9z"],
   space: ["M3 3h7v9H3z", "M14 3h7v5h-7z", "M14 12h7v9h-7z", "M3 16h7v5H3z"],
   changes: ["M12 3v14", "M5 10h14", "M5 21h14"],
+  // Lucide "file-text": a file preview (#1004).
+  preview: [
+    "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z",
+    "M14 2v4a2 2 0 0 0 2 2h4",
+    "M10 9H8",
+    "M16 13H8",
+    "M16 17H8",
+  ],
   flow: [
     "M5 3h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
     "M7 11v4a2 2 0 0 0 2 2h4",
@@ -46,6 +54,11 @@ const STROKES = {
     "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   ],
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
+  // Lucide "lock": a read-only pane.
+  lock: [
+    "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
+    "M7 11V7a5 5 0 0 1 10 0v4",
+  ],
   // Lucide "bot": an agent.
   agent: [
     "M12 8V4H8",
@@ -57,7 +70,15 @@ const STROKES = {
   ],
 } as const;
 
-export type IconName = keyof typeof PATHS | keyof typeof STROKES;
+/** A monogram badge of an agent kind (#1215): `agent:Cc`, a rounded square with one or two letters. */
+export type AgentBadgeName = `agent:${string}`;
+
+export type IconName = keyof typeof PATHS | keyof typeof STROKES | AgentBadgeName;
+
+/** The badge icon of a monogram. */
+export function agentBadge(monogram: string): AgentBadgeName {
+  return `agent:${monogram}`;
+}
 
 /**
  * An icon in the colour of its surroundings. Decorative (hidden from assistive technology) unless
@@ -93,6 +114,10 @@ export class Icon {
   /** The accessible name and tooltip; without it the icon is decorative. */
   @Input() label?: string;
   @Input() size = 18;
+
+  protected get monogram(): string | null {
+    return this.name.startsWith("agent:") ? this.name.slice(6) : null;
+  }
 
   protected get path(): string {
     return this.name in PATHS ? PATHS[this.name as keyof typeof PATHS] : "";

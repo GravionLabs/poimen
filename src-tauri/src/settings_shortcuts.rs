@@ -154,3 +154,109 @@ pub(crate) fn resolve_shortcuts(
     }
     out
 }
+
+/// Returns `text` with the one entry `shortcuts.<action>` changed, touching nothing else. `None`
+/// resets the action (removes the entry, so the default applies), `Some("")` unbinds it, any other
+/// text is validated like the loader does (a modifier is needed) and refused when another action
+/// has it already. An action that already has the effective value leaves the text unchanged.
+pub fn set_shortcut_text(
+    text: &str,
+    action: &str,
+    accelerator: Option<&str>,
+) -> Result<String, String> {
+    use poimen_core::settings::{remove_path_text, set_path_text};
+    if !ACTIONS.iter().any(|(id, _)| *id == action) {
+        return Err(format!("{action} is not a known shortcut action"));
+    }
+    let path = ["shortcuts", action];
+    match accelerator {
+        None => {
+            let default = ACTIONS
+                .iter()
+                .find(|(id, _)| *id == action)
+                .map(|(_, d)| *d);
+            let current = super::resolve(Some(text), || None).shortcuts;
+            if let Some((other, _)) = current
+                .iter()
+                .find(|(id, v)| *id != action && Some(v.as_str()) == default)
+            {
+                return Err(format!(
+                    "{} is already used by {other}",
+                    default.unwrap_or_default()
+                ));
+            }
+            remove_path_text(text, &path)
+        }
+        Some(a) if a.trim().is_empty() => set_path_text(text, &path, "\"\""),
+        Some(a) => {
+            let acc = normalize_accelerator(a).ok_or_else(|| {
+                format!("\"{a}\" is not a valid shortcut (it needs Cmd, Ctrl or Alt, or is a function key)")
+            })?;
+            let current = super::resolve(Some(text), || None).shortcuts;
+            if let Some((other, _)) = current.iter().find(|(id, v)| *id != action && **v == acc) {
+                return Err(format!("{acc} is already used by {other}"));
+            }
+            set_path_text(text, &path, &Value::String(acc).to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn shortcuts(text: &str) -> BTreeMap<String, String> {
+        super::super::resolve(Some(text), || None).shortcuts
+    }
+
+    #[test]
+    fn set_writes_only_that_entry_and_keeps_the_rest() {
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}\n";
+        let out = set_shortcut_text(text, "newTerminal", Some("cmd+shift+n")).unwrap();
+        assert!(
+            out.contains("// keep") && out.contains("\"theme\": \"dark\""),
+            "{out}"
+        );
+        let v: Value = serde_json::from_str(&out.replace("// keep", "")).unwrap();
+        assert_eq!(v["shortcuts"], json!({ "newTerminal": "Cmd+Shift+N" }));
+    }
+
+    #[test]
+    fn a_second_entry_keeps_the_first() {
+        let a = set_shortcut_text("{}", "newTerminal", Some("Ctrl+Alt+N")).unwrap();
+        let b = set_shortcut_text(&a, "closeTab", Some("Ctrl+Alt+X")).unwrap();
+        let s = shortcuts(&b);
+        assert_eq!(
+            (s["newTerminal"].as_str(), s["closeTab"].as_str()),
+            ("Ctrl+Alt+N", "Ctrl+Alt+X")
+        );
+    }
+
+    #[test]
+    fn a_shortcut_without_a_modifier_or_a_taken_one_is_refused() {
+        assert!(set_shortcut_text("{}", "newTerminal", Some("N")).is_err());
+        assert!(set_shortcut_text("{}", "newTerminal", Some("Shift+N")).is_err());
+        let err = set_shortcut_text("{}", "newTerminal", Some("CmdOrCtrl+W")).unwrap_err();
+        assert!(err.contains("closeTab"), "{err}");
+        assert!(set_shortcut_text("{}", "nope", Some("Ctrl+N")).is_err());
+        // A function key needs no modifier, like the loader.
+        assert!(set_shortcut_text("{}", "newTerminal", Some("F5")).is_ok());
+    }
+
+    #[test]
+    fn clear_unbinds_and_reset_restores_the_default() {
+        let cleared = set_shortcut_text("{}", "closeTab", Some("")).unwrap();
+        assert_eq!(shortcuts(&cleared)["closeTab"], "");
+        // The freed accelerator can go to another action.
+        let moved = set_shortcut_text(&cleared, "newTerminal", Some("CmdOrCtrl+W")).unwrap();
+        assert_eq!(shortcuts(&moved)["newTerminal"], "CmdOrCtrl+W");
+        let reset = set_shortcut_text(&cleared, "closeTab", None).unwrap();
+        assert_eq!(shortcuts(&reset)["closeTab"], "CmdOrCtrl+W");
+        assert_eq!(set_shortcut_text("{}", "closeTab", None).unwrap(), "{}");
+        // Reset is refused while another action holds the default.
+        let taken = set_shortcut_text(&cleared, "newTerminal", Some("CmdOrCtrl+W")).unwrap();
+        let err = set_shortcut_text(&taken, "closeTab", None).unwrap_err();
+        assert!(err.contains("newTerminal"), "{err}");
+    }
+}

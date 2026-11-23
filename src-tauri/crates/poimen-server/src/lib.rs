@@ -1222,8 +1222,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.report_done" => reports::terminal_report_done(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
         "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
-        "terminal.input" => input::terminal_input(shared, parsed(request)?, ctx),
-        "terminal.resize" => input::terminal_resize(shared, parsed(request)?, ctx),
+        m if input::METHODS.contains(&m) => input::dispatch(m, shared, request, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
     }
 }

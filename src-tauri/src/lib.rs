@@ -11,7 +11,9 @@ mod changes_files;
 mod changes_git;
 mod commit_message;
 mod deliver;
+mod deliver_command;
 mod editor;
+mod file_preview;
 mod git_sync;
 mod github_branches;
 mod github_issues;
@@ -34,7 +36,10 @@ mod server_install;
 mod server_paths;
 mod settings;
 mod settings_transfer;
+mod settings_write;
+mod snippets;
 mod spaces;
+mod stream_commands;
 mod task_start;
 mod terminal_colors;
 mod updater;
@@ -794,21 +799,6 @@ async fn resolve_space_template(cwd: String) -> Option<TemplateHint> {
     .flatten()
 }
 
-/// Writes only `layouts` after validating it (named layouts, ADR 0011); a layout a template uses
-/// cannot be dropped or renamed.
-#[tauri::command]
-fn set_layouts(layouts: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    poimen_core::settings::save_layouts(&home, &layouts)
-}
-
-/// Writes only `spaceTemplates` after validating it; the settings watcher emits the change.
-#[tauri::command]
-fn set_space_templates(templates: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_space_templates(&home, &templates)
-}
-
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
 /// exactly in it, else one labelled with its name whose panes report no other directory) that one
 /// is focused.
@@ -1123,13 +1113,6 @@ async fn settings_import_apply(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-/// Revokes the trust of the project file of `root`; the settings watcher emits the change.
-#[tauri::command]
-fn revoke_project(root: String) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::revoke_project(&home, &root)
 }
 
 /// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
@@ -2391,36 +2374,6 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Watches the deliver runs (progress events in `<git-common-dir>/.agents/events`, else the
-/// status file `.agents/deliver-loop/status.json`) of the repositories of `dirs` (one watch per
-/// repository: its worktrees count as one, named by the toplevel of the first), replacing the
-/// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
-/// content. Returns the watched roots. Read-only.
-#[tauri::command]
-async fn deliver_watch(
-    app: AppHandle,
-    watch: State<'_, DeliverWatch>,
-    dirs: Vec<String>,
-) -> Result<Vec<String>, String> {
-    let roots = tauri::async_runtime::spawn_blocking(move || git::repo_roots(&dirs))
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
-    let current = watches.keys().cloned().collect();
-    let (stop, start) = deliver::plan(&current, &roots);
-    for root in stop {
-        watches.remove(&root);
-    }
-    for root in start {
-        let (app, name) = (app.clone(), root.clone());
-        let handle = deliver::watch(PathBuf::from(&root), move |read| {
-            let _ = app.emit("deliver", json!({ "root": name, "read": read }));
-        });
-        watches.insert(root, handle);
-    }
-    Ok(roots)
-}
-
 /// What goes over the channel of a stream for one record. The PTY bytes (snapshot and
 /// output) are sent raw, which the webview receives as an `ArrayBuffer`; the other records are JSON.
 fn channel_messages(record: &backend::StreamRecord) -> Vec<InvokeResponseBody> {
@@ -2505,29 +2458,6 @@ fn stream_of(backend: &Shared, remote: &machines::RemoteStreams, id: u32) -> (Sh
         return found;
     }
     (backend.clone(), id)
-}
-
-#[tauri::command]
-fn terminal_input(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    text: String,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_input(id, &text)
-}
-
-#[tauri::command]
-fn terminal_resize(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_resize(id, cols, rows)
 }
 
 #[tauri::command]
@@ -2731,6 +2661,7 @@ pub fn run() {
         .manage(SubagentWatch::default())
         .manage(TokenWatch::default())
         .manage(DeliverWatch::default())
+        .manage(file_preview::Watches::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
@@ -2906,10 +2837,14 @@ pub fn run() {
             paste_image,
             usage_claude,
             set_spaces_layout,
-            set_layouts,
-            set_space_templates,
+            settings_write::set_layouts,
+            settings_write::set_shortcut,
+            snippets::set_snippets,
+            snippets::terminal_type,
+            stream_commands::terminal_draft,
+            settings_write::set_space_templates,
             resolve_space_template,
-            revoke_project,
+            settings_write::revoke_project,
             settings_export,
             layout_export,
             layout_import,
@@ -2928,10 +2863,13 @@ pub fn run() {
             subagents_unwatch,
             tokens_watch,
             tokens_unwatch,
-            deliver_watch,
+            deliver_command::deliver_watch,
+            file_preview::preview_read,
+            file_preview::preview_watch,
+            file_preview::preview_unwatch,
             open_terminal,
-            terminal_input,
-            terminal_resize,
+            stream_commands::terminal_input,
+            stream_commands::terminal_resize,
             close_terminal
         ])
         .build(tauri::generate_context!())

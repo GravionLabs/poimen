@@ -80,6 +80,7 @@ describe("sidebarMenuItems", () => {
     expect(sidebarMenuItems("workspace").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "new-terminal",
       "resume-session",
+      "open-in-editor",
       "rename-space",
       "close-space",
     ]);
@@ -94,6 +95,7 @@ describe("sidebarMenuItems", () => {
       "show-changes",
       "start-task",
       "cleanup-tasks",
+      "open-in-editor",
       "rename-space",
       "close-space",
     ]);
@@ -154,6 +156,13 @@ describe("sidebarMenuItems", () => {
     expect(actions("workspace", true)).toContain("unpin-space");
     expect(actions("workspace", true)).not.toContain("pin-space");
     expect(actions("workspace", null)).not.toContain("pin-space");
+    // a space of a machine opens in the editor over ssh (#1005)
+    expect(actions("workspace", null)).toContain("open-in-editor");
+    expect(
+      sidebarMenuItems("workspace", false, false, "box is offline")
+        .flatMap((g) => g.items)
+        .find((i) => i.action === "open-in-editor")?.disabled,
+    ).toBe("box is offline");
     expect(actions("pane", false)).not.toContain("pin-space");
   });
 
@@ -201,6 +210,7 @@ describe("sidebarMenuItems", () => {
     expect(groups[0].items.map((i) => i.action)).toEqual([
       "new-terminal",
       "resume-session",
+      "open-in-editor",
       "rename-space",
       "close-space",
     ]);

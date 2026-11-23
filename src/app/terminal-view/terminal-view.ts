@@ -44,7 +44,7 @@ import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
 import { PromptBar } from "../prompt-bar/prompt-bar";
-import { FILE_LINK_MENU, FileLinkActions } from "./file-link-actions";
+import { fileLinkMenu, FileLinkActions } from "./file-link-actions";
 import { fileLinkProvider, offersFileLinks, type FileLinkTarget } from "./file-links";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
@@ -123,12 +123,13 @@ export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
 })
 export class TerminalView implements OnDestroy, Searchable {
   readonly pane = input.required<Terminal>();
-  /** The menu of a click on the path of a changed file (#1003). */
+  /** The menu of a click on the path of a file (#1003, #1004). */
   protected readonly fileMenu = signal<{
     at: { x: number; y: number };
     target: FileLinkTarget;
+    changed: boolean;
   } | null>(null);
-  protected readonly fileMenuGroups = FILE_LINK_MENU;
+  protected readonly fileMenuGroups = fileLinkMenu;
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
   /** The mode the stream really has. */
@@ -289,8 +290,7 @@ export class TerminalView implements OnDestroy, Searchable {
           if (!holdsLinkModifier(event)) return;
           const at = { x: event.clientX, y: event.clientY };
           void actions.isChanged(target).then((changed) => {
-            if (changed && !this.destroyed) this.fileMenu.set({ at, target });
-            else actions.open(target);
+            if (!this.destroyed) this.fileMenu.set({ at, target, changed });
           });
         },
       ),
@@ -301,9 +301,7 @@ export class TerminalView implements OnDestroy, Searchable {
     const target = this.fileMenu()?.target;
     this.fileMenu.set(null);
     if (!target) return;
-    const actions = this.injector.get(FileLinkActions);
-    if (id === "changes") actions.showInChanges(target);
-    else actions.open(target);
+    this.injector.get(FileLinkActions).pick(id, target);
   }
 
   private createTerminal(): void {

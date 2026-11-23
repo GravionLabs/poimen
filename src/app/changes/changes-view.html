@@ -34,6 +34,18 @@
     [value]="layout()"
     (valueChange)="setLayout($any($event))"
   />
+  <button
+    type="button"
+    hx-button
+    variant="outlined"
+    severity="secondary"
+    size="small"
+    class="preview"
+    [disabled]="!canPreview()"
+    (click)="preview(changes.selected() ?? '')"
+  >
+    Preview
+  </button>
   @if (pullRequest.canCreate()) {
     <button
       type="button"
@@ -335,7 +347,7 @@
   <app-context-menu
     [at]="at"
     [groups]="menuGroups"
-    (picked)="openFile(at.path)"
+    (picked)="pickMenu($event.id, at.path)"
     (closed)="menuAt.set(null)"
   />
 }

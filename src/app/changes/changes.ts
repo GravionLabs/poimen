@@ -1,4 +1,4 @@
-import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
+import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
 import { EditorTabs } from "../core/editor-tabs";
 import { Attention } from "../core/attention";
 import { parseHarnesses } from "../core/settings";
@@ -152,6 +152,18 @@ export class Changes {
   private fileRun = 0;
 
   constructor() {
+    // The selected file, for the palette entry "Preview File" (#1004).
+    effect(() => {
+      const dir = this.dir();
+      const path = this.selected();
+      untracked(() => {
+        if (dir) this.tabs.setChangesSelection(dir, path);
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      const dir = this.dir();
+      if (dir) this.tabs.setChangesSelection(dir, null);
+    });
     // "Show in Changes" for a file of this directory: read again, the refresh selects it.
     effect(() => {
       const wanted = this.tabs.changesFocus();

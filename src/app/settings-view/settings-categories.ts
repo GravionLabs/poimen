@@ -85,6 +85,16 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Preview",
         ],
       },
+      {
+        id: "snippets",
+        title: "Snippets",
+        labels: ["Add snippet", "Label", "Text", "Send to", "Press Enter"],
+      },
+      {
+        id: "keyboard",
+        title: "Keyboard",
+        labels: ["Record", "Reset", "Clear", "Unbound"],
+      },
       { id: "trusted-projects", title: "Trusted projects", labels: ["Revoke"] },
     ],
   },

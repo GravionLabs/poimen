@@ -663,6 +663,14 @@
           @case ("spaces") {
             <app-space-templates-editor />
           }
+          @case ("keyboard") {
+            @defer {
+              <app-shortcuts-editor />
+            }
+          }
+          @case ("snippets") {
+            <app-snippets-editor />
+          }
           @case ("layouts") {
             @defer {
               <app-layouts-editor />

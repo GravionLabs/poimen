@@ -1,4 +1,4 @@
-import { Injector } from "@angular/core";
+import { Injector, signal } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
@@ -10,13 +10,15 @@ import { GithubIssues } from "../github/issues";
 import { GithubMilestones } from "../github/milestones";
 import { GithubPulls } from "../github/pulls";
 import { CommandPalette, POIMEN_COMMANDS } from "./command-palette";
+import { EditorTabs } from "./editor-tabs";
 import { ProjectEntries } from "./project-entries";
 import { SpaceActions } from "./space-actions";
 import type { Snapshot } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { Keymap } from "./keymap";
 import { UI_STORAGE, UiState } from "./ui-state";
-import { SettingsStore } from "./settings";
+import { DEFAULT_SETTINGS, SettingsStore } from "./settings";
+import type { Snippet } from "./snippets-model";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -32,6 +34,14 @@ const snapshot: Snapshot = {
   tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
   terminals: [
     { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "idle", cwd: "/a" },
+    {
+      terminal_id: "w1:p2",
+      tab_id: "w1:t1",
+      space_id: "w1",
+      agent_status: "idle",
+      cwd: "/a",
+      agent: "claude",
+    },
   ],
 };
 
@@ -39,9 +49,11 @@ describe("CommandPalette", () => {
   let palette: CommandPalette;
   let project: ProjectEntries;
   let settings: SettingsStore;
+  const active = signal<string | null>("w1:p1");
 
   beforeEach(async () => {
     tauri.reset();
+    active.set("w1:p1");
     tauri.answer("snapshot", () => snapshot);
     const injector = Injector.create({
       providers: [
@@ -61,6 +73,7 @@ describe("CommandPalette", () => {
         GithubIssues,
         AgentRuns,
         AgentActions,
+        { provide: EditorTabs, useValue: { activeId: active } },
         { provide: IssueTasks, useValue: { load: async () => {}, label: () => "Start task…" } },
         CommandPalette,
       ],
@@ -69,6 +82,96 @@ describe("CommandPalette", () => {
     palette = injector.get(CommandPalette);
     project = injector.get(ProjectEntries);
     settings = injector.get(SettingsStore);
+  });
+
+  it("lists snippets as Snippet: <label>, an agent one only while the active pane is an agent", () => {
+    const snippets: Snippet[] = [
+      { label: "tests", text: "cargo test", enter: true, target: "terminal" },
+      { label: "deliver", text: "/deliver-loop", enter: true, target: "agent" },
+    ];
+    settings["_settings"].set({ ...DEFAULT_SETTINGS, snippets });
+    palette.open();
+    const titles = () => palette.items().flatMap((i) => (i.snippet ? [i.title] : []));
+    expect(titles()).toEqual(["Snippet: tests"]);
+    expect(palette.items().find((i) => i.snippet)).toMatchObject({ command: "snippet" });
+    active.set("w1:p2");
+    expect(titles()).toEqual(["Snippet: tests", "Snippet: deliver"]);
+    active.set(null);
+    expect(titles()).toEqual([]);
+  });
+
+  describe("tabs", () => {
+    const entries = (commands: string[], presets: string[] = []) => {
+      tauri.answer("project_entries", () => ({
+        commands: commands.map((name) => ({ name })),
+        presets,
+        locked: false,
+      }));
+      project.setDir("/a");
+    };
+    const ids = () => palette.sourceTabs().map((t) => t.id);
+
+    it("hides a tab without entries; All is always there", async () => {
+      entries([]);
+      await project.reload();
+      palette.open();
+      expect(ids()).toEqual(["all", "commands"]);
+      entries(["build"]);
+      await project.reload();
+      expect(ids()).toEqual(["all", "commands", "project"]);
+    });
+
+    it("filters the list by tab and keeps the query when the tab changes", async () => {
+      entries(["build"], ["duo"]);
+      await project.reload();
+      palette.open();
+      palette.selectTab("project");
+      expect(palette.items().map((i) => i.title)).toEqual(["Project: build", "Preset: duo"]);
+      palette.setQuery("duo");
+      expect(palette.items().map((i) => i.title)).toEqual(["Preset: duo"]);
+      palette.stepTab(-1);
+      expect(palette.tab()).toBe("commands");
+      expect(palette.query()).toBe("duo");
+      expect(palette.items().every((i) => i.source !== "project")).toBe(true);
+    });
+
+    it("cycles with step, wrapping around", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      const seen = [palette.tab()];
+      for (let n = 0; n < 3; n++) {
+        palette.stepTab(1);
+        seen.push(palette.tab());
+      }
+      expect(seen).toEqual(["all", "commands", "project", "all"]);
+      palette.stepTab(-1);
+      expect(palette.tab()).toBe("project");
+    });
+
+    it("remembers the last tab, and opens on All while it is hidden", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      palette.selectTab("project");
+      palette.close();
+      palette.open();
+      expect(palette.tab()).toBe("project");
+      palette.close();
+      entries([]);
+      await project.reload();
+      palette.open();
+      expect(palette.tab()).toBe("all");
+    });
+
+    it("labels each entry with its source", async () => {
+      entries(["build"]);
+      await project.reload();
+      palette.open();
+      const source = (title: string) => palette.items().find((i) => i.title === title);
+      expect(palette.sourceLabel(source("Project: build")!)).toBe("Project");
+      expect(palette.sourceLabel(source("Open Settings")!)).toBe("Poimen");
+    });
   });
 
   it("lists the poimen commands in order and nothing else", () => {

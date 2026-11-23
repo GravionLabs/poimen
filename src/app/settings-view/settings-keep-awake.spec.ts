@@ -12,6 +12,8 @@ import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsView } from "./settings-view";
+import { ShortcutsEditor } from "./shortcuts-editor";
+import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -43,6 +45,8 @@ function agentsPage(keepAwake: boolean) {
     [LayoutsEditor, "layouts-editor"],
     [SettingsImportPanel, "settings-import-panel"],
     [SpaceTemplatesEditor, "space-templates-editor"],
+    [SnippetsEditor, "snippets-editor"],
+    [ShortcutsEditor, "shortcuts-editor"],
   ];
   for (const [component, name] of templates) {
     TestBed.overrideComponent(component, {

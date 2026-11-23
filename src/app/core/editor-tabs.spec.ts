@@ -10,6 +10,8 @@ import {
   flowTab,
   moveItem,
   parseEditor,
+  previewPath,
+  previewTab,
   spaceOfTab,
   spaceTab,
   tabKind,
@@ -32,6 +34,26 @@ describe("changes tab ids", () => {
 
   it("restore like the other kinds", () => {
     const id = changesTab("/src/repo");
+    const stored = {
+      groups: [{ id: 1, tabs: [{ paneId: id, pinned: true }], activeId: id }],
+      layout: { kind: "group", id: 1 },
+      focusedId: 1,
+    };
+    expect(parseEditor(stored)?.groups[0].activeId).toBe(id);
+  });
+});
+
+describe("preview tab ids", () => {
+  it("map a file to its preview tab and back", () => {
+    expect(previewTab("/src/repo/PLAN.md")).toBe("preview:/src/repo/PLAN.md");
+    expect(previewPath(previewTab("/src/repo/PLAN.md"))).toBe("/src/repo/PLAN.md");
+    expect(previewPath("changes:/src/repo")).toBeNull();
+    expect(tabKind(previewTab("/a.md"))).toBe("preview");
+    expect(tabPaneId(previewTab("/a.md"))).toBeNull();
+  });
+
+  it("restore like the other kinds", () => {
+    const id = previewTab("/a.md");
     const stored = {
       groups: [{ id: 1, tabs: [{ paneId: id, pinned: true }], activeId: id }],
       layout: { kind: "group", id: 1 },
@@ -212,6 +234,23 @@ describe("EditorTabs", () => {
     expect(ids()).toEqual(["a", changesTab("/r")]);
     expect(tabs.activeId()).toBe(changesTab("/r"));
     expect(tabs.prune(new Set(["a"]))).toEqual([]);
+  });
+
+  it("opens one pinned preview tab per file and keeps it when panes are pruned", () => {
+    tabs.open("a", true);
+    tabs.openPreview("/r/PLAN.md");
+    tabs.openPreview("/r/PLAN.md");
+    tabs.openPreview("/r/other.md");
+    expect(ids()).toEqual(["a", previewTab("/r/PLAN.md"), previewTab("/r/other.md")]);
+    expect(tabs.tabs().every((t) => t.pinned)).toBe(true);
+    expect(tabs.prune(new Set(["a"]))).toEqual([]);
+  });
+
+  it("remembers the selected file of a changes tab until it is cleared", () => {
+    tabs.setChangesSelection("/r", "a.ts");
+    expect(tabs.changesSelection().get("/r")).toBe("a.ts");
+    tabs.setChangesSelection("/r", null);
+    expect(tabs.changesSelection().has("/r")).toBe(false);
   });
 
   it("closes a flow tab with its pane when the pane is gone", () => {
