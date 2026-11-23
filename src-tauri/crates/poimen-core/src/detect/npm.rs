@@ -46,7 +46,7 @@ impl Detector for Npm {
             .iter()
             .filter_map(|(name, line)| {
                 let line = line.as_str()?;
-                (!name.is_empty()).then(|| DetectedEntry {
+                (!name.is_empty() && !name.chars().any(char::is_control)).then(|| DetectedEntry {
                     source: "npm".into(),
                     name: name.clone(),
                     description: line.to_owned(),
@@ -116,6 +116,15 @@ mod tests {
         let pkg = r#"{"packageManager": "unknown@1", "scripts": {"a": "x"}}"#;
         let root = repo(&[("package.json", pkg), ("pnpm-lock.yaml", "")]);
         assert_eq!(argvs(&root)[0][0], "pnpm");
+    }
+
+    #[test]
+    fn a_name_with_a_control_character_is_not_listed() {
+        let root = repo(&[(
+            "package.json",
+            r#"{"scripts": {"a\u0003b": "x", "line\nbreak": "x", "ok": "x"}}"#,
+        )]);
+        assert_eq!(argvs(&root), vec![vec!["npm", "run", "ok"]]);
     }
 
     #[test]

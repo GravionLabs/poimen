@@ -104,6 +104,7 @@ own Scripts tab; each is `Script: <name>` with the command line of the script as
 - Trust: there is no hash trust. A detected entry runs only on an explicit pick in the palette and
   nothing runs automatically; the entry shows the command line that will run.
 - A `commands[]` entry with the name of a detected script wins; the detected one is not shown.
+- A script whose name contains a control character is not listed (the command is typed into a terminal).
 - Local spaces only; a remote space shows no detected entries.
 
 ## Environment variables
