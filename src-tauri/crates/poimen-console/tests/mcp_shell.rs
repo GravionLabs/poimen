@@ -133,9 +133,14 @@ fn screen_has(client: &Client, terminal: &str, needle: &str) -> bool {
         {
             return true;
         }
-        thread::sleep(Duration::from_millis(100));
+        pause();
     }
     false
+}
+
+/// One polling step; parks the thread (a condition is polled, never a fixed wait).
+fn pause() {
+    thread::park_timeout(Duration::from_millis(100));
 }
 
 const WAIT: Duration = Duration::from_secs(30);
@@ -175,7 +180,7 @@ fn runs_the_command_in_the_own_space_and_the_pane_stays_after_it_ends() {
         if t.status == TerminalStatus::Exited || Instant::now() > deadline {
             break t;
         }
-        thread::sleep(Duration::from_millis(100));
+        pause();
     };
     assert_eq!(
         (t.status, t.exit_code, t.name.as_str()),
