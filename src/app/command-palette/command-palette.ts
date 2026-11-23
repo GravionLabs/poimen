@@ -106,6 +106,7 @@ export class CommandPalette {
       const item = this.palette.current();
       if (item) this.run(item);
     } else if (event.key === "Escape") this.palette.close();
+    else if (event.key === "Delete" && event.shiftKey) this.hide(this.palette.current());
     else return;
     event.preventDefault();
   }
