@@ -60,5 +60,6 @@ export function startup(snapshot: unknown = SNAPSHOT): Record<string, unknown> {
     branch_pulls: {},
     project_entries: { commands: [], presets: [], locked: false },
     detected_entries: [],
+    repo_root: "/repo",
   };
 }
