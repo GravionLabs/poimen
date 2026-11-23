@@ -150,6 +150,7 @@ fn initialize_and_tools_list() {
             "start_agent",
             "start_shell",
             "stop_terminal",
+            "write_terminal",
             "prompt_agent",
             "wait_agent",
             "report_done",

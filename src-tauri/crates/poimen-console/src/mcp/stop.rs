@@ -13,12 +13,12 @@ use super::{Env, Fail, announce, authorize, runs, server_error, text_arg};
 const INTERRUPT_WAIT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(100);
 
-fn find(client: &Client, id: &str) -> Result<Option<Terminal>, Fail> {
+pub(super) fn find(client: &Client, id: &str) -> Result<Option<Terminal>, Fail> {
     let terminals = client.list_terminals(None).map_err(server_error)?;
     Ok(terminals.into_iter().find(|t| t.id == id))
 }
 
-fn has_running_agent(t: &Terminal) -> bool {
+pub(super) fn has_running_agent(t: &Terminal) -> bool {
     t.agent
         .as_ref()
         .is_some_and(|a| a.status != AgentStatus::Gone)
