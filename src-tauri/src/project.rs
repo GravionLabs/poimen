@@ -20,6 +20,14 @@ pub fn start_tab(
     Ok(())
 }
 
+/// The repository root of `dir` (the key of the hidden detected entries, #1218), or `dir` itself.
+#[tauri::command]
+pub async fn repo_root(dir: String) -> String {
+    tauri::async_runtime::spawn_blocking(move || poimen_core::git::toplevel(&dir).unwrap_or(dir))
+        .await
+        .unwrap_or_default()
+}
+
 /// Runs the detected entry `name` of `source` (`poimen_core::detect`) in a tab named after it in
 /// `dir`. The entry is detected again at `root`, so the frontend never supplies a command; there
 /// is no hash trust, a call is an explicit pick. Returns `false` when the file no longer lists it.

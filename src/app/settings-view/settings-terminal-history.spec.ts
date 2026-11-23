@@ -13,6 +13,7 @@ import { LayoutsEditor } from "./layouts-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsView } from "./settings-view";
 import { ShortcutsEditor } from "./shortcuts-editor";
+import { PaletteEditor } from "./palette-editor";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 
@@ -46,6 +47,7 @@ function serverPage() {
     [SettingsImportPanel, "settings-import-panel"],
     [SpaceTemplatesEditor, "space-templates-editor"],
     [SnippetsEditor, "snippets-editor"],
+    [PaletteEditor, "palette-editor"],
     [ShortcutsEditor, "shortcuts-editor"],
   ];
   for (const [component, name] of templates) {

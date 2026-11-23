@@ -163,6 +163,7 @@ describe("parseSettings", () => {
       explorerShowHidden: false,
       claudeClassicRenderer: false,
       keepAwake: false,
+      palette: { scripts: true, skills: true, hidden: {} },
       terminalHistory: { enabled: true, perTerminalMib: 8, totalMib: 256 },
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },

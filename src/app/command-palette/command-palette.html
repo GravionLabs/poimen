@@ -59,6 +59,7 @@
           >
             <button
               type="button"
+              class="row"
               tabindex="-1"
               (click)="run(row.item)"
               (mousemove)="palette.hover(row.index)"
@@ -88,6 +89,21 @@
                 <kbd class="shortcut">{{ row.item.shortcut }}</kbd>
               }
             </button>
+            @if (row.item.detected) {
+              <button
+                hx-button
+                type="button"
+                variant="text"
+                size="small"
+                class="hide"
+                tabindex="-1"
+                [attr.aria-label]="'Hide ' + row.item.title"
+                (mousedown)="$event.preventDefault()"
+                (click)="hide(row.item)"
+              >
+                Hide
+              </button>
+            }
           </li>
         }
       } @empty {

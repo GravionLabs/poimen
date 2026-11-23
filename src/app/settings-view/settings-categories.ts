@@ -91,6 +91,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         labels: ["Add snippet", "Label", "Text", "Send to", "Press Enter"],
       },
       {
+        id: "palette",
+        title: "Palette",
+        labels: ["Detected sources", "Hidden entries", "Scripts", "Skills"],
+      },
+      {
         id: "keyboard",
         title: "Keyboard",
         labels: ["Record", "Reset", "Clear", "Unbound"],

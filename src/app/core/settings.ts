@@ -4,6 +4,8 @@ import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { layoutConfig, parseNamedLayouts, type NamedLayout } from "./named-layouts";
 import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
+import { parseTrusted } from "./trusted-projects";
+import { DEFAULT_PALETTE, parsePalette, type PaletteSettings } from "./palette-settings";
 import { parseSnippets, type Snippet } from "./snippets-model";
 import { TauriBridge } from "./tauri";
 import {
@@ -293,6 +295,8 @@ export interface Settings {
   sounds: SoundSettings;
   /** `usage`: which provider limits the status bar asks for (#784). */
   usage: UsageSettings;
+  /** `palette`: detected sources and hidden entries (#1218). */
+  palette: PaletteSettings;
   /** `terminalHistory`: the server logs terminal output to disk (#1196). */
   terminalHistory: TerminalHistorySettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
@@ -421,18 +425,11 @@ export const DEFAULT_SETTINGS: Settings = {
   snippets: [],
   sounds: { blocked: false, done: false },
   usage: { claude: true },
+  palette: DEFAULT_PALETTE,
   terminalHistory: DEFAULT_TERMINAL_HISTORY,
   home: null,
   warnings: [],
 };
-
-/** The `trustedProjects` map; entries that are not strings are skipped. */
-function parseTrusted(raw: unknown): Record<string, string> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-  return Object.fromEntries(
-    Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"),
-  );
-}
 
 /** A valid list of lines of tokens, or `null`. */
 function parseRowLines(raw: unknown): RowLines | null {
@@ -536,6 +533,7 @@ export function parseSettings(raw: unknown): Settings {
     snippets: parseSnippets(r["snippets"]),
     sounds: parseSounds(r["sounds"]),
     usage: parseUsage(r["usage"]),
+    palette: parsePalette(r["palette"]),
     terminalHistory: parseTerminalHistory(r["terminalHistory"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
