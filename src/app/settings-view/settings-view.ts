@@ -173,6 +173,7 @@ export function withRoot(
   ],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
+  host: { class: "settings-root" },
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SettingsView {
