@@ -113,6 +113,9 @@
                     @if (t.step; as s) {
                       <span class="step">{{ stepText(s) }}</span>
                     }
+                    <ng-container
+                      *ngTemplateOutlet="termTpl; context: { $implicit: run, task: t.task }"
+                    />
                   </div>
                 }
                 @if (run.status.links.length > 0) {
@@ -316,6 +319,7 @@
               <span class="hint" data-testid="step-text">{{ s.text }}</span>
             }
           }
+          <ng-container *ngTemplateOutlet="termTpl; context: { $implicit: run, task: t.task }" />
         </div>
       }
       <p class="hint" data-testid="age">
@@ -447,6 +451,9 @@
                               progressText(p)
                             }}</span>
                           }
+                          <ng-container
+                            *ngTemplateOutlet="termTpl; context: { $implicit: r, task: t.task }"
+                          />
                         </li>
                       }
                     </ul>
@@ -492,6 +499,12 @@
                               <span class="hint">at {{ stepText(s) }}</span>
                             }
                           }
+                          <ng-container
+                            *ngTemplateOutlet="
+                              termTpl;
+                              context: { $implicit: r, task: t.task.task }
+                            "
+                          />
                         </li>
                       }
                     </ul>
@@ -542,6 +555,9 @@
                         <span class="hint"
                           >{{ t.outcome }}{{ outcomeText(t) ? ": " + outcomeText(t) : "" }}</span
                         >
+                        <ng-container
+                          *ngTemplateOutlet="termTpl; context: { $implicit: r, task: t.task }"
+                        />
                         @for (l of t.links; track l.url) {
                           <button
                             type="button"
@@ -698,3 +714,31 @@
     }
   </li>
 </ng-template>
+
+<ng-template #termTpl let-run let-task="task">
+  @let terms = terminalsOf(run, task);
+  @if (terms.length > 0) {
+    <button
+      type="button"
+      hx-button
+      variant="text"
+      size="small"
+      data-testid="task-terminal"
+      (click)="showTerminal($event, terms)"
+    >
+      Show terminal
+      @if (terms.length > 1) {
+        ({{ terms.length }})
+      }
+    </button>
+  }
+</ng-template>
+@if (taskMenu(); as m) {
+  <app-context-menu
+    label="Terminals of the task"
+    [at]="m"
+    [groups]="taskMenuGroups(m.terminals)"
+    (picked)="chooseTaskTerminal($event.id)"
+    (closed)="taskMenu.set(null)"
+  />
+}

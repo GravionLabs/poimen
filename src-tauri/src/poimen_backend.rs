@@ -1,12 +1,10 @@
 //! The `poimen-server` backend (ADR 0003, #153): spaces, tabs and terminals of the server in the
 //! backend-neutral snapshot (`poimen_core::snapshot`, #586), live terminals through
-//! `terminal.attach`.
-//!
-//! The server owns the PTYs and, since protocol 4, the tabs and split trees of each space (#513):
-//! the snapshot maps its tabs with their trees, a split is `tab.split`, a new space is
+//! `terminal.attach`. The server owns the PTYs and, since protocol 4, the tabs and split trees of
+//! each space (#513): the snapshot maps its tabs with their trees, a split is `tab.split`, a new space is
 //! `space.create` with the layout the server resolves and builds (and its trust question).
-//! A stream is emulated: it carries the snapshot and raw PTY bytes, so
-//! xterm.js tracks the modes itself (mouse, scrollback). poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
+//! A stream is emulated: it carries the snapshot and raw PTY bytes, so xterm.js tracks the modes itself (mouse, scrollback).
+//! poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -286,6 +284,8 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         hibernated: terminal.hibernated.is_some(),
         ended: terminal.from_history,
         started_by: terminal.started_by.clone(),
+        run: terminal.run.clone(),
+        task: terminal.task.clone(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
         agent_reported_at: agent.and_then(|a| a.reported_at),

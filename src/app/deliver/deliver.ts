@@ -23,6 +23,7 @@ import {
   withMachines,
 } from "./deliver-status";
 import { effectiveStatus, runsByTerminal } from "./pane-status";
+import { taskTerminals } from "./task-terminal";
 import { activeLoop, type ActiveLoop, type Launched } from "./deliver-start";
 
 /** How often the age texts and the stale rule are re-evaluated. */
@@ -272,6 +273,18 @@ export class Deliver {
     const named = host["poimen.terminal"];
     if (named && terminals.some((t) => t.terminal_id === named)) return named;
     return loopPane(terminals, card.root, harness ?? "");
+  }
+
+  /**
+   * The terminals poimen started for `task` of the run of `card` (#745), newest first: matched by
+   * `Terminal.run` and `Terminal.task` of the run's machine only, none for an offline machine.
+   */
+  terminalsOfTask(card: DeliverCard, task: string): Terminal[] {
+    return taskTerminals(
+      this.store.all().terminals,
+      { run: card.run, machine: card.machine, offline: card.offline },
+      task,
+    );
   }
 
   /** Starts by this action (#746), by repository root: the terminal and when. */

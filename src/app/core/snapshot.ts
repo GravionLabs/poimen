@@ -1,7 +1,7 @@
 // The backend-neutral model of spaces, tabs and terminals (the `snapshot` command, #586) and the
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
-
 import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
+import type { SessionLink } from "./session-link";
 import type { BranchPull } from "./branch-pull";
 import type { ChildRecord } from "./child-record";
 import type { SidebarSort } from "./settings";
@@ -179,7 +179,7 @@ export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undef
   return first ?? snapshot.terminals.find((t) => t.space_id === spaceId);
 }
 
-export interface Terminal {
+export interface Terminal extends SessionLink {
   terminal_id: string;
   tab_id: string;
   space_id: string;
