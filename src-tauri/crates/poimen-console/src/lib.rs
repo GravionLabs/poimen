@@ -10,5 +10,6 @@ pub mod doctor;
 pub mod keys;
 pub mod mcp;
 pub mod session;
+pub mod session_run;
 pub mod tty;
 pub mod tui;
