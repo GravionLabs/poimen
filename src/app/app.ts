@@ -108,6 +108,8 @@ import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
+import { DeliverDialog } from "./deliver/deliver-dialog";
+import { DeliverLauncher } from "./deliver/deliver-launcher";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
 import { ServerDialog } from "./server-dialog/server-dialog";
 import { AgentConfirmDialog } from "./agent-confirm-dialog/agent-confirm-dialog";
@@ -174,6 +176,7 @@ const ZOOM_STEP = 1;
     ResultDialog,
     AgentPickerView,
     TaskDialog,
+    DeliverDialog,
     AgentActionDialog,
     PaletteView,
     JumpPaletteView,
@@ -215,6 +218,7 @@ export class App {
   protected readonly agentActions = inject(AgentActions);
   protected readonly pulls = inject(GithubPulls);
   protected readonly deliver = inject(Deliver);
+  private readonly deliverLauncher = inject(DeliverLauncher);
   protected readonly claudeLimits = inject(ClaudeLimits);
   private readonly spaceRebuild = inject(SpaceRebuild);
 
@@ -582,6 +586,8 @@ export class App {
       return;
     }
     if (id === "startTask") return this.startTaskInActiveRepo();
+    if (id === "deliverMilestone")
+      return void this.deliverLauncher.openMilestone(this.activeRepo());
     if (id === "resumeSession") return this.sessionResume.openActive(this.activePaneId());
     if (id === "openInEditor") {
       this.externalEditor.openDir(this.activeDir());
@@ -590,7 +596,7 @@ export class App {
     if (id === "openTerminalHere") return this.openTerminalInSelectedDir();
     if (id === "cleanupTasks") return this.cleanupInActiveRepo();
     if (id === "quitAndStopServer") return this.serverRestart.askQuit();
-    if (id === "projectTeardown") return this.teardownInActiveSpace();
+    if (id === "projectTeardown") return this.teardown.runIn(this.activeDir());
     if (id === "renameSpace") {
       const paneId = this.activePaneId();
       const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
@@ -738,13 +744,6 @@ export class App {
     const dir = pane ? paneDir(pane) : undefined;
     if (pane && dir) void this.projectEntries.start(entry, pane.space_id, dir);
     else this.spaceActions.notify(`Project: ${entry.name}: there is no focused space`);
-  }
-
-  /** The palette entry: run the project's teardown in the directory of the active pane. */
-  private teardownInActiveSpace(): void {
-    const dir = this.activeDir();
-    if (dir) void this.teardown.run(dir);
-    else this.spaceActions.notify("Project: Run teardown: the active pane has no directory");
   }
 
   /** The space of the active pane: a cleanup never removes it. */

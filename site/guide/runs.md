@@ -15,7 +15,14 @@ A run is a file `<repository>/.agents/events/<run>.jsonl` in the format of [agen
 - **Needs you** lists the gates a run waits on for a human.
 - **History** groups finished runs by subject, newest first. Expanding a group shows a timeline: outcome, pull requests, what was skipped or left open, tokens per run and the events.
 
-*Start loop* on a milestone group starts the task mode `deliver-loop` in the repository's space.
+*Deliver milestone* on a milestone group opens a dialog that starts a deliver loop for the milestone. The same dialog opens from the command palette (*Deliver milestone…*, a picker of the open milestones of the active repository) and from *Deliver…* in the row menu of the issues tree (for the marked issues, else the row's issue).
+
+The dialog shows the target (`--milestone M<nnn>` or `--issues 12,15`), the harness (`claude` or `copilot`, empty keeps the loop's default), an optional model and `--max`, the base branch (from `deliver.base` in `.agents/config.json`, else the loop's default) and the exact command line. *Start loop* types `deliver-loop …` into a new tab named `deliver <target>` in the repository's space. poimen only launches it: the loop starts its agent sessions itself, and poimen never starts a loop on its own, on a timer or again after it ended.
+
+- `deliver-loop` must be installed and on your `PATH` (`/skills-manage delivery`); without it the dialog says so and starts nothing.
+- A project that is not trusted yet asks you to review and trust it first, because the command can run a copy of the skill that lives in the repository.
+- While a loop runs for the repository (or one you just started has not written its run yet) a second start is refused with *Show run*.
+- Only spaces on this Mac: a space on a machine has no such action.
 
 ## Status bar and notifications
 

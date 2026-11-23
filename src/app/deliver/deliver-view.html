@@ -7,8 +7,8 @@
     <p class="hint" data-testid="empty">
       No run yet. A run starts when an agent reports agent-events to
       <code>.agents/events/&lt;run&gt;.jsonl</code> in the git directory of its repository, for
-      example a deliver loop started with "Start task" in the <code>deliver-loop</code> mode; it
-      appears here as soon as the file exists.
+      example a deliver loop started with "Deliver milestone…" from the command palette; it appears
+      here as soon as the file exists.
     </p>
   }
   @if (overview.loading() && overview.repos().length === 0 && !overview.failure()) {
@@ -97,7 +97,9 @@
               }
               @if (row.run; as run) {
                 @if (row.milestone === null && run.status.progress; as p) {
-                  <p class="progress" data-testid="milestone-run-progress">{{ progressText(p) }}</p>
+                  <p class="progress" data-testid="milestone-run-progress">
+                    {{ progressText(p) }}
+                  </p>
                 }
                 <p class="hint" data-testid="milestone-run">
                   {{ runLabel(run) }}
@@ -162,7 +164,6 @@
       }
     </section>
   }
-
   @for (card of problems(); track cardKey(card)) {
     <section class="card" data-testid="problem">
       <h2 class="mono">{{ where(card) }}</h2>
@@ -183,7 +184,6 @@
       }
     </section>
   }
-
   @if (sections().running.length > 0) {
     <section class="section" data-testid="running" aria-labelledby="runs-running">
       <h2 id="runs-running" class="section-title">Running now</h2>
@@ -192,7 +192,6 @@
       }
     </section>
   }
-
   @if (needsYou().length > 0) {
     <section class="section" data-testid="needs-you" aria-labelledby="runs-needs-you">
       <h2 id="runs-needs-you" class="section-title">Needs you</h2>
@@ -218,7 +217,6 @@
       </ul>
     </section>
   }
-
   @if (sections().history.length > 0) {
     <section class="section" data-testid="history" aria-labelledby="runs-history">
       <h2 id="runs-history" class="section-title">History</h2>
@@ -230,8 +228,7 @@
 </div>
 
 <ng-template #groupTpl let-g let-live="live">
-  @let head = newest(g);
-  @let open = groupOpen(g);
+  @let head = newest(g); @let open = groupOpen(g);
   <article
     class="card group tone-{{ head.tone }}"
     [class.offline]="g.offline"
@@ -280,7 +277,6 @@
       </div>
       <p class="progress" data-testid="progress">{{ progressText(p) }}</p>
     }
-
     @if (live) {
       @let run = running(g)!;
       @for (t of run.status.tasks.slice(0, 1); track t.task) {
@@ -325,10 +321,12 @@
       <p class="hint" data-testid="age">
         last event {{ age(run.status) }}
         @if (tokens(run); as tk) {
-          · <span data-testid="run-tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
+          ·
+          <span data-testid="run-tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
         }
         @if (deliver.starterOf(run.card); as by) {
-          · <span data-testid="run-started-by">started by {{ by }}</span>
+          ·
+          <span data-testid="run-started-by">started by {{ by }}</span>
         }
       </p>
     }
@@ -364,8 +362,16 @@
           </button>
         }
         @if (canStart(g)) {
-          <button type="button" hx-button size="small" data-testid="start" (click)="startLoop(g)">
-            Start loop
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            data-testid="start"
+            (click)="startLoop(g)"
+          >
+            Deliver milestone
           </button>
         }
       </span>
