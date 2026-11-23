@@ -59,5 +59,6 @@ export function startup(snapshot: unknown = SNAPSHOT): Record<string, unknown> {
     hooks_status: [],
     branch_pulls: {},
     project_entries: { commands: [], presets: [], locked: false },
+    detected_entries: [],
   };
 }

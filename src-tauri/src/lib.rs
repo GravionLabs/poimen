@@ -1159,52 +1159,6 @@ async fn project_save(
     .map_err(|e| e.to_string())?
 }
 
-/// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
-/// palette (names only), and whether the file still needs the user's trust.
-#[tauri::command]
-async fn project_entries(dir: String) -> project::Entries {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = git::toplevel(&dir).unwrap_or(dir);
-        let sources = trust::Sources::read(&root);
-        project::entries(&sources, &get_settings().trusted_projects)
-    })
-    .await
-    .unwrap_or_default()
-}
-
-/// Runs a palette entry of the project file in the space `space_id` (a user action). Goes
-/// through `trust::gate` with the one read of the file; an untrusted file answers `ask`.
-#[tauri::command]
-async fn project_run(
-    backend: State<'_, Shared>,
-    space_id: String,
-    dir: String,
-    entry: project::Entry,
-    decision: Option<trust::Decision>,
-) -> Result<project::EntryOutcome, String> {
-    on_backend(backend.inner(), move |b| {
-        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
-        let sources = trust::Sources::read(&root);
-        let home = home_dir();
-        let trusted = get_settings().trusted_projects;
-        let persist = |hash: &str| -> Result<(), String> {
-            let home = home.as_deref().ok_or("the home directory is not known")?;
-            settings::trust_project(home, &sources.root, hash)
-        };
-        project::run_entry(
-            b,
-            &sources,
-            &trusted,
-            decision.as_ref(),
-            &persist,
-            &space_id,
-            &dir,
-            &entry,
-        )
-    })
-    .await
-}
-
 /// Directories matching a typed path, for the completion of path fields.
 #[tauri::command]
 async fn list_dirs(input: String) -> Result<Vec<String>, String> {
@@ -2856,8 +2810,10 @@ pub fn run() {
             project_config,
             project_file,
             project_save,
-            project_entries,
-            project_run,
+            project::project_entries,
+            project::project_run,
+            project::detected_entries,
+            project::detected_run,
             repo_info,
             subagents_watch,
             subagents_unwatch,
