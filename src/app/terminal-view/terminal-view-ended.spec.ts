@@ -105,10 +105,10 @@ async function setup() {
   });
   fixture.detectChanges();
   await fixture.whenStable();
-  await new Promise((resolve) => setTimeout(resolve));
+  await vi.waitFor(() => expect(records.length).toBeGreaterThan(0));
   const send = async (record: StreamRecord) => {
     records[0](record);
-    await new Promise((resolve) => setTimeout(resolve));
+    await fixture.whenStable();
   };
   return { fixture, body, send };
 }
