@@ -24,7 +24,7 @@
   rangeStrategy: "bump",
   automerge: false,
   // Work is integrated on release/next; main only receives the release PR (AGENTS.md).
-  baseBranches: ["release/next"],
+  baseBranchPatterns: ["release/next"],
   labels: ["dependencies"],
   enabledManagers: ["npm", "cargo", "github-actions"],
   // The vendored copy of portable-pty is changed by hand (src-tauri/vendor/portable-pty/POIMEN.md).
