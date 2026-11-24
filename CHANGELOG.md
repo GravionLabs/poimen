@@ -5,6 +5,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.36.1] — 2026-11-24
+
+### Bug Fixes
+- **tests**: Remove test directories when the test ends (#1280)
+- **tests**: Expect the protocol of this tree from the last release (#1280)
+
+
+### Documentation
+- **agents**: Point to the test directory rule in AGENTS.md (#1280)
+- **agents**: Shorten the tests.md pointer to fit the AGENTS.md limit (#1280)
+
+
 ## [0.36.0] — 2026-11-24
 
 ### Bug Fixes
@@ -21,6 +33,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **mcp**: Guide and tool descriptions for orchestration (#1214) (#1279)
 - **mcp**: Guide and tool descriptions for orchestration (#1214)
 - **mcp**: Max_agents is required in request_grant (#1214)
+- Update CHANGELOG.md for v0.36.0 [skip ci]
 
 
 ### Features
