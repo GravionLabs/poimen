@@ -20,13 +20,20 @@ use poimen_server::{Config, PtyHost, Server};
 
 const WAIT: Duration = Duration::from_secs(10);
 
+/// The test directory and the server in it. Dropping stops the server first (its threads write
+/// into the directory), then the guard removes the directory.
 struct Env {
     dir: PathBuf,
+    socket: PathBuf,
+    stopped: Receiver<()>,
+    _guard: tempfile::TempDir,
 }
 
 impl Drop for Env {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        if Client::new(&self.socket).shutdown().is_ok() {
+            let _ = self.stopped.recv_timeout(WAIT);
+        }
     }
 }
 
@@ -38,12 +45,20 @@ struct Fixture {
 }
 
 fn fixture(name: &str, pty_host: PtyHost) -> Fixture {
-    let dir = std::env::temp_dir().join(format!("poimen-ph-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let env = Env { dir };
+    let guard = tempfile::Builder::new()
+        .prefix(&format!("poimen-ph-{name}-"))
+        .tempdir()
+        .unwrap();
+    let dir = guard.path().to_path_buf();
+    let (stop_tx, stopped) = mpsc::channel();
+    let env = Env {
+        socket: dir.join("run").join("server.sock"),
+        dir,
+        stopped,
+        _guard: guard,
+    };
     let config = Config {
-        socket: env.dir.join("run").join("server.sock"),
+        socket: env.socket.clone(),
         state_file: env.dir.join("state").join("server.json"),
         history_dir: env
             .dir
@@ -55,6 +70,9 @@ fn fixture(name: &str, pty_host: PtyHost) -> Fixture {
         pty_host,
     };
     let server = Server::bind(config.clone()).unwrap();
+    server.on_shutdown(move || {
+        let _ = stop_tx.send(());
+    });
     thread::spawn(move || server.serve());
     let client = Client::new(&config.socket);
     let space = client
