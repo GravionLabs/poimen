@@ -23,6 +23,7 @@ fn main() -> ExitCode {
             println!("poimen {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Ok(cmd) if !matches!(cmd, Command::Doctor { .. }) && !start_server() => ExitCode::FAILURE,
         Ok(Command::Tui) => tui(),
         Ok(Command::Attach(a)) => attach(a),
         Ok(Command::SessionRun(a)) => session_run(&a),
@@ -57,6 +58,17 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("poimen: {e}\n{USAGE}");
             ExitCode::from(2)
+        }
+    }
+}
+
+/// Starts `poimen-server` when none runs (#1171); false after printing why it could not.
+fn start_server() -> bool {
+    match poimen_console::server_start::ensure_for_console() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("poimen: {e}");
+            false
         }
     }
 }
