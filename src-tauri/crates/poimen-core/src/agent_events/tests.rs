@@ -283,3 +283,38 @@ fn run_files_are_named_by_a_run_id_of_the_binding() {
         "a".repeat(128)
     ))));
 }
+
+#[test]
+fn the_records_of_a_lead_run_fold_into_its_lead_state() {
+    let text = r#"{"v":1,"seq":1,"ts":"2026-11-08T11:00:00Z","run":"lead-1","type":"run.started","tone":"neutral","host":{"poimen.terminal":"t1"}}
+{"v":1,"seq":2,"ts":"2026-11-08T11:01:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.member","task":"a#1","repository":"/r/a","terminal":"t2","deliver_run":"d-1"}
+{"v":1,"seq":3,"ts":"2026-11-08T11:02:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.member","task":"a#1","repository":"/r/a","terminal":"t3","deliver_run":"d-1"}
+{"v":1,"seq":4,"ts":"2026-11-08T11:03:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.dependency","task":"b#2","blocked_by":"a#1"}
+{"v":1,"seq":5,"ts":"2026-11-08T11:03:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.dependency","task":"b#2","blocked_by":"a#1"}
+{"v":1,"seq":6,"ts":"2026-11-08T11:04:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.grant","grant":"g1","spaces":["s1"],"tools":["start_agent"],"max_agents":3}
+{"v":1,"seq":7,"ts":"2026-11-08T11:05:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.resume","terminal":"t9"}
+{"v":1,"seq":8,"ts":"2026-11-08T11:06:00Z","run":"lead-1","profile":"orchestrate@1","type":"orchestrate.future"}
+"#;
+    let run = reduce(text, now(), &|_| true).unwrap();
+    let lead = run.lead.clone().expect("a lead state");
+    assert_eq!(lead.members.len(), 1, "a member is replaced by its task");
+    assert_eq!(lead.members[0].terminal.as_deref(), Some("t3"));
+    assert_eq!(lead.dependencies.len(), 1);
+    assert_eq!(lead.grant.as_ref().map(|g| g.id.as_str()), Some("g1"));
+    assert_eq!(lead.resumed_in.as_deref(), Some("t9"));
+    // The records are no rows of the Events tab, the core events are.
+    assert_eq!(run.events.len(), 1);
+    let json = serde_json::to_value(&run).unwrap();
+    assert_eq!(json["lead"]["members"][0]["deliverRun"], "d-1");
+    assert_eq!(json["lead"]["grant"]["maxAgents"], 3);
+}
+
+#[test]
+fn a_run_without_lead_records_has_no_lead_state() {
+    let text = r#"{"v":1,"seq":1,"ts":"2026-11-08T11:00:00Z","run":"r","type":"run.started","tone":"neutral"}
+{"v":1,"seq":2,"ts":"2026-11-08T11:01:00Z","run":"r","profile":"deliver@1","type":"deliver.new"}
+"#;
+    let run = reduce(text, now(), &|_| true).unwrap();
+    assert!(run.lead.is_none());
+    assert!(serde_json::to_value(&run).unwrap().get("lead").is_none());
+}
