@@ -313,6 +313,8 @@ pub struct Config {
     pub sort: SidebarSort,
     /// `sidebar.groupWorktrees` (default true): spaces of linked worktrees below their repository.
     pub group_worktrees: bool,
+    /// `sidebar.showBaseBranch` (default false): the `branch` token shows the base branch too (#711).
+    pub show_base_branch: bool,
     /// The user scheme `colorSchema` names; `None` uses the colors of the local terminal.
     pub scheme: Option<Scheme>,
     pub warnings: Vec<String>,
@@ -326,6 +328,7 @@ impl Default for Config {
             rows: SidebarRows::default(),
             sort: SidebarSort::default(),
             group_worktrees: true,
+            show_base_branch: false,
             scheme: None,
             warnings: Vec::new(),
         }
@@ -348,6 +351,7 @@ pub fn parse(root: &Value, schemes: &[Scheme]) -> Config {
         c.rows = resolve_sidebar_rows(sidebar, &mut c.warnings);
         c.sort = resolve_sidebar_sort(sidebar, &mut c.warnings);
         c.group_worktrees = resolve_group_worktrees(sidebar, &mut c.warnings);
+        c.show_base_branch = sidebar.get("showBaseBranch") == Some(&Value::Bool(true));
     }
     if let Some(name) = scheme_name(root) {
         c.scheme = schemes.iter().find(|s| s.name == name).cloned();

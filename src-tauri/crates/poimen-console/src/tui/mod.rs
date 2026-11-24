@@ -207,11 +207,7 @@ impl App {
     }
 
     fn refresh(&mut self, client: &Client) -> Result<(), Error> {
-        self.model = if self.config.group_worktrees {
-            Model::load_grouped(client, &mut self.repo_cache)?
-        } else {
-            Model::load(client)?
-        };
+        self.model = Model::load_with_repos(client, &self.repo_cache, &self.config)?;
         self.rows = self.model.rows_unread(
             &self.config.rows,
             self.config.sort,
@@ -244,6 +240,7 @@ impl App {
     /// and repeatable: also run after the view changed, which is what clears a mark.
     fn observe(&mut self) {
         self.now_ms = epoch_ms();
+        self.model.resolve_repos(&self.repo_cache); // old git state reads again, off thread
         let viewed = self.viewed();
         let changes = self
             .attention
@@ -372,6 +369,9 @@ pub fn run<B: Backend>(
     }
 
     let mut app = App::new(opts);
+    let notify = tx.clone();
+    app.repo_cache
+        .on_change(move || drop(notify.send(Msg::Changed)));
     let mut router = Router::new(&opts.config);
     app.refresh(client)?;
     let first = app.model.initial(app.own_terminal.as_deref());

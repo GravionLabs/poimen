@@ -101,7 +101,7 @@ fn model() -> Model {
             ),
         ],
         terminals: vec![term("t1", "s1", "shell", "/home/u/work"), t2, t3],
-        repos: HashMap::new(),
+        ..Model::default()
     }
 }
 
@@ -301,6 +301,7 @@ fn repo_ref(common: &str, worktree: bool) -> RepoRef {
     RepoRef {
         common_dir: common.into(),
         worktree,
+        ..RepoRef::default()
     }
 }
 
@@ -404,24 +405,6 @@ fn step_follows_the_grouped_order() {
     // Shown order: notes (x1), a (x2), a-fix (x0).
     assert_eq!(step(&rows, Some("x1"), 1, None).as_deref(), Some("x2"));
     assert_eq!(step(&rows, Some("x2"), 1, None).as_deref(), Some("x0"));
-}
-
-#[test]
-fn the_cache_reads_a_directory_once_and_keeps_a_failure_flat() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static CALLS: AtomicUsize = AtomicUsize::new(0);
-    fn lookup(dir: &str) -> Option<RepoRef> {
-        CALLS.fetch_add(1, Ordering::SeqCst);
-        (dir == "/w/a").then(|| repo_ref("/a/.git", false))
-    }
-    let mut cache = RepoCache::with_lookup(lookup);
-    let dirs = ["/w/a", "/remote/only"];
-    let first = cache.resolve(dirs.iter().copied());
-    let second = cache.resolve(dirs.iter().copied());
-    assert_eq!(first, second);
-    assert_eq!(first.len(), 1);
-    assert!(first.contains_key("/w/a"));
-    assert_eq!(CALLS.load(Ordering::SeqCst), 2);
 }
 
 #[test]

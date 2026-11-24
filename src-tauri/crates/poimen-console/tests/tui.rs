@@ -915,8 +915,8 @@ fn a_linked_worktree_space_is_listed_below_its_repository() {
     f.client.create_space("Awt", &path(&wt)).unwrap();
     f.client.create_space("Zmain", &path(&main)).unwrap();
 
-    let mut cache = poimen_console::tui::sidebar::RepoCache::default();
-    let model = Model::load_grouped(&f.client, &mut cache).unwrap();
+    let mut model = Model::load(&f.client).unwrap();
+    model.repos = model.resolve_repos_now(&poimen_console::tui::sidebar::RepoCache::default());
     let rows: Vec<_> = model
         .rows(
             &SidebarRows::default(),
