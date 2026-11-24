@@ -4,7 +4,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -99,7 +99,7 @@ fn fifo(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("poimen-notify-{}-{name}", std::process::id()));
     let _ = std::fs::remove_file(&path);
     assert!(
-        Command::new("mkfifo")
+        poimen_core::gui_path::command("mkfifo")
             .arg(&path)
             .status()
             .unwrap()
@@ -162,7 +162,7 @@ fn a_failing_or_hanging_command_is_logged_and_never_blocks_the_server() {
         .create(true)
         .append(true)
         .open(&log);
-    let mut tail = Command::new("tail")
+    let mut tail = poimen_core::gui_path::command("tail")
         .args(["-F"])
         .arg(&log)
         .stdout(Stdio::piped())
