@@ -5,8 +5,9 @@
 //! reports no status.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
-use poimen_protocol::Channel;
+use poimen_protocol::{CHANNEL, Channel};
 
 use crate::claude::{CliVersion, HookStatus, Version};
 use crate::hook::HookEnv;
@@ -89,6 +90,117 @@ pub fn kind(name: &str) -> Option<&'static Kind> {
 /// `claude|copilot|gemini`, for usage texts.
 pub fn names() -> String {
     KINDS.map(|k| k.name).join("|")
+}
+
+/// `integration install|uninstall|status <kind> [--settings <path>]` (`args` after `integration`),
+/// for `poimen integration` and the deprecated `poimen-server integration`. `prog` prefixes
+/// errors; `hook_exe` is the `poimen-server` binary the hooks call (and where the `poimen`
+/// binary is looked for first), or why it is unknown.
+pub fn run(args: &[String], prog: &str, hook_exe: Result<PathBuf, String>) -> ExitCode {
+    let (Some(action), Some(kind)) = (args.first(), args.get(1).and_then(|a| kind(a))) else {
+        eprintln!("{}", usage(prog));
+        return ExitCode::from(2);
+    };
+    let path = match args.get(2).map(String::as_str) {
+        Some("--settings") => args.get(3).map(PathBuf::from),
+        None => std::env::home_dir().map(|h| (kind.default_path)(&h, CHANNEL)),
+        _ => None,
+    };
+    let Some(path) = path else {
+        eprintln!("{}", usage(prog));
+        return ExitCode::from(2);
+    };
+    // The MCP config is the agent's own file below the home directory; an explicit `--settings`
+    // path is a test or special setup and leaves it alone.
+    let mcp = kind
+        .mcp
+        .filter(|_| args.get(2).is_none())
+        .and_then(|m| Some((m, (m.default_path)(&std::env::home_dir()?))));
+    let cli = kind.cli_version(&claude::SystemCli);
+    let result = match action.as_str() {
+        "install" => hook_exe.and_then(|exe| {
+            (kind.install)(&path, &exe, CHANNEL, cli)?;
+            let mut message = format!("installed in {}", path.display());
+            if let Some((m, mcp_path)) = &mcp {
+                let path_var = std::env::var_os("PATH");
+                match mcp_config::console_exe(&exe, CHANNEL, path_var.as_deref()) {
+                    Some(console) => {
+                        mcp_config::install(mcp_path, *m, &console, CHANNEL)?;
+                        message.push_str(&format!("; mcp in {}", mcp_path.display()));
+                    }
+                    None => message.push_str("; mcp skipped: the poimen binary was not found"),
+                }
+            }
+            Ok(message)
+        }),
+        "uninstall" => (kind.uninstall)(&path, CHANNEL).and_then(|removed| {
+            let mcp_removed = match &mcp {
+                Some((_, mcp_path)) => mcp_config::uninstall(mcp_path, CHANNEL)?,
+                None => false,
+            };
+            Ok(if removed || mcp_removed {
+                format!("removed from {}", path.display())
+            } else {
+                "nothing to remove".to_owned()
+            })
+        }),
+        "status" => (kind.status)(&path, CHANNEL, cli).and_then(|status| {
+            let mut out = if status.installed.is_empty() {
+                "not installed".to_owned()
+            } else if status.missing.is_empty() {
+                "installed".to_owned()
+            } else {
+                format!(
+                    "partially installed: {}; missing: {}",
+                    status.installed.join(", "),
+                    status.missing.join(", ")
+                )
+            };
+            if let Some((_, mcp_path)) = &mcp {
+                out.push('\n');
+                out.push_str(mcp_status_line(mcp_path)?);
+            }
+            Ok(out)
+        }),
+        _ => {
+            eprintln!("{}", usage(prog));
+            return ExitCode::from(2);
+        }
+    };
+    match result {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{prog}: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `mcp: installed|not installed|unavailable` (`unavailable`: no `poimen` binary to register).
+fn mcp_status_line(path: &std::path::Path) -> Result<&'static str, String> {
+    Ok(match mcp_config::status(path, CHANNEL)? {
+        mcp_config::McpState::Installed => "mcp: installed",
+        mcp_config::McpState::Missing => {
+            let found = std::env::current_exe().ok().and_then(|exe| {
+                mcp_config::console_exe(&exe, CHANNEL, std::env::var_os("PATH").as_deref())
+            });
+            if found.is_some() {
+                "mcp: not installed"
+            } else {
+                "mcp: unavailable"
+            }
+        }
+    })
+}
+
+fn usage(prog: &str) -> String {
+    format!(
+        "usage: {prog} integration install|uninstall|status {} [--settings <path>]",
+        names()
+    )
 }
 
 #[cfg(test)]

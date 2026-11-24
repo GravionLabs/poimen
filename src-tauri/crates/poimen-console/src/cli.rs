@@ -2,7 +2,9 @@
 
 use poimen_protocol::{AttachMode, Placement, SplitDirection};
 
+mod integration;
 mod layout;
+pub use integration::Integration;
 pub use layout::TrustFlag;
 
 /// A raw string: a `\` line continuation would drop the indentation of the next line.
@@ -46,6 +48,8 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
                                       130 SIGINT, 143 SIGTERM
   mcp                                 a stdio MCP server for agents: read tools, start_agent,
                                       prompt_agent, wait_agent, report_done
+  integration install|uninstall|status claude|copilot|gemini [--settings <path>]
+                                      the agent's status hooks and its `poimen mcp` entry
   doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;
                                       --bundle writes a local diagnostics file (never uploaded)
   -V, --version                       prints the version
@@ -156,6 +160,8 @@ pub enum Command {
         json: bool,
         bundle: Option<String>,
     },
+    /// `poimen integration install|uninstall|status <kind> [--settings <path>]` (#1173).
+    Integration(Integration),
     /// No arguments: the TUI.
     Tui,
     Help,
@@ -179,6 +185,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "tab" => layout::parse_tab(rest),
         "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
         "doctor" => parse_doctor(rest),
+        "integration" => integration::parse(rest),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
             no_more(&pos, 0)?;
