@@ -57,7 +57,7 @@ Panes are managed by `poimen-server`, so the result shows up through its events 
 
 ### Agents
 
-The step that installs the hooks (the *Install hooks* button, or `poimen-server integration install claude|copilot`) also registers `poimen mcp` ([ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)) as an MCP server of the agent, so a session can look around in poimen. Claude Code gets the entry `mcpServers.poimen` in `~/.claude.json`, Copilot CLI in `~/.copilot/mcp-config.json` (`poimen-rc` on a pre-release build, which runs next to the stable one without touching its entries). The one consent covers both; an agent that is already running reads its MCP config when it starts. The read tools:
+The step that installs the hooks (the *Install hooks* button, or `poimen integration install claude|copilot`) also registers `poimen mcp` ([ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)) as an MCP server of the agent, so a session can look around in poimen. Claude Code gets the entry `mcpServers.poimen` in `~/.claude.json`, Copilot CLI in `~/.copilot/mcp-config.json` (`poimen-rc` on a pre-release build, which runs next to the stable one without touching its entries). The one consent covers both; an agent that is already running reads its MCP config when it starts. The read tools:
 
 - `list_spaces`: the spaces of the server with their tabs.
 - `list_terminals`: the terminals, with the agent status and the space of each.

@@ -292,14 +292,15 @@ For agents that lead other agents, the [MCP server](/guide/mcp) is the better to
 
 ## Agent hooks from a shell
 
-Hooks are installed by the server binary, not by `poimen`:
+`poimen integration` installs the hooks (they keep calling `poimen-server hook ...`):
 
 ```sh
-poimen-server integration install claude    # or copilot, gemini
-poimen-server integration status claude
+poimen integration install claude    # or copilot, gemini
+poimen integration status claude
+poimen integration uninstall claude
 ```
 
-The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot CLI. `poimen doctor` shows what is installed.
+`poimen-server integration` still works for one release and prints a deprecation note on stderr. `--settings <path>` names the agent's file instead of its default. The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot CLI. `poimen doctor` shows what is installed.
 
 ## What the console does not do (yet)
 
@@ -307,5 +308,4 @@ The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot
 - The sidebar has no git tokens (`branch`, `dirty`, `sync`, `pr`) yet.
 - No settings dialog: the TUI reads `config.json` and nothing else, and only at start.
 - No machine switching: the console talks to the server of the machine it runs on.
-- Hook installation is in `poimen-server integration`, not in `poimen`.
 - The CLI has no commands for spaces and tabs (create, rename, close, split); use the TUI or the app, or the `start_agent` tool of the [MCP server](/guide/mcp).

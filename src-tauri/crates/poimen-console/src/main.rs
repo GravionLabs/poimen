@@ -103,7 +103,11 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Machines { json }) => machines(json),
-        Ok(cmd) if local && !matches!(cmd, Command::Doctor { .. }) && !start_server() => {
+        Ok(cmd)
+            if local
+                && !matches!(cmd, Command::Doctor { .. } | Command::Integration(_))
+                && !start_server() =>
+        {
             ExitCode::FAILURE
         }
         Ok(Command::Tui) => tui(&target),
@@ -126,6 +130,7 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Ok(Command::Integration(i)) => integration(&i),
         Ok(Command::Doctor { json, bundle }) => doctor(json, bundle.as_deref()),
         Ok(Command::Request(r)) => {
             let client = target.client();
@@ -296,6 +301,34 @@ fn tui(target: &Target) -> ExitCode {
     }
 }
 
+/// `poimen integration`: the hooks call `poimen-server hook ...`, so the hook binary is the server
+/// (`POIMEN_HOOK_EXE`, else next to the console, else on the login-shell `PATH`).
+fn integration(i: &cli::Integration) -> ExitCode {
+    let hook_exe = match std::env::var_os(poimen_protocol::ENV_HOOK_EXE).filter(|v| !v.is_empty()) {
+        Some(given) => poimen_server::claude::hook_exe(Some(given), std::env::current_exe),
+        None => {
+            let bin_dir = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(std::path::Path::to_path_buf));
+            poimen_console::server_start::find_server(
+                bin_dir.as_deref(),
+                &poimen_core::gui_path::child_path(),
+            )
+            .ok_or_else(|| {
+                format!(
+                    "{} was not found next to poimen or on PATH",
+                    poimen_console::server_start::server_name()
+                )
+            })
+        }
+    };
+    let mut args = vec![i.action.clone(), i.kind.clone()];
+    if let Some(path) = &i.settings {
+        args.extend(["--settings".to_owned(), path.clone()]);
+    }
+    poimen_server::integration::run(&args, "poimen", hook_exe)
+}
+
 /// `poimen doctor`: the report on stdout (text or JSON), optionally the bundle file.
 fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
     use poimen_console::doctor::{self, collect};
@@ -308,6 +341,7 @@ fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
         bin_dir: std::env::current_exe()
             .ok()
             .and_then(|e| e.parent().map(std::path::Path::to_path_buf)),
+        console: std::env::current_exe().ok(),
         path: path.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     };

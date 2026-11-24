@@ -100,6 +100,7 @@ fn inputs(f: &Fixture, hooks: &'static str) -> Inputs {
         client: &f.client,
         state_file: f.state_file.clone(),
         bin_dir: Some(bin.clone()),
+        console: Some(bin.join("poimen")),
         path: bin.display().to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
