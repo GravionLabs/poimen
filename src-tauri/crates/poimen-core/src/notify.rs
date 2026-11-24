@@ -268,7 +268,6 @@ pub fn machine_name() -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::time::Instant;
 
     fn msg() -> Message {
         Message {
@@ -370,7 +369,7 @@ mod tests {
             command: Some(vec!["sleep".into(), "30".into()]),
             url: None,
         };
-        let start = Instant::now();
+        let start = std::time::Instant::now();
         let e = run(&hang, &msg(), Duration::from_secs(1)).unwrap_err();
         assert!(e.contains("timed out"), "{e}");
         assert!(start.elapsed() < Duration::from_secs(10));
