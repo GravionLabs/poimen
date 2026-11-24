@@ -340,25 +340,18 @@ fn gh_pr_text(dir: &str, branch: &str) -> Option<String> {
         .spawn()
         .ok()?;
     let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut buf = String::new();
         let _ = stdout.read_to_string(&mut buf);
-        buf
+        let _ = tx.send(buf);
     });
-    let deadline = Instant::now() + GH_TIMEOUT;
-    let status = loop {
-        if let Some(s) = child.try_wait().ok()? {
-            break s;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(50));
+    let Ok(body) = rx.recv_timeout(GH_TIMEOUT) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
     };
-    let body = reader.join().ok()?;
-    if !status.success() {
+    if !child.wait().ok()?.success() {
         return None;
     }
     pr_text(&serde_json::from_str(&body).ok()?)
