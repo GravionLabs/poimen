@@ -3231,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-app"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "notify",
  "poimen-client",
@@ -3251,7 +3251,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-client"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "interprocess",
  "poimen-core",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-console"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "alacritty_terminal",
  "crossterm",
@@ -3281,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-core"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "notify",
  "poimen-protocol",
@@ -3294,7 +3294,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-protocol"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -3304,7 +3304,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-pty-host"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "libc",
  "poimen-client",
@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-server"
-version = "0.36.0"
+version = "0.36.1"
 dependencies = [
  "alacritty_terminal",
  "base64 0.23.1",
