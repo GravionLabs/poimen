@@ -5,6 +5,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.35.0] — 2026-11-24
+
+### Bug Fixes
+- **ci**: Renovate targets the default branch again and ignores .agents/ (#1253) (#1255)
+- **mcp**: Start_shell test polls without a real-time sleep (#1181)
+- **settings**: Settings page forms span the whole window on wide screens (#1262) (#1267)
+- **settings**: Cap the settings page width (#1262)
+- **settings**: Use literal page widths, no undefined custom properties (#1262)
+- **console**: Close the terminal of a Started that arrives with the signal (#1257)
+
+
+### Documentation
+- **adr**: Script environment for runs (#748) (#1269)
+- **adr**: Script environment for runs (#748)
+- **adr**: State the CLI as proposed and split the remote cases (#748)
+
+
+### Features
+- Run events show text, fall back to reason (#622) (#1260)
+- **deliver**: Start a deliver loop from the app (#746) (#1263)
+- **mcp**: Start_shell runs a command in a shell pane (#1181) (#1264)
+- **mcp**: Start_shell runs a command in a shell pane (#1181)
+- **mcp**: Stop_terminal interrupts or closes a terminal (#1183) (#1265)
+- **mcp**: Write_terminal types into an existing terminal (#1184) (#1266)
+- **client**: Run a harness session in a pane and report its end (#744) (#1261)
+- **client**: Run a harness session in a pane and report its end (#744)
+- **deliver**: Show the terminal of a running task (#745) (#1268)
+- **console**: Poimen session run command (#1257) (#1270)
+- **console**: Poimen session run command (#1257)
+
+
 ## [0.34.0] — 2026-11-23
 
 ### Bug Fixes
@@ -22,6 +53,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Release/next is red (ci) (#1251) (#1252)
 - Logout ends all terminals, server and hosts share the app's systemd scope (#1231) (#1247)
 - **server**: Start poimen-server in its own systemd scope so logout keeps terminals (#1231)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.34.0 [skip ci]
 
 
 ### Features
