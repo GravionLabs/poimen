@@ -16,59 +16,16 @@ pub struct Model {
     pub terminals: Vec<Terminal>,
     /// Repository per directory for the worktree groups (empty when off); a missing one is a flat space.
     pub repos: HashMap<String, RepoRef>,
+    /// `sidebar.groupWorktrees` is off: `repos` feeds the git tokens only.
+    pub flat: bool,
+    /// `sidebar.showBaseBranch`: the `branch` token shows the base branch too.
+    pub show_base_branch: bool,
 }
 
-/// What the worktree groups need of a directory's repository.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoRef {
-    pub common_dir: String,
-    /// True for a linked worktree, false for the main checkout.
-    pub worktree: bool,
-}
-
-/// Repository info per directory, read once; a failed read (no repository, or a directory missing here) stays `None`.
-pub struct RepoCache {
-    known: HashMap<String, Option<RepoRef>>,
-    lookup: fn(&str) -> Option<RepoRef>,
-}
-
-fn git_lookup(dir: &str) -> Option<RepoRef> {
-    poimen_core::git::info(dir).map(|i| RepoRef {
-        common_dir: i.common_dir,
-        worktree: i.worktree,
-    })
-}
-
-impl Default for RepoCache {
-    fn default() -> Self {
-        Self::with_lookup(git_lookup)
-    }
-}
-
-impl RepoCache {
-    pub fn with_lookup(lookup: fn(&str) -> Option<RepoRef>) -> Self {
-        Self {
-            known: HashMap::new(),
-            lookup,
-        }
-    }
-
-    /// The repositories of `dirs` that resolve, reading each directory the first time only.
-    pub fn resolve<'a>(&mut self, dirs: impl Iterator<Item = &'a str>) -> HashMap<String, RepoRef> {
-        let mut out = HashMap::new();
-        for dir in dirs {
-            let lookup = self.lookup;
-            let found = self
-                .known
-                .entry(dir.to_owned())
-                .or_insert_with(|| lookup(dir));
-            if let Some(r) = found {
-                out.insert(dir.to_owned(), r.clone());
-            }
-        }
-        out
-    }
-}
+#[path = "sidebar_git.rs"]
+pub mod git;
+use git::GitView;
+pub use git::{RepoCache, RepoRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowKind {
@@ -235,6 +192,7 @@ struct Subject<'a> {
     tab: Option<&'a str>,
     space: &'a Space,
     starter: Option<&'a str>,
+    git: GitView<'a>,
 }
 
 /// Reported text is shown as plain text whatever server sent it: bidi overrides, invisible characters and an unknown kind go.
@@ -440,6 +398,7 @@ fn value(token: &str, s: &Subject<'_>, home: Option<&str>) -> Option<String> {
         "tab" => s.tab.map(str::to_owned),
         "started_by" => s.starter.map(|n| format!("↳ {n}")),
         "notification" => t.and_then(|t| t.agent.as_ref()?.message.clone()),
+        "branch" | "dirty" | "sync" | "pr" => s.git.token(token),
         "dir" => match t {
             None => Some(short_path(&s.space.cwd, home)),
             Some(t) if t.cwd != s.space.cwd => Some(short_path(&t.cwd, home)),
@@ -502,21 +461,44 @@ impl Model {
             tabs: layout.tabs,
             terminals,
             repos: HashMap::new(),
+            flat: false,
+            show_base_branch: false,
         })
     }
 
-    /// [`Model::load`] plus the spaces' repositories for the worktree groups (`sidebar.groupWorktrees`), via `cache`.
-    pub fn load_grouped(client: &Client, cache: &mut RepoCache) -> Result<Self, ClientError> {
+    /// [`Model::load`] plus what `cache` knows of the directories of the spaces and terminals (worktree groups and git tokens); unread ones fill in later.
+    pub fn load_with_repos(
+        client: &Client,
+        cache: &RepoCache,
+        config: &super::config::Config,
+    ) -> Result<Self, ClientError> {
         let mut model = Self::load(client)?;
-        model.repos = cache.resolve(model.spaces.iter().map(|s| s.cwd.as_str()));
+        model.repos = model.resolve_repos(cache);
+        model.flat = !config.group_worktrees;
+        model.show_base_branch = config.show_base_branch;
         Ok(model)
+    }
+
+    /// The repositories of the model's directories as far as `cache` has read them.
+    pub fn resolve_repos(&self, cache: &RepoCache) -> HashMap<String, RepoRef> {
+        cache.resolve(self.dirs())
+    }
+
+    /// [`Model::resolve_repos`] that reads on this thread first (tests).
+    pub fn resolve_repos_now(&self, cache: &RepoCache) -> HashMap<String, RepoRef> {
+        cache.resolve_now(self.dirs())
+    }
+
+    fn dirs(&self) -> impl Iterator<Item = &str> + Clone {
+        let terminals = self.terminals.iter().map(|t| t.cwd.as_str());
+        self.spaces.iter().map(|s| s.cwd.as_str()).chain(terminals)
     }
 
     /// Puts linked-worktree spaces directly after the space of their repository's main checkout,
     /// keeping the order inside heads and members. A group without a main checkout and a space
     /// without repository stay flat. Returns each space with whether it is a member.
     fn grouped<'a>(&self, spaces: Vec<&'a Space>) -> Vec<(&'a Space, bool)> {
-        let repo = |s: &Space| self.repos.get(&s.cwd);
+        let repo = |s: &Space| self.repos.get(&s.cwd).filter(|_| !self.flat);
         let mut heads: HashMap<&str, &str> = HashMap::new();
         for s in &spaces {
             if let Some(r) = repo(s).filter(|r| !r.worktree) {
@@ -541,6 +523,20 @@ impl Model {
             }
         }
         out
+    }
+
+    /// The repositories a row's git tokens read: a space's own, a terminal's next to its space's.
+    fn git_view(&self, space: &Space, terminal_cwd: Option<&str>) -> GitView<'_> {
+        let space_repo = self.repos.get(&space.cwd);
+        let (own, space) = match terminal_cwd {
+            None => (space_repo, None),
+            Some(cwd) => (self.repos.get(cwd), space_repo),
+        };
+        GitView {
+            own,
+            space,
+            show_base_branch: self.show_base_branch,
+        }
     }
 
     /// The name of the terminal that started `t` (#982), when it is still there.
@@ -709,6 +705,7 @@ impl Model {
                 tab: None,
                 space,
                 starter: None,
+                git: self.git_view(space, None),
             };
             rows.push(Row {
                 kind: RowKind::Space,
@@ -749,6 +746,7 @@ impl Model {
                         tab: tab.map(|t| t.name.as_str()),
                         space,
                         starter: self.starter_of(t),
+                        git: self.git_view(space, Some(&t.cwd)),
                     };
                     let lines = if t.agent.is_some() { &agent } else { &terminal };
                     rows.push(Row {
