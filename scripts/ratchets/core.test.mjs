@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { countTestPatterns, denyExceptionProblems, isTrackedPath, pathsIn } from "./checks.mjs";
+import {
+  countTestPatterns,
+  denyExceptionProblems,
+  isTrackedPath,
+  leaksTempDirs,
+  pathsIn,
+} from "./checks.mjs";
 import { compare, formatBaseline, parseBaseline, prune } from "./core.mjs";
 import { runRatchet } from "./run.mjs";
 
@@ -108,4 +114,47 @@ test("deny exceptions need a reason and a future expiry", () => {
   const lic = '[[licenses.exceptions]]\ncrate = "x"\nallow = ["GPL-3.0"]\n';
   assert.equal(denyExceptionProblems(lic, "2026-11-21").size, 1);
   assert.equal(denyExceptionProblems('ignore = [\n  # { id = "x" },\n]\n').size, 0);
+});
+
+test("a test directory under temp_dir() that nothing removes is a leak", () => {
+  const leak = `#[cfg(test)]
+mod tests {
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("poimen-x-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+}`;
+  assert.equal(leaksTempDirs(leak), true);
+  assert.equal(leaksTempDirs(leak.replace("create_dir_all(&dir)", 'write(&dir, "")')), true);
+});
+
+test("a TempDir or TestDir guard or a removal is not a leak", () => {
+  const guarded = `#[cfg(test)]
+mod tests {
+    fn temp() -> tempfile::TempDir {
+        std::fs::create_dir_all(std::env::temp_dir().join("a")).unwrap();
+        tempfile::tempdir().unwrap()
+    }
+}`;
+  assert.equal(leaksTempDirs(guarded), false);
+  assert.equal(leaksTempDirs(guarded.replace("tempfile::TempDir", "TestDir")), false);
+  const removed = `#[cfg(test)]
+mod tests {
+    #[test]
+    fn t() {
+        let dir = std::env::temp_dir().join("a");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}`;
+  assert.equal(leaksTempDirs(removed), false);
+});
+
+test("production code that names temp_dir() and creates files is not a leak", () => {
+  const prod = `fn socket() { let d = std::env::temp_dir().join("x"); std::fs::create_dir_all(&d).unwrap(); }
+#[cfg(test)]
+mod tests { #[test] fn t() { assert!(true); } }`;
+  assert.equal(leaksTempDirs(prod), false);
+  assert.equal(leaksTempDirs("fn t() { let h = std::env::temp_dir(); }"), false);
 });

@@ -484,19 +484,11 @@ pub type Watches = HashMap<String, Handle>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use crate::test_dir::TestDir;
     use std::time::Instant;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "poimen-deliver-{}-{}-{name}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        // Events carry resolved paths (`/private/var` for `/var` on macOS).
-        dir.canonicalize().unwrap()
+    fn temp_dir(name: &str) -> TestDir {
+        TestDir::new(&format!("poimen-deliver-{name}-"))
     }
 
     fn write_status(root: &Path, text: &str) {
@@ -591,7 +583,7 @@ mod tests {
     fn the_watch_follows_the_file_from_missing_to_written_to_rewritten() {
         let root = temp_dir("watch");
         let (tx, rx) = mpsc::channel();
-        let _handle = watch(root.clone(), move |r| {
+        let _handle = watch(root.to_path_buf(), move |r| {
             let _ = tx.send(r);
         });
         let next = |want: &dyn Fn(&Read) -> bool| {
@@ -891,7 +883,7 @@ mod tests {
         let dir = root.join("common").join(EVENTS_PATH);
         std::fs::create_dir_all(root.join("common")).unwrap();
         let (tx, rx) = mpsc::channel();
-        let _handle = watch_with(root.clone(), Some(dir.clone()), move |r| {
+        let _handle = watch_with(root.to_path_buf(), Some(dir.to_path_buf()), move |r| {
             let _ = tx.send(r);
         });
         let next = |want: &dyn Fn(&Read) -> bool| {

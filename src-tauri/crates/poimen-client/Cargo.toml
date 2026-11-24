@@ -15,6 +15,10 @@ poimen-protocol = { path = "../poimen-protocol" }
 serde = "1"
 serde_json = "1"
 
+[dev-dependencies]
+# Test directories that remove themselves, also when the test panics (docs/agents/tests.md).
+tempfile = "3"
+
 [lints.rust]
 unsafe_code = "forbid"
 

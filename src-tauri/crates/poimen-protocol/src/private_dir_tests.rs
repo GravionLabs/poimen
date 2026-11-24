@@ -1,11 +1,12 @@
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
 
-fn fresh(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("poimen-pd-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A fresh directory; keep the guard, it removes the directory on drop.
+fn fresh(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("poimen-pd-{name}-"))
+        .tempdir()
+        .unwrap()
 }
 
 fn mode(p: &std::path::Path) -> u32 {
@@ -14,31 +15,31 @@ fn mode(p: &std::path::Path) -> u32 {
 
 #[test]
 fn a_0700_dir_of_ours_passes() {
-    let dir = fresh("ok");
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-    check_private_dir(&dir, false).unwrap();
+    let guard = fresh("ok");
+    let dir = guard.path();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    check_private_dir(dir, false).unwrap();
 }
 
 #[test]
 fn a_0777_dir_is_fixed_with_fix_and_refused_without() {
-    let dir = fresh("loose");
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
-    let err = check_private_dir(&dir, false).unwrap_err();
+    let guard = fresh("loose");
+    let dir = guard.path();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let err = check_private_dir(dir, false).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-    assert_eq!(mode(&dir), 0o777);
-    check_private_dir(&dir, true).unwrap();
-    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(mode(dir), 0o777);
+    check_private_dir(dir, true).unwrap();
+    assert_eq!(mode(dir), 0o700);
 }
 
 #[test]
 fn a_symlink_to_a_dir_is_refused_even_with_fix() {
-    let target = fresh("target");
-    let link = std::env::temp_dir().join(format!("poimen-pd-{}-link", std::process::id()));
-    let _ = std::fs::remove_file(&link);
-    symlink(&target, &link).unwrap();
+    let base = fresh("target");
+    let link = base.path().join("link");
+    symlink(base.path(), &link).unwrap();
     let err = check_private_dir(&link, true).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-    std::fs::remove_file(&link).unwrap();
 }
 
 #[test]
@@ -71,6 +72,6 @@ fn a_tab_parent_is_optional_on_the_wire() {
 
 #[test]
 fn a_missing_dir_is_not_found() {
-    let err = check_private_dir(&fresh("m").join("nope"), false).unwrap_err();
+    let err = check_private_dir(&fresh("m").path().join("nope"), false).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }

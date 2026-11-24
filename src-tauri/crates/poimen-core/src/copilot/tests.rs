@@ -1,20 +1,13 @@
 use super::*;
+use crate::test_dir::TestDir;
 use std::io::Write;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 const FIXTURE: &str = include_str!("../../fixtures/copilot-events.jsonl");
 
-fn temp_dir(name: &str) -> PathBuf {
-    static N: AtomicU32 = AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "poimen-copilot-{}-{}-{name}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(name: &str) -> TestDir {
+    TestDir::new(&format!("poimen-copilot-{name}-"))
 }
 
 fn append(path: &Path, text: &str) {
@@ -26,7 +19,7 @@ fn append(path: &Path, text: &str) {
     file.write_all(text.as_bytes()).unwrap();
 }
 
-fn session(name: &str, text: &str) -> PathBuf {
+fn session(name: &str, text: &str) -> TestDir {
     let dir = temp_dir(name);
     append(&dir.join(EVENTS), text);
     dir
@@ -333,7 +326,8 @@ fn the_last_main_assistant_message_with_text_is_reported() {
         r#"{"type":"assistant.message","data":{"messageId":"m4","content":"Subagent."},"agentId":"a1","id":"4","timestamp":"t4"}"#,
         "\n",
     );
-    let mut tracker = Tracker::new(&session("last-message", text));
+    let dir = session("last-message", text);
+    let mut tracker = Tracker::new(&dir);
     let updates = tracker.refresh();
     let last = updates.iter().find_map(|u| match u {
         Update::Main { last_message, .. } => Some(last_message.clone()),

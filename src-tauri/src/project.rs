@@ -208,21 +208,19 @@ pub async fn project_run(
 mod detected {
     use super::*;
     use crate::backend_fake::FakeBackend;
+    use crate::test_dir::TestDir;
 
-    fn repo(pkg: &str) -> String {
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("poimen-run-detected-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn repo(pkg: &str) -> (TestDir, String) {
+        let dir = TestDir::new("poimen-run-detected-");
         std::fs::write(dir.join("package.json"), pkg).unwrap();
         std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
-        dir.to_string_lossy().into_owned()
+        let path = dir.to_string_lossy().into_owned();
+        (dir, path)
     }
 
     #[test]
     fn a_pick_opens_a_named_tab_and_types_the_argv() {
-        let root = repo(r#"{"scripts": {"build": "tsc", "a b": "x"}}"#);
+        let (_dir, root) = repo(r#"{"scripts": {"build": "tsc", "a b": "x"}}"#);
         let fake = FakeBackend::default();
         assert_eq!(
             run_detected(&fake, &root, "w1", &root, "npm", "build"),
@@ -249,7 +247,7 @@ mod detected {
 
     #[test]
     fn an_unknown_name_runs_nothing() {
-        let root = repo(r#"{"scripts": {"build": "tsc"}}"#);
+        let (_dir, root) = repo(r#"{"scripts": {"build": "tsc"}}"#);
         let fake = FakeBackend::default();
         assert_eq!(
             run_detected(&fake, &root, "w1", &root, "npm", "rm -rf"),
@@ -264,7 +262,7 @@ mod detected {
 
     #[test]
     fn a_skill_is_not_a_command() {
-        let root = repo(r#"{"scripts": {}}"#);
+        let (_dir, root) = repo(r#"{"scripts": {}}"#);
         let skill = std::path::Path::new(&root).join(".agents/skills/deliver");
         std::fs::create_dir_all(&skill).unwrap();
         std::fs::write(skill.join("SKILL.md"), "---\nname: deliver\n---\n").unwrap();

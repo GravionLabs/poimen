@@ -5,7 +5,7 @@ use crate::backend::LayoutRequest;
 
 #[test]
 fn a_tasks_env_goes_into_space_create() {
-    let (backend, log) = backend_for("space-env", vec![], false);
+    let (backend, log, _dir) = backend_for("space-env", vec![], false);
     let env = std::collections::BTreeMap::from([
         ("POIMEN_ISSUE".to_owned(), "12".to_owned()),
         ("POIMEN_BRANCH".to_owned(), "feat/12-x".to_owned()),
@@ -37,7 +37,7 @@ pub(super) fn layout_request<'a>(
 
 #[test]
 fn a_new_space_with_layout_is_built_by_the_server() {
-    let (backend, log) = backend_for("space-layout", vec![], false);
+    let (backend, log, _dir) = backend_for("space-layout", vec![], false);
     let request = layout_request("/work/api", None, Some("claude 'x'"));
     let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
     assert_eq!(

@@ -67,6 +67,48 @@ export function testPatterns(root, files = tracked(root)) {
   return map;
 }
 
+// A Rust test that makes a directory under `temp_dir()` and nothing ever removes it: every run leaves the
+// directory behind, and `/tmp` (a tmpfs on many Linux systems) runs out of inodes and the desktop with it.
+const TEMP_ROOT = /\benv::temp_dir\(\)/;
+const TEMP_CREATES = /\bcreate_dir(_all)?\(|\bfs::write\(|\bFile::create\(|\bOpenOptions\b/;
+const TEMP_GUARD = /\bTempDir\b|\bTestDir\b|\btempdir\(|\btempfile::/;
+const REMOVE = /\bremove_dir_all\(/g;
+
+/**
+ * Removals of a directory that come after the test made it. A removal right before a `create_dir` only
+ * clears an earlier run's directory: with a process id in the name, every run then leaves a new one.
+ */
+function removalsAfterUse(text) {
+  let n = 0;
+  for (const m of text.matchAll(REMOVE)) {
+    if (!/\bcreate_dir(_all)?\(/.test(text.slice(m.index, m.index + 200))) n += 1;
+  }
+  return n;
+}
+
+/** True when the text creates files under `temp_dir()` and nothing removes them (a guard or a removal after use). */
+export function leaksTempDirs(text) {
+  // Only the test module: production code may name `temp_dir()` and create files without leaking anything.
+  const at = text.indexOf("#[cfg(test)]");
+  text = at === -1 ? text : text.slice(at);
+  return (
+    TEMP_ROOT.test(text) &&
+    TEMP_CREATES.test(text) &&
+    !TEMP_GUARD.test(text) &&
+    removalsAfterUse(text) === 0
+  );
+}
+
+export function tempDirLeaks(root, files = tracked(root)) {
+  const map = new Map();
+  for (const file of files) {
+    if (!file.endsWith(".rs")) continue;
+    const text = read(root, file);
+    if (isTestFile(file, text) && leaksTempDirs(text)) map.set(file, 1);
+  }
+  return map;
+}
+
 /** Repository paths named in a Markdown text: backticked tokens and link targets that start in a top-level entry. */
 export function pathsIn(text, tops) {
   const found = new Set();
@@ -153,6 +195,12 @@ export const RATCHETS = [
     name: "test-patterns",
     measure: testPatterns,
     fix: "wait on a condition, not on time; give a skipped test an issue number (#123)",
+  },
+  {
+    name: "test-temp-dirs",
+    measure: tempDirLeaks,
+    fixed: true,
+    fix: "create the directory with tempfile::TempDir and keep the guard alive; it removes the directory on drop, also when the test panics (docs/agents/tests.md)",
   },
   { name: "doc-paths", measure: docPaths, fix: "correct the path in AGENTS.md or docs/agents/" },
   {

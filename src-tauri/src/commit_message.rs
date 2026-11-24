@@ -362,10 +362,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn script(body: &str) -> (std::path::PathBuf, Vec<String>) {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-cm-{}-{}", std::process::id(), body.len()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn script(body: &str) -> (crate::test_dir::TestDir, Vec<String>) {
+        let dir = crate::test_dir::TestDir::new("poimen-cm-");
         (dir, vec!["sh".into(), "-c".into(), body.into()])
     }
 

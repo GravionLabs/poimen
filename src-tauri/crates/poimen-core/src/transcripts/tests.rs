@@ -1,16 +1,9 @@
 use super::*;
+use crate::test_dir::TestDir;
 use std::io::Write;
-use std::sync::atomic::{AtomicU32, Ordering};
 
-fn temp_dir(name: &str) -> PathBuf {
-    static N: AtomicU32 = AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "poimen-transcripts-{}-{}-{name}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(name: &str) -> TestDir {
+    TestDir::new(&format!("poimen-transcripts-{name}-"))
 }
 
 fn append(path: &Path, text: &str) {
@@ -293,7 +286,7 @@ fn tailer_starts_over_when_the_file_shrinks() {
     assert_eq!(tailer.read_new(), vec!["new"]);
 }
 
-fn session_fixture(name: &str) -> (PathBuf, PathBuf) {
+fn session_fixture(name: &str) -> (TestDir, PathBuf) {
     let project = temp_dir(name);
     let sub = project.join("S").join("subagents");
     append(

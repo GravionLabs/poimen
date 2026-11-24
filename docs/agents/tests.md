@@ -22,6 +22,12 @@ Every change ships with tests, and every test earns its place with three rules.
 
 An exception is not a loophole: a constant that is a wire value or a user-visible contract (a protocol version, a shortcut default) is tested as a contract, with the literal written out, and the test says why it is frozen.
 
+## Test directories
+
+A test that needs a directory under `temp_dir()` creates it with `tempfile::TempDir` (a dev-dependency) and keeps the guard in a variable for as long as it uses the path: the directory is removed when the guard drops, also when the test panics. A helper returns the guard with the path (`(TempDir, PathBuf)`) or a small wrapper (`TestDir` in `src-tauri/crates/poimen-core/src/test_dir.rs` and `src-tauri/src/test_dir.rs`). Do not take the guard as a temporary (`Tracker::new(&helper())` followed by more calls): the directory is gone at the end of the statement.
+
+A directory made by hand (`temp_dir().join(..)` and `create_dir_all`) and never removed stays on every run. On Linux `/tmp` is often a tmpfs with a fixed number of inodes: it ran out at about a million leftover files and the desktop stopped (icons gone, apps frozen). The `test-temp-dirs` ratchet (`pnpm ratchets`, no baseline) fails for a Rust test file that creates files under `temp_dir()` and has no `TempDir`, `TestDir`, `tempdir(` or `remove_dir_all`.
+
 ## Review checklist
 
 Ask these of every diff, in this order. A "no" on the first one is blocking.
@@ -32,3 +38,4 @@ Ask these of every diff, in this order. A "no" on the first one is blocking.
 - [ ] Does any test only check a constant, a CSS class, third-party code, private state or timing?
 - [ ] Is a bug fix covered by a test that failed before the fix?
 - [ ] Do tests stay read-only against the user's session (`AGENTS.md` rules)?
+- [ ] Does a test directory remove itself (a `TempDir` guard), also when the test fails?

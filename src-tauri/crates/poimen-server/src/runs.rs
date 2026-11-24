@@ -245,18 +245,15 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::cell::Cell;
-    use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn temp_dir(name: &str) -> PathBuf {
-        static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "poimen-server-runs-{}-{}-{name}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A fresh directory; keep the guard, it removes the directory on drop.
+    fn temp_dir(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("poimen-server-runs-{name}-"))
+            .tempdir()
+            .unwrap();
+        let dir = guard.path().to_path_buf();
+        (guard, dir)
     }
 
     fn line(seq: u32, ty: &str) -> String {
@@ -293,7 +290,7 @@ mod tests {
 
     #[test]
     fn a_new_file_is_read_from_the_start_and_an_appended_line_once() {
-        let dir = temp_dir("new");
+        let (_guard, dir) = temp_dir("new");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         let mut runs = Runs::default();
         assert!(runs.scan(&repos, SystemTime::now()).is_empty());
@@ -316,7 +313,7 @@ mod tests {
 
     #[test]
     fn an_incomplete_last_line_waits_until_it_is_complete() {
-        let dir = temp_dir("half");
+        let (_guard, dir) = temp_dir("half");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         let file = dir.join("r1.jsonl");
         let half = line(2, "progress");
@@ -330,7 +327,7 @@ mod tests {
 
     #[test]
     fn the_replay_holds_every_event_read_so_far_per_run() {
-        let dir = temp_dir("replay");
+        let (_guard, dir) = temp_dir("replay");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         append(&dir.join("a.jsonl"), &line(1, "run.started"));
         append(
@@ -351,7 +348,7 @@ mod tests {
 
     #[test]
     fn foreign_old_and_removed_files_and_dropped_repositories_are_not_followed() {
-        let dir = temp_dir("foreign");
+        let (_guard, dir) = temp_dir("foreign");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         append(&dir.join("notes.txt"), &line(1, "run.started"));
         append(&dir.join(".hidden.jsonl"), &line(1, "run.started"));
@@ -393,7 +390,7 @@ mod tests {
 
     #[test]
     fn older_files_follow_only_while_their_subject_is_shown_and_within_fourteen_days() {
-        let dir = temp_dir("subject");
+        let (_guard, dir) = temp_dir("subject");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         subject_file(&dir, "earlier", true, 5);
         subject_file(&dir, "bare", false, 5);
@@ -422,7 +419,7 @@ mod tests {
 
     #[test]
     fn a_truncated_file_is_read_again_from_its_start() {
-        let dir = temp_dir("trunc");
+        let (_guard, dir) = temp_dir("trunc");
         let repos = vec![("/repo".to_owned(), dir.clone())];
         let file = dir.join("r1.jsonl");
         append(&file, &(line(1, "run.started") + &line(2, "progress")));

@@ -48,7 +48,7 @@ fn error_progress_kind_and_title_reach_the_pane_and_its_event() {
 
 #[test]
 fn a_prompt_draft_is_told_to_the_server_on_the_stream_of_its_terminal() {
-    let (backend, log) = backend_for("draft", vec![], false);
+    let (backend, log, _dir) = backend_for("draft", vec![], false);
     let (opened, _rx) = collect(&backend, Mode::Observe, false);
     opened.unwrap();
     backend.terminal_draft("t1", true).unwrap();
@@ -87,7 +87,7 @@ fn a_prompt_draft_is_told_to_the_server_on_the_stream_of_its_terminal() {
 
 #[test]
 fn a_stream_opened_while_a_draft_is_held_tells_the_server_again() {
-    let (backend, log) = backend_for("draft-again", vec![], false);
+    let (backend, log, _dir) = backend_for("draft-again", vec![], false);
     backend.terminal_draft("t1", true).unwrap();
     let (opened, _rx) = collect(&backend, Mode::Observe, false);
     opened.unwrap();
@@ -107,7 +107,7 @@ fn a_stream_opened_while_a_draft_is_held_tells_the_server_again() {
 
 #[test]
 fn a_held_controller_is_reported_as_a_closed_record_not_an_error() {
-    let (backend, _) = backend_for("held", vec![], true);
+    let (backend, _, _dir) = backend_for("held", vec![], true);
     let (opened, rx) = collect(&backend, Mode::Control, false);
     assert!(opened.is_ok());
     let (_, record) = rx.recv().unwrap();

@@ -1,4 +1,4 @@
-src-tauri/crates/poimen-client/src/lib.rs	1398
+src-tauri/crates/poimen-client/src/lib.rs	1391
 src-tauri/crates/poimen-console/src/tui/mod.rs	1301
 src-tauri/crates/poimen-console/src/tui/palette.rs	1209
 src-tauri/crates/poimen-console/src/tui/sidebar.rs	888
@@ -12,11 +12,11 @@ src-tauri/crates/poimen-protocol/src/lib.rs	1551
 src-tauri/crates/poimen-server/src/lib.rs	2470
 src-tauri/crates/poimen-server/src/tabs.rs	986
 src-tauri/src/changes.rs	908
-src-tauri/src/deliver.rs	952
+src-tauri/src/deliver.rs	944
 src-tauri/src/github_issues.rs	1396
-src-tauri/src/lib.rs	3574
+src-tauri/src/lib.rs	3573
 src-tauri/src/machines.rs	1938
-src-tauri/src/poimen_backend.rs	2500
+src-tauri/src/poimen_backend.rs	2499
 src-tauri/src/poimen_server.rs	1292
 src-tauri/src/settings.rs	2324
 src-tauri/src/settings_transfer.rs	1195

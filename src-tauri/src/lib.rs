@@ -45,6 +45,8 @@ mod spaces;
 mod stream_commands;
 mod task_start;
 mod terminal_colors;
+#[cfg(test)]
+mod test_dir;
 mod updater;
 mod worktree;
 
@@ -2876,10 +2878,8 @@ mod build_layout_tests {
         assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
     }
 
-    fn home_with_templates(config: &str) -> (PathBuf, String) {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let home = std::env::temp_dir().join(format!("poimen-tpl-{}-{n}", std::process::id()));
+    fn home_with_templates(config: &str) -> (crate::test_dir::TestDir, String) {
+        let home = crate::test_dir::TestDir::new("poimen-tpl-");
         std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
         std::fs::write(home.join(".config/poimen/config.json"), config).unwrap();
         let dir = home.join("src/app");
@@ -3047,13 +3047,12 @@ mod build_layout_tests {
     }
 
     /// A directory with a project file whose `setup` is not trusted by anyone.
-    fn untrusted_project() -> String {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("poimen-513-{}-{n}", std::process::id()));
+    fn untrusted_project() -> (crate::test_dir::TestDir, String) {
+        let dir = crate::test_dir::TestDir::new("poimen-513-");
         std::fs::create_dir_all(dir.join(".poimen")).unwrap();
         std::fs::write(dir.join(".poimen/config.json"), r#"{"setup": "make"}"#).unwrap();
-        dir.to_string_lossy().into_owned()
+        let path = dir.to_string_lossy().into_owned();
+        (dir, path)
     }
 
     #[test]
@@ -3085,7 +3084,7 @@ mod build_layout_tests {
     #[test]
     fn a_layout_backend_gets_the_task_command_and_the_trust_answer() {
         let fake = layout_backend(built("s9"));
-        let dir = untrusted_project();
+        let (_guard, dir) = untrusted_project();
         let decision = trust::Decision::Trust { hash: "abc".into() };
         create_space_with(
             &fake,
@@ -3142,7 +3141,7 @@ mod build_layout_tests {
     #[test]
     fn the_app_does_not_gate_the_project_file_of_a_layout_backend() {
         // The server asks for trust; the app creates the space as it is.
-        let dir = untrusted_project();
+        let (_guard, dir) = untrusted_project();
         let fake = layout_backend(built("s9"));
         let outcome = create_space_with(&fake, None, &dir, None, None, None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());

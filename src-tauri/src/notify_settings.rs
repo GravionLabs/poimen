@@ -36,10 +36,10 @@ pub async fn notify_test(status: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
 
-    fn home(name: &str, config: &str) -> std::path::PathBuf {
-        let home =
-            std::env::temp_dir().join(format!("poimen-notify-test-{}-{name}", std::process::id()));
+    fn home(name: &str, config: &str) -> TestDir {
+        let home = TestDir::new(&format!("poimen-notify-test-{name}-"));
         let path = poimen_core::settings::config_path(&home);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, config).unwrap();
@@ -56,8 +56,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_configured_command_runs_with_the_test_message() {
-        let out =
-            std::env::temp_dir().join(format!("poimen-notify-test-out-{}", std::process::id()));
+        let out_dir = TestDir::new("poimen-notify-test-out-");
+        let out = out_dir.join("out");
         let config = serde_json::json!({ "notify": { "done": { "command":
             ["sh", "-c", format!("echo \"$0\" > '{}'", out.display()), "{agent}:{status}"] } } });
         let h = home("run", &config.to_string());

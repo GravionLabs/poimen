@@ -264,6 +264,7 @@ pub async fn deliver_start(
 mod tests {
     use super::*;
     use crate::backend_fake::FakeBackend;
+    use crate::test_dir::TestDir;
 
     fn milestone(name: &str) -> Request {
         Request {
@@ -288,18 +289,16 @@ mod tests {
     }
 
     /// A directory with an executable named `deliver-loop`, as a `PATH`.
-    fn path_with_loop() -> String {
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("poimen-deliver-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn path_with_loop() -> (TestDir, String) {
+        let dir = TestDir::new("poimen-deliver-");
         let name = if cfg!(windows) {
             "deliver-loop.cmd"
         } else {
             COMMAND
         };
         std::fs::write(dir.join(name), "").unwrap();
-        dir.to_string_lossy().into_owned()
+        let path = dir.to_string_lossy().into_owned();
+        (dir, path)
     }
 
     const NOTHING: &str = "";
@@ -432,7 +431,7 @@ mod tests {
 
     #[test]
     fn the_command_is_found_only_on_the_path() {
-        assert!(available_in(&path_with_loop()));
+        assert!(available_in(&path_with_loop().1));
         assert!(!available_in(NOTHING));
         assert!(!available_in(
             std::env::temp_dir()
@@ -444,7 +443,7 @@ mod tests {
 
     #[test]
     fn the_base_is_read_from_the_agents_config() {
-        let dir = std::env::temp_dir().join(format!("poimen-deliver-base-{}", std::process::id()));
+        let dir = TestDir::new("poimen-deliver-base-");
         std::fs::create_dir_all(dir.join(".agents")).unwrap();
         let root = dir.to_string_lossy().into_owned();
         assert_eq!(configured_base(&root), None);
@@ -467,7 +466,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &ok_persist,
-            &path_with_loop(),
+            &path_with_loop().1,
             ShellKind::Posix,
             "w1",
             "/work/app",
@@ -516,7 +515,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &ok_persist,
-            &path_with_loop(),
+            &path_with_loop().1,
             ShellKind::Posix,
             "w1",
             "/work/app",
@@ -545,7 +544,7 @@ mod tests {
             &BTreeMap::new(),
             Some(&decision),
             &persist,
-            &path_with_loop(),
+            &path_with_loop().1,
             ShellKind::Posix,
             "w1",
             "/work/app",
@@ -565,7 +564,7 @@ mod tests {
             &BTreeMap::new(),
             Some(&Decision::Without),
             &ok_persist,
-            &path_with_loop(),
+            &path_with_loop().1,
             ShellKind::Posix,
             "w1",
             "/work/app",
@@ -586,7 +585,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &ok_persist,
-            &path_with_loop(),
+            &path_with_loop().1,
             ShellKind::Posix,
             "w1",
             "/work/app",

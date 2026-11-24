@@ -37,12 +37,13 @@ pub fn import(path: &Path) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
     use serde_json::json;
 
-    fn temp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-layout-file-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+    fn temp(name: &str) -> (TestDir, std::path::PathBuf) {
+        let dir = TestDir::new("poimen-layout-file-");
+        let path = dir.join(name);
+        (dir, path)
     }
 
     #[test]
@@ -51,14 +52,14 @@ mod tests {
             {"name": "t", "place": {"direction": "down", "ratio": 0.3},
              "root": {"kind": "split", "direction": "right", "ratio": 0.4, "children": [
                 {"kind": "terminal", "name": "a"}, {"kind": "terminal", "name": "b"}]}}]}]});
-        let path = temp("round.json");
+        let (_dir, path) = temp("round.json");
         export(&path, &layout).unwrap();
         assert_eq!(import(&path).unwrap(), layout);
     }
 
     #[test]
     fn invalid_layouts_are_refused_both_ways() {
-        let path = temp("bad.json");
+        let (_dir, path) = temp("bad.json");
         assert!(export(&path, &json!({"panes": []})).is_err());
         std::fs::write(
             &path,
@@ -68,6 +69,7 @@ mod tests {
         assert!(import(&path).unwrap_err().contains("place"));
         std::fs::write(&path, "[1]").unwrap();
         assert!(import(&path).is_err());
-        assert!(export(&temp("x.txt"), &json!({"panes": [{"name": "a"}]})).is_err());
+        let (_dir2, other) = temp("x.txt");
+        assert!(export(&other, &json!({"panes": [{"name": "a"}]})).is_err());
     }
 }
