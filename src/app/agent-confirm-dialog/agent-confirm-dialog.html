@@ -16,15 +16,19 @@
               ? "wants to stop a terminal"
               : request.action === "write_terminal"
                 ? "wants to type into a terminal"
-                : "wants to prompt an agent"
+                : request.action === "create_space"
+                  ? "wants to create a space"
+                  : "wants to prompt an agent"
       }}
-      in <strong>{{ request.spaceName }}</strong>
+      @if (request.action !== "create_space") {
+        in <strong>{{ request.spaceName }}</strong>
+      }
     </ng-container>
     <p class="hint">
       {{
         request.action === "prompt_agent" || request.action === "write_terminal"
           ? "It types:"
-          : request.action === "stop_terminal"
+          : request.action === "stop_terminal" || request.action === "create_space"
             ? "It does:"
             : "It runs:"
       }}
@@ -33,6 +37,8 @@
     <p class="hint">
       @if (request.action === "write_terminal") {
         This text runs in your shell, with your rights. poimen always asks for it.
+      } @else if (request.action === "create_space") {
+        The space is made as if you opened the directory yourself.
       } @else {
         That space is not the one of {{ request.callerName }}.
       }
