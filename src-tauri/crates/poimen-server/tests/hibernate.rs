@@ -7,6 +7,7 @@
 #![allow(clippy::disallowed_methods)] // Unix-only test: no console window to hide.
 
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,8 +18,12 @@ use poimen_server::{Config, PtyHost, Server};
 const LONG: Duration = Duration::from_secs(10);
 const MINUTE_MS: u64 = 60_000;
 
+/// The test directory and the server in it. Dropping stops the server first (its threads write
+/// into the directory), then the guard removes the directory.
 struct Env {
     dir: PathBuf,
+    stopped: Receiver<()>,
+    _guard: tempfile::TempDir,
     sweep: Box<dyn Fn(u64) + Send + Sync>,
     client: Client,
 }
@@ -41,8 +46,11 @@ impl Env {
 
     /// As [`Env::new`]; `{dir}` in the config is the test directory, `{agent}` the fake agent.
     fn with_resume_timeout(name: &str, config: Option<&str>, resume: Duration) -> Self {
-        let dir = std::env::temp_dir().join(format!("poimen-hib-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("poimen-hib-{name}-"))
+            .tempdir()
+            .unwrap();
+        let dir = guard.path().to_path_buf();
         std::fs::create_dir_all(dir.join("work")).unwrap();
         let home = dir.join("home");
         if let Some(text) = config {
@@ -67,9 +75,19 @@ impl Env {
         let server = Server::bind(config.clone()).unwrap();
         server.set_resume_timeout(resume);
         let sweep = Box::new(server.hibernate_sweeper());
+        let (stop_tx, stopped) = mpsc::channel();
+        server.on_shutdown(move || {
+            let _ = stop_tx.send(());
+        });
         thread::spawn(move || server.serve());
         let client = Client::new(&config.socket);
-        Self { dir, sweep, client }
+        Self {
+            dir,
+            stopped,
+            _guard: guard,
+            sweep,
+            client,
+        }
     }
 
     /// The fake agent: reports `SessionStart`, `UserPromptSubmit` and `Stop` for each prompt line;
@@ -153,7 +171,9 @@ impl Env {
 
 impl Drop for Env {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        if self.client.shutdown().is_ok() {
+            let _ = self.stopped.recv_timeout(LONG);
+        }
     }
 }
 

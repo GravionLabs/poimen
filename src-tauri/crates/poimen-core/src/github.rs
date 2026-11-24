@@ -758,6 +758,7 @@ pub fn failed_logs<R: Runner>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
     use serde_json::json;
     use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
@@ -803,10 +804,14 @@ mod tests {
         })
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-gh-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+    fn temp_dir(tag: &str) -> TestDir {
+        TestDir::new(&format!("poimen-gh-{tag}-"))
+    }
+
+    /// A client with its own cache directory; keep the guard while it is used.
+    fn cached<'a>(f: &'a Fake, tag: &str) -> (Client<&'a Fake>, TestDir) {
+        let dir = temp_dir(tag);
+        (Client::new(f, dir.to_path_buf()), dir)
     }
 
     const OK: &str =
@@ -917,7 +922,7 @@ mod tests {
     #[test]
     fn a_missing_gh_is_reported() {
         let f = fake(vec![Err(io::Error::new(io::ErrorKind::NotFound, "x"))]);
-        let c = Client::new(&f, temp_dir("missing"));
+        let (c, _dir) = cached(&f, "missing");
         assert_eq!(c.rest("repos/o/r"), Err(GhError::GhMissing));
     }
 
@@ -931,7 +936,7 @@ mod tests {
             ),
             out(1, "", "You are not logged into any GitHub hosts."),
         ]);
-        let c = Client::new(&f, temp_dir("login"));
+        let (c, _dir) = cached(&f, "login");
         assert_eq!(c.rest("repos/o/r"), Err(GhError::NotLoggedIn));
         assert_eq!(f.calls.borrow()[1], ["auth", "status"]);
     }
@@ -946,7 +951,7 @@ mod tests {
             ),
             out(0, "", ""),
         ]);
-        let c = Client::new(&f, temp_dir("401"));
+        let (c, _dir) = cached(&f, "401");
         assert_eq!(
             c.rest("repos/o/r"),
             Err(GhError::Other {
@@ -980,9 +985,8 @@ mod tests {
 
     #[test]
     fn rest_caches_for_30_seconds_then_revalidates_with_the_etag() {
-        let dir = temp_dir("etag");
         let f = fake(vec![out(0, OK, ""), out(0, NOT_MODIFIED, "")]);
-        let c = Client::new(&f, dir.clone());
+        let (c, _dir) = cached(&f, "etag");
         assert_eq!(c.rest("repos/o/r").unwrap(), "{\"n\":1}");
         assert_eq!(f.calls.borrow()[0], ["api", "--include", "repos/o/r"]);
 
@@ -1006,43 +1010,43 @@ mod tests {
         f.clock.set(f.clock.get() + Duration::from_secs(10));
         c.rest("repos/o/r").unwrap();
         assert_eq!(f.calls.borrow().len(), 2);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_cached_body_is_only_returned_for_its_own_path() {
-        let dir = temp_dir("paths");
         let f = fake(vec![
             out(0, OK, ""),
             out(0, "HTTP/2.0 200 OK\r\n\r\n{\"n\":2}", ""),
         ]);
-        let c = Client::new(&f, dir.clone());
+        let (c, _dir) = cached(&f, "paths");
         c.rest("repos/o/a").unwrap();
         assert_eq!(c.rest("repos/o/b").unwrap(), "{\"n\":2}");
         assert_eq!(f.calls.borrow()[1], ["api", "--include", "repos/o/b"]);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn the_rest_cache_survives_a_new_client_and_stays_in_the_cache_dir() {
         let dir = temp_dir("disk");
         let f = fake(vec![out(0, OK, "")]);
-        Client::new(&f, dir.clone()).rest("repos/o/r").unwrap();
+        Client::new(&f, dir.to_path_buf())
+            .rest("repos/o/r")
+            .unwrap();
         let g = fake(vec![]);
         assert_eq!(
-            Client::new(&g, dir.clone()).rest("repos/o/r").unwrap(),
+            Client::new(&g, dir.to_path_buf())
+                .rest("repos/o/r")
+                .unwrap(),
             "{\"n\":1}"
         );
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
         assert_eq!(names.len(), 1);
         assert!(names[0].file_name().to_string_lossy().ends_with(".json"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn rest_rejects_paths_that_look_like_flags() {
         let f = fake(vec![]);
-        let client = Client::new(&f, temp_dir("flag"));
+        let (client, _dir) = cached(&f, "flag");
         assert!(matches!(
             client.rest("--hostname=evil"),
             Err(GhError::Other { .. })
@@ -1052,16 +1056,14 @@ mod tests {
 
     #[test]
     fn rest_errors_are_not_cached_and_not_found_maps() {
-        let dir = temp_dir("404");
         let f = fake(vec![out(
             1,
             "HTTP/2.0 404 Not Found\r\n\r\n{}",
             "gh: Not Found (HTTP 404)",
         )]);
-        let c = Client::new(&f, dir.clone());
+        let (c, dir) = cached(&f, "404");
         assert_eq!(c.rest("repos/o/x"), Err(GhError::NotFound));
         assert!(!dir.exists() || std::fs::read_dir(&dir).unwrap().next().is_none());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1071,7 +1073,7 @@ mod tests {
             out(0, "{\"data\":2}", ""),
             out(0, "{\"data\":3}", ""),
         ]);
-        let c = Client::new(&f, temp_dir("gql"));
+        let (c, _dir) = cached(&f, "gql");
         let vars = json!({"owner": "o", "first": 5});
         assert_eq!(c.graphql("query{a}", &vars).unwrap(), json!({"data": 1}));
         assert_eq!(
@@ -1101,7 +1103,6 @@ mod tests {
 
     #[test]
     fn mutate_runs_uncached_and_drops_the_caches_of_that_repository() {
-        let dir = temp_dir("mutate");
         let f = fake(vec![
             out(0, OK, ""),             // rest of repo o/n
             out(0, OK, ""),             // rest of repo o/other
@@ -1111,7 +1112,7 @@ mod tests {
             out(0, "{\"data\":2}", ""), // graphql again
             out(0, "done\n", ""),       // second mutate is not cached
         ]);
-        let c = Client::new(&f, dir.clone());
+        let (c, _dir) = cached(&f, "mutate");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
@@ -1129,7 +1130,6 @@ mod tests {
         assert_eq!(f.calls.borrow().len(), 6);
         c.mutate(&r, &argv).unwrap();
         assert_eq!(f.calls.borrow().len(), 7);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1138,7 +1138,7 @@ mod tests {
             out(0, "ok\n", ""),
             out(1, "", "gh: Not Found (HTTP 404)"),
         ]);
-        let c = Client::new(&f, temp_dir("mutate-in"));
+        let (c, _dir) = cached(&f, "mutate-in");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
@@ -1163,7 +1163,7 @@ mod tests {
             out(0, "b", ""),
             out(1, "", "gh: Not Found (HTTP 404)"),
         ]);
-        let c = Client::new(&f, temp_dir("fresh"));
+        let (c, _dir) = cached(&f, "fresh");
         let argv = vec!["issue".to_string(), "view".into()];
         assert_eq!(c.read_fresh(&argv).unwrap(), "a");
         assert_eq!(c.read_fresh(&argv).unwrap(), "b");
@@ -1178,7 +1178,7 @@ mod tests {
             out(1, "", "GraphQL: Pull request is not mergeable\nmore"),
             out(0, "{\"data\":2}", ""),
         ]);
-        let c = Client::new(&f, temp_dir("mutate-err"));
+        let (c, _dir) = cached(&f, "mutate-err");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
@@ -1198,7 +1198,7 @@ mod tests {
     #[test]
     fn graphql_failures_map_to_errors() {
         let f = fake(vec![out(1, "", "error connecting to api.github.com")]);
-        let c = Client::new(&f, temp_dir("gqlerr"));
+        let (c, _dir) = cached(&f, "gqlerr");
         assert_eq!(c.graphql("q", &json!({})), Err(GhError::Offline));
     }
 
@@ -1251,28 +1251,27 @@ mod tests {
             let body = format!("[{}]", items.join(","));
             out(0, &format!("HTTP/2.0 200 OK\r\n\r\n{body}"), "")
         };
-        let dir = temp_dir("open-issues");
         let r = Repo {
             owner: "o".into(),
             name: "r".into(),
         };
         let f = fake(vec![page(1, 100), page(101, 40)]);
-        let client = Client::new(&f, dir.clone());
+        let (client, _dir) = cached(&f, "open-issues");
         assert_eq!(open_issues(&client, &r).unwrap().len(), 140);
         let calls = f.calls.borrow();
         assert_eq!(calls.len(), 2);
         assert!(calls[1][2].ends_with("issues?state=open&per_page=100&page=2"));
         drop(calls);
 
-        let dir2 = temp_dir("open-issues-full");
         let f = fake(vec![page(1, 100), page(101, 100), page(201, 100)]);
-        let client = Client::new(&f, dir2);
+        let (client, _dir2) = cached(&f, "open-issues-full");
         assert_eq!(open_issues(&client, &r).unwrap().len(), 300);
         assert_eq!(f.calls.borrow().len(), 3);
         let f = fake(vec![out(1, "", "gh: command failed: HTTP 404")]);
-        let _ = std::fs::remove_dir_all(dir);
-        assert!(open_issues(&Client::new(&f, temp_dir("open-issues-err")), &r).is_err());
+        let (c, _dir3) = cached(&f, "open-issues-err");
+        assert!(open_issues(&c, &r).is_err());
     }
+
     #[test]
     fn failed_runs_are_the_newest_failed_run_per_workflow() {
         let body = include_str!("../fixtures/github-actions-runs.json");
@@ -1296,7 +1295,7 @@ mod tests {
             ),
             "",
         )]);
-        let c = Client::new(&f, temp_dir("runs"));
+        let (c, _dir) = cached(&f, "runs");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
@@ -1335,7 +1334,7 @@ mod tests {
             out(0, "log of 102\n", ""),
             out(0, &"y".repeat(LOG_LIMIT_PER_RUN + 10), ""),
         ]);
-        let c = Client::new(&f, temp_dir("logs"));
+        let (c, _dir) = cached(&f, "logs");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
@@ -1354,7 +1353,7 @@ mod tests {
     fn failed_logs_without_runs_or_logs_are_errors() {
         let none = "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{\"workflow_runs\":[]}";
         let f = fake(vec![out(0, none, "")]);
-        let c = Client::new(&f, temp_dir("nologs"));
+        let (c, _dir) = cached(&f, "nologs");
         let r = Repo {
             owner: "o".into(),
             name: "n".into(),
