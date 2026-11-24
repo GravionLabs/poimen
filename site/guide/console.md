@@ -156,15 +156,17 @@ Terminal and space ids are short strings such as `t42` and `s9`. `poimen ls` sho
 poimen ls [--json]
 ```
 
-All spaces with their terminals: id, name, directory; per terminal id, name, state (`running`, `exited`, `exited(<code>)`) and agent (`<kind>:<status>` or `-`).
+All spaces with their tabs and terminals: id, name, directory; per tab `tab`, its id and name, and under it its terminals (a terminal in no tab, such as an ended one, stands right under the space); per terminal id, name, state (`running`, `exited`, `exited(<code>)`) and agent (`<kind>:<status>` or `-`).
 
 ```text
 s9  poimen  /home/me/src/poimen
-  t36  claude  running  claude-code:working
-  t42  zsh  running  -
+  tab tb3  claude
+    t36  claude  running  claude-code:working
+  tab tb4  zsh
+    t42  zsh  running  -
 ```
 
-`--json` prints one array of spaces, each with its `terminals`, in the server's shapes ([protocol](https://github.com/GravionLabs/poimen/blob/main/docs/protocol.md)).
+`--json` prints one array of spaces, each with its `terminals` and `tabs` (the split trees), in the server's shapes ([protocol](https://github.com/GravionLabs/poimen/blob/main/docs/protocol.md)).
 
 ### `poimen status`
 
@@ -186,6 +188,28 @@ Creates a terminal in a space and prints its id. `<space>` is an id or an exact 
 poimen new poimen --name build -- cargo build --release
 id=$(poimen new s9) && poimen send "$id" --enter "git status"
 ```
+
+### `poimen space`
+
+```sh
+poimen space new <dir> [--name <name>] [--trust | --without-commands]
+poimen space rename <space> <name>
+poimen space close <space> [--yes]
+```
+
+`new` makes a space for a directory, with the layout the app would build, and prints its id (the name defaults to the directory's name). When the project file has commands you have not trusted, nothing is made: the command exits with 1 and prints the commands and their hash. Run it again with `--trust` to run them (stored for that content, as in the app) or `--without-commands` to build the panes without them. `close` ends the space's terminals; it asks nothing but is refused while one of them runs an agent, unless you pass `--yes`. `<space>` is an id or an exact name.
+
+### `poimen tab`
+
+```sh
+poimen tab new <space> [--name <name>] [-- <command> [args..]]
+poimen tab rename <tab> <name>
+poimen tab close <tab> [--yes]
+poimen tab split <terminal> right|down [--ratio <r>] [-- <command> [args..]]
+poimen tab focus <tab> [<terminal>]
+```
+
+`new` opens a tab in a space and prints the tab id; without a command it runs your shell. `split` splits the pane of a terminal (the new one is right of or below it; `--ratio` is the share the old pane keeps, above 0 and below 1) and prints the new terminal's id. `close` ends the tab's terminals, refused while one runs an agent unless `--yes`. `focus` makes the tab (and the terminal in it) the focused one for every client. `<tab>` is an id or an exact name; when several tabs share the name, use the id.
 
 ### `poimen send`
 

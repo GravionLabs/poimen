@@ -12,5 +12,6 @@ pub mod mcp;
 pub mod server_start;
 pub mod session;
 pub mod session_run;
+pub mod space_tab;
 pub mod tty;
 pub mod tui;

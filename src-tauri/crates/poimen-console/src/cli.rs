@@ -1,6 +1,9 @@
 //! Arguments of `poimen`: none for the TUI, else a command.
 
-use poimen_protocol::{AttachMode, Placement};
+use poimen_protocol::{AttachMode, Placement, SplitDirection};
+
+mod layout;
+pub use layout::TrustFlag;
 
 /// A raw string: a `\` line continuation would drop the indentation of the next line.
 pub const USAGE: &str = r#"usage: poimen [<command>]
@@ -12,6 +15,19 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
   ls [--json]                         spaces, terminals and agent status
   status <terminal> [--json]          one terminal: state and agent status
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id
+  space new <dir> [--name <n>] [--trust|--without-commands]
+                                      a new space (layout of the project); prints its id. A project
+                                      file with untrusted commands: exit 1 listing them and the
+                                      hash, unless --trust runs them or --without-commands skips
+  space rename <space> <name>         renames a space (id or name)
+  space close <space> [--yes]         closes a space and its terminals; --yes when an agent runs
+  tab new <space> [--name <n>] [-- cmd..]
+                                      a new tab (id or name of the space); prints the tab id
+  tab rename <tab> <name>             renames a tab (id or name)
+  tab close <tab> [--yes]             closes a tab and its terminals; --yes when an agent runs
+  tab split <terminal> right|down [--ratio <r>] [-- cmd..]
+                                      splits the terminal's pane; prints the new terminal id
+  tab focus <tab> [<terminal>]        focuses a tab (and a terminal in it) for every client
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked
   session run --harness <id> --prompt <text> [--model <m>] [--cwd <dir>] [--space <id>]
@@ -65,7 +81,7 @@ pub struct SessionRunArgs {
 }
 
 /// The commands that talk to the server in single requests (everything but `attach`).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     Ls {
         json: bool,
@@ -88,9 +104,46 @@ pub enum Request {
         terminal: String,
         text: String,
     },
+    /// `space new <dir> [--name n] [--trust|--without-commands]` (#1172).
+    SpaceNew {
+        dir: String,
+        name: Option<String>,
+        trust: Option<TrustFlag>,
+    },
+    SpaceRename {
+        space: String,
+        name: String,
+    },
+    SpaceClose {
+        space: String,
+        yes: bool,
+    },
+    TabNew {
+        space: String,
+        name: Option<String>,
+        command: Option<Vec<String>>,
+    },
+    TabRename {
+        tab: String,
+        name: String,
+    },
+    TabClose {
+        tab: String,
+        yes: bool,
+    },
+    TabSplit {
+        terminal: String,
+        direction: SplitDirection,
+        ratio: Option<f64>,
+        command: Option<Vec<String>>,
+    },
+    TabFocus {
+        tab: String,
+        terminal: Option<String>,
+    },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     Attach(AttachArgs),
     Request(Request),
@@ -122,6 +175,8 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
         "session" => parse_session(rest),
+        "space" => layout::parse_space(rest),
+        "tab" => layout::parse_tab(rest),
         "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
         "doctor" => parse_doctor(rest),
         "ls" => {
