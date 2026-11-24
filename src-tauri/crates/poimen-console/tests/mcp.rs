@@ -151,6 +151,8 @@ fn initialize_and_tools_list() {
             "start_shell",
             "stop_terminal",
             "write_terminal",
+            "create_space",
+            "list_repositories",
             "prompt_agent",
             "wait_agent",
             "report_done",

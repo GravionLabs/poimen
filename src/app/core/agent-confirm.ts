@@ -10,7 +10,8 @@ export type AgentWriteAction =
   | "prompt_agent"
   | "start_shell"
   | "stop_terminal"
-  | "write_terminal";
+  | "write_terminal"
+  | "create_space";
 
 /** An agent asks to write into a space other than its own (`agent.confirm_requested`). */
 export interface ConfirmRequest {
@@ -62,8 +63,10 @@ export function writeMessage(
           ? "stopped a terminal"
           : action === "write_terminal"
             ? "typed into a terminal"
-            : "prompted an agent";
-  return `${caller} ${what} in ${space}${confirmed ? " (you allowed it)" : ""}`;
+            : action === "create_space"
+              ? "created a space"
+              : "prompted an agent";
+  return `${caller} ${what}${action === "create_space" ? "" : ` in ${space}`}${confirmed ? " (you allowed it)" : ""}`;
 }
 
 /**

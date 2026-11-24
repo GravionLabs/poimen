@@ -65,6 +65,8 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
 - `start_agent` (`harness`, `space?`, `model?`, `prompt?`, `name?`): a new terminal running a harness of your `harnesses` config.
 - `start_shell` (`command` argv list, `cwd?`, `name?`, `space?`, `env?`): a new terminal that runs a long command (for example the deliver loop); it stays listed after the command ends.
+- `list_repositories`: the git repositories poimen knows (spaces and trusted projects) with path, `origin` URL and `owner/repo` for GitHub.
+- `create_space` (`directory`, `name?`): a space for a directory, unchanged when one exists (`created: false`); always needs your confirmation in the app, refused for a project file you have not trusted.
 - `stop_terminal` (`terminal`, `mode?` `interrupt` (default, Ctrl-C) or `close`, `force?`): ends what a terminal runs; answers `ended`, `running` or `gone`. `close` of a terminal with a running agent needs `force`.
 - `write_terminal` (`terminal`, `text`, `enter?`): types into an existing terminal that runs no agent (the text runs in your shell); needs your confirmation in the app on every call unless the agent started that terminal with `start_shell`; control characters other than newline and tab are refused; a terminal with an agent is refused (use `prompt_agent`).
 - `prompt_agent` (`terminal`, `text`): types a prompt into the agent of a terminal, refused while it works or waits.
