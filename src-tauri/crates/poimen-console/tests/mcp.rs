@@ -155,6 +155,7 @@ fn initialize_and_tools_list() {
             "list_repositories",
             "prompt_agent",
             "wait_agent",
+            "wait_any",
             "report_done",
             "read_agent"
         ]

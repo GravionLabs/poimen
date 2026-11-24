@@ -89,7 +89,7 @@ impl RunFilter {
 
 /// The directory of the event files of the repository containing `dir`; a directory outside a
 /// repository is an error.
-fn events_dir(dir: &str) -> Result<PathBuf, String> {
+pub(super) fn events_dir(dir: &str) -> Result<PathBuf, String> {
     if !Path::new(dir).is_dir() {
         return Err(format!("`{dir}` is not a directory"));
     }

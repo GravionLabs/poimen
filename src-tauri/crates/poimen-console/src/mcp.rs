@@ -17,6 +17,7 @@ mod shell;
 mod space;
 mod stop;
 mod terminal;
+mod wait_any;
 mod worktree;
 mod write;
 
@@ -263,6 +264,7 @@ fn tools() -> Value {
                 "timeout_s": {"type": "number", "description": "Seconds to wait (default 300, at most 3600). On timeout the current status is returned with timed_out true."}
             }, "required": ["terminal"]},
         },
+        wait_any::tool(),
         {
             "name": "report_done",
             "description": "Call once at the very end of your work when another agent started you: reports the result to the agent that started you (poimen types a line into it when it is idle) and closes your run in the Runs view. Report once, with a summary of at most three sentences.",
@@ -360,6 +362,7 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
         "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
+        "wait_any" => wait_any::wait_any(client, args),
         "report_done" => report::report_done(client, env, args),
         "read_agent" => read_agent(client, args),
         _ => Err(Fail::Unknown),

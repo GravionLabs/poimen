@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 alacritty_terminal = "0.26.0"
 crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events", "windows"] }
+notify = "8"
 poimen-client = { path = "../poimen-client" }
 poimen-core = { path = "../poimen-core" }
 poimen-protocol = { path = "../poimen-protocol" }
