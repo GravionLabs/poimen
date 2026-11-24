@@ -28,7 +28,7 @@ pub(super) fn has_running_agent(t: &Terminal) -> bool {
 pub(super) fn tool() -> Value {
     json!({
         "name": "stop_terminal",
-        "description": "Ends what a terminal runs, e.g. the deliver loop you started with start_shell. `interrupt` (default) sends Ctrl-C (SIGINT) to the foreground process and waits a few seconds; `close` closes the pane and ends its processes. Refuses `close` of a terminal with a running agent unless `force` is true. The answer's `outcome` is `ended`, `running` (still alive, e.g. it ignored Ctrl-C) or `gone` (it had exited already). Afterwards `get_terminal` shows the state. In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
+        "description": "Ends what a terminal runs, e.g. the deliver loop you started with start_shell. `interrupt` (default) sends Ctrl-C (SIGINT) to the foreground process and waits a few seconds; `close` closes the pane and ends its processes. Refuses `close` of a terminal with a running agent unless `force` is true. The answer's `outcome` is `ended`, `running` (still alive, e.g. it ignored Ctrl-C) or `gone` (it had exited already). Afterwards `get_terminal` shows the state. Use it to stop a loop or agent that you started (start_shell, start_agent); to wait for one to end use wait_any or wait_agent instead, and record the result with record_run `member_done`. In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
         "inputSchema": {"type": "object", "properties": {
             "terminal": {"type": "string", "description": "Terminal id."},
             "mode": {"type": "string", "enum": ["interrupt", "close"], "description": "`interrupt` (default) or `close`."},
