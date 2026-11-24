@@ -34,6 +34,7 @@ pub mod config;
 pub mod grid;
 pub mod input;
 pub mod palette;
+mod reload;
 pub mod screen;
 pub mod sidebar;
 pub mod tree;
@@ -44,7 +45,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
@@ -60,7 +61,7 @@ use ratatui::backend::Backend;
 use ratatui::buffer::Buffer;
 
 use crate::session::Error;
-use attention::{Attention, Change, Entry, Kind, Log};
+use attention::{Attention, Change, Entry, Kind, Log, epoch_ms};
 use config::Config;
 use grid::{Grid, Palette};
 use input::{Routed, Router, Wheel};
@@ -100,6 +101,7 @@ enum Msg {
     ServerGone(String),
     /// A stream record of the attachment with this generation.
     Record(u64, Box<Result<Event, String>>),
+    ConfigChanged,
     /// The open issues and the names of the task modes (or why they could not be read).
     Issues(Result<(Vec<OpenIssue>, Vec<String>), String>),
     /// A task was prepared and started on the server.
@@ -318,12 +320,6 @@ impl App {
     }
 }
 
-fn epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
-
 /// Runs the TUI on `terminal` until detach, `stop` or the server going away. `input` yields the
 /// local terminal's events.
 pub fn run<B: Backend>(
@@ -373,6 +369,7 @@ pub fn run<B: Backend>(
     app.repo_cache
         .on_change(move || drop(notify.send(Msg::Changed)));
     let mut router = Router::new(&opts.config);
+    let _config_watcher = reload::watch(opts.home.as_deref(), &tx);
     app.refresh(client)?;
     let first = app.model.initial(app.own_terminal.as_deref());
     select(&mut app, client, &tx, first, How::Control);
@@ -402,6 +399,7 @@ pub fn run<B: Backend>(
         for msg in std::iter::once(first).chain(rx.try_iter()) {
             match msg {
                 Msg::Changed => changed = true,
+                Msg::ConfigChanged => reload::apply(&mut app, &mut router, opts, client),
                 Msg::ServerGone(e) => return Ok(Outcome::ServerGone(e)),
                 Msg::Record(generation, rec) => record(&mut app, client, &tx, generation, *rec),
                 Msg::Issues(result) => palette_issues(&mut app, result),

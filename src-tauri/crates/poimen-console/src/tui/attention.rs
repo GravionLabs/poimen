@@ -210,6 +210,13 @@ pub fn age(now_ms: u64, at_ms: u64) -> String {
     }
 }
 
+/// Milliseconds since the epoch.
+pub(super) fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
