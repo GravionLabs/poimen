@@ -127,6 +127,9 @@ describe("agent confirmations", () => {
     expect(writeMessage("lead", "write_terminal", "web", true)).toBe(
       "lead typed into a terminal in web (you allowed it)",
     );
+    expect(writeMessage("lead", "create_space", "web", true)).toBe(
+      "lead created a space (you allowed it)",
+    );
   });
 
   it("ignores other events", () => {

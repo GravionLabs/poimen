@@ -135,6 +135,22 @@ impl Exec for SystemExec {
     }
 }
 
+/// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
+#[tauri::command]
+pub async fn hooks_status() -> Result<Vec<HookStatus>, String> {
+    tauri::async_runtime::spawn_blocking(|| status_all(&SystemExec))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Installs the poimen hooks of one agent (`claude` or `copilot`); only on a user click.
+#[tauri::command]
+pub async fn hooks_install(agent: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || install(&SystemExec, &agent))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

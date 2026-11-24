@@ -47,16 +47,17 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - Color schemes: bundled and imported schemes, a derived chrome and the `colorSchema` setting ([ADR 0002](docs/adr/0002-color-schemes.md)).
 - Own terminal backend `poimen-server`, the only one (herdr removed, #174); agent status from Claude Code and Copilot hooks (proposed, [ADR 0003](docs/adr/0003-own-terminal-backend-without-herdr.md)).
 - GitHub views and agent harnesses native in poimen; the herdr plugin integration (ADR 0004) is removed (accepted, [ADR 0005](docs/adr/0005-github-views-and-agent-harnesses.md)).
-- poimen console with herdr scope: one `poimen` binary (TUI and CLI), tabs and splits owned by poimen-server, shared code in `poimen-core`; supersedes ADR 0003's TUI/CLI exclusion and "the app owns layout" (proposed, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)).
+- poimen console with herdr scope: one `poimen` binary (TUI and CLI), tabs and splits owned by poimen-server, shared code in `poimen-core`; supersedes ADR 0003 in part (proposed, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)).
 - Plugin system with a sandboxed worker and view contexts; supersedes ADR 0005's "no plugin system now" in part (proposed, [ADR 0007](docs/adr/0007-plugin-system-with-sandboxed-worker-and-view-contexts.md)).
 - Remote machines over `poimen-server stdio` through SSH, no open port and no stored secret (proposed, [ADR 0008](docs/adr/0008-remote-machines-over-ssh.md)).
-- Terminals owned by a stable `poimen-pty-host` per terminal, so a server update or crash keeps them (accepted, [ADR 0009](docs/adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)). Numbered 0007 until 2026-11-09, when it collided with the plugin ADR.
+- Terminals owned by a stable `poimen-pty-host` per terminal, so a server update or crash keeps them (accepted, [ADR 0009](docs/adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)).
 - Shells in a terminal panel at the bottom of the app by default, agents in editor tabs; the placement (`editor`/`panel`) is a server-owned tab field, splits stay (proposed, [ADR 0010](docs/adr/0010-terminal-panel-for-shells-in-the-app.md)).
 - Named layouts: `layouts[]` in the user config with the shape of ADR 0006 (tabs with split trees, nested tabs, app-only `place`), templates refer to them by name, old keys keep working, presets stay project palette entries (proposed, [ADR 0011](docs/adr/0011-named-layouts-referenced-by-templates.md)).
 - MCP server for agent sessions: `poimen mcp` over `poimen-client`; writes are free in the caller's own space, any other space needs a confirmation in the app (proposed, [ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)).
 - Install `poimen-server` on a machine from the app after a confirmation, over the ssh connection, checksum verified; amends ADR 0008 (proposed, [ADR 0013](docs/adr/0013-install-poimen-server-on-a-machine-from-the-app.md)).
 - Hibernate idle agents: the server stops the agent process of a `done` terminal after a set idle time and resumes the session on the first controller attach, off by default, an exception to the non-destructive rule (proposed, [ADR 0014](docs/adr/0014-hibernate-idle-agents.md)).
 - poimen hosts the sessions of scripted runs: one `poimen-client` operation, interactive sessions, JSON-line records, permissions as ADR 0012 (accepted, [ADR 0016](docs/adr/0016-poimen-hosts-the-sessions-of-scripted-runs.md)).
+- Scoped write grant, lead runs and `wait_any`; amends ADR 0012 (proposed, [ADR 0018](docs/adr/0018-scoped-write-grant-and-lead-runs-for-orchestration.md)).
 
 ## Verification
 

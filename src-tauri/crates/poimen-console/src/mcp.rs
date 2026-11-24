@@ -10,12 +10,16 @@
 //! refuse with the reason. The target space is the id the server holds for the target, never a
 //! name the agent supplies.
 
+mod grant;
+mod lead;
 mod report;
 mod runs;
 mod screen;
 mod shell;
+mod space;
 mod stop;
 mod terminal;
+mod wait_any;
 mod worktree;
 mod write;
 
@@ -233,7 +237,7 @@ fn tools() -> Value {
         },
         {
             "name": "start_shell",
-            "description": "Runs a long-running command in a new shell pane of the user, e.g. the deliver loop (`node deliver-loop.mts --milestone M005`) or a build watcher. Not for short commands: use your own shell for those. `command` is an argv list, never a shell string. Returns the terminal id; the pane stays after the command ends. Watch it with read_terminal (output), get_terminal (status, exit code), get_events and list_runs (agent runs it writes). In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
+            "description": "Runs a long-running command in a new shell pane of the user, e.g. the deliver loop (`node deliver-loop.mts --milestone M005`) or a build watcher. Not for short commands: use your own shell for those. `command` is an argv list, never a shell string. Returns the terminal id; the pane stays after the command ends. Watch it with read_terminal (output), get_terminal (status, exit code), get_events and list_runs (agent runs it writes); wait for it with wait_any; end it with stop_terminal. For another repository first find its directory with list_repositories and make a space with create_space, and ask once for request_grant when you start several loops. In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
             "inputSchema": {"type": "object", "properties": {
                 "command": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Program and arguments, e.g. [\"node\", \"deliver-loop.mts\", \"--milestone\", \"M005\"]."},
                 "cwd": {"type": "string", "description": "Working directory; the directory of the space by default."},
@@ -244,6 +248,12 @@ fn tools() -> Value {
         },
         stop::tool(),
         write::tool(),
+        space::create_tool(),
+        space::list_tool(),
+        grant::request_tool(),
+        grant::revoke_tool(),
+        lead::record_tool(),
+        lead::read_tool(),
         {
             "name": "prompt_agent",
             "description": "Types a prompt into the agent of a terminal. Refused while that agent is working or blocked. In another space than your own the user must confirm in the poimen app (waits up to 60 s).",
@@ -260,6 +270,7 @@ fn tools() -> Value {
                 "timeout_s": {"type": "number", "description": "Seconds to wait (default 300, at most 3600). On timeout the current status is returned with timed_out true."}
             }, "required": ["terminal"]},
         },
+        wait_any::tool(),
         {
             "name": "report_done",
             "description": "Call once at the very end of your work when another agent started you: reports the result to the agent that started you (poimen types a line into it when it is idle) and closes your run in the Runs view. Report once, with a summary of at most three sentences.",
@@ -351,10 +362,17 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         }
         "start_agent" => start_agent(client, env, args),
         "start_shell" => shell::start_shell(client, env, args),
+        "create_space" => space::create_space(client, env, args),
+        "list_repositories" => space::list_repositories(client, env, args),
+        "request_grant" => grant::request_grant(client, env, args),
+        "revoke_grant" => grant::revoke_grant(client, env, args),
+        "record_run" => lead::record_run(client, env, args),
+        "read_run" => lead::read_run(client, env, args),
         "stop_terminal" => stop::stop_terminal(client, env, args),
         "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
         "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
+        "wait_any" => wait_any::wait_any(client, args),
         "report_done" => report::report_done(client, env, args),
         "read_agent" => read_agent(client, args),
         _ => Err(Fail::Unknown),

@@ -1,10 +1,12 @@
-//! The small tab requests: `tab.rename`, `tab.move` and `tab.focus`.
+//! The small tab requests: `tab.rename`, `tab.move` and `tab.focus`, and two helpers that
+//! publish events and drop a terminal that has no leaf.
 
 use serde_json::json;
 
 use poimen_protocol::{TabFocus, TabMove, TabRename};
 
-use crate::{ApiResult, Shared, lock, require_name, tab_json};
+use crate::{ApiResult, Inner, Shared, close_entry, lock, require_name, tab_json};
+use poimen_protocol::Event;
 
 pub(super) fn tab_rename(shared: &Shared, p: TabRename) -> ApiResult {
     let name = require_name(&p.name)?;
@@ -29,4 +31,22 @@ pub(super) fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
     shared.apply(&inner, events);
     let tab = inner.layout.tab(&p.tab_id)?;
     Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
+}
+
+pub(crate) fn publish_all(shared: &Shared, events: Vec<Event>) {
+    for event in events {
+        shared.publish(event);
+    }
+}
+
+/// Closes a terminal that is not in any leaf yet (`terminal.closed`).
+pub(crate) fn drop_terminal(shared: &Shared, inner: &mut Inner, terminal_id: &str) {
+    if let Some(i) = inner
+        .terminals
+        .iter()
+        .position(|t| t.info.id == terminal_id)
+    {
+        let entry = inner.terminals.remove(i);
+        close_entry(shared, entry);
+    }
 }

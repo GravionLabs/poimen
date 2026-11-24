@@ -2,8 +2,10 @@
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { signal } from "@angular/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { NotificationCenter, type CheckResult } from "../core/notification-center";
+import { AgentGrants, type ActiveGrant } from "../core/agent-grants";
 import { PrWatch } from "../core/pr-watch";
 import { Notifications } from "./notifications";
 
@@ -99,5 +101,39 @@ describe("Notifications", () => {
     buttons[0].click();
     expect(fixChecks).toHaveBeenCalledWith(expect.objectContaining({ passed: false, number: 12 }));
     expect(center.entries()[0].read).toBe(true);
+  });
+
+  it("lists the active write grants and revokes one", async () => {
+    const grant: ActiveGrant = {
+      id: "g1",
+      leadName: "lead",
+      spaces: [
+        { id: "s1", name: "api" },
+        { id: "s2", name: "web" },
+      ],
+      tools: ["start_agent"],
+      maxAgents: 3,
+      running: 1,
+      expiresAt: Date.now() + 3600_000,
+    };
+    const grants = { active: signal([grant]), revoke: vi.fn() };
+    TestBed.resetTestingModule();
+    TestBed.overrideProvider(AgentGrants, { useValue: grants });
+    TestBed.overrideComponent(Notifications, {
+      set: {
+        templateUrl: undefined,
+        styleUrl: undefined,
+        template: readFileSync("src/app/notifications/notifications.html", "utf8"),
+      },
+    });
+    const fixture = TestBed.createComponent(Notifications);
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector(".grant .message")?.textContent).toContain(
+      "lead may write in api, web",
+    );
+    expect(el.querySelector(".grant .meta")?.textContent).toContain("1 of 3 agents running");
+    el.querySelector<HTMLButtonElement>(".revoke")!.click();
+    expect(grants.revoke).toHaveBeenCalledWith("g1");
   });
 });

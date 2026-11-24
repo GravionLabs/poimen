@@ -3266,6 +3266,7 @@ version = "0.35.0"
 dependencies = [
  "alacritty_terminal",
  "crossterm",
+ "notify",
  "poimen-client",
  "poimen-core",
  "poimen-protocol",

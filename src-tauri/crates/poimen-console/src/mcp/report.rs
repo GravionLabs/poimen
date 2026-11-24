@@ -67,6 +67,11 @@ pub(super) fn report_done(client: &Client, env: &Env, args: &Value) -> Result<Va
         )
         .map_err(server_error)?;
     let run = write_run_finished(own, outcome, &stored["summary"], &stored["files"]);
+    // A lead's grant ends with its run (ADR 0018); for any other agent there is none to revoke.
+    let _ = client.revoke_agent_grant(&poimen_protocol::AgentGrantRevoke {
+        id: None,
+        caller_terminal_id: Some(caller.to_owned()),
+    });
     Ok(json!({
         "terminal": caller,
         "reported": true,
@@ -134,7 +139,7 @@ fn write_run_finished(t: &Terminal, outcome: &str, summary: &Value, files: &Valu
     append(&dir, &run, &[started, finished(&run, 2)]).map_or(Value::Null, |()| json!(run))
 }
 
-fn append(dir: &Path, run: &str, events: &[Value]) -> std::io::Result<()> {
+pub(super) fn append(dir: &Path, run: &str, events: &[Value]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut file = std::fs::OpenOptions::new()
         .create(true)

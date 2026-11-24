@@ -6,6 +6,7 @@ import { LayoutsEditor } from "./layouts-editor";
 import { PaletteEditor } from "./palette-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { ShortcutsEditor } from "./shortcuts-editor";
+import { NotificationsPage } from "./notifications-page";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 
@@ -16,6 +17,7 @@ export const EDITORS: [Type<unknown>, string][] = [
   [SettingsImportPanel, "settings-import-panel"],
   [SpaceTemplatesEditor, "space-templates-editor"],
   [SnippetsEditor, "snippets-editor"],
+  [NotificationsPage, "notifications-page"],
   [PaletteEditor, "palette-editor"],
   [ShortcutsEditor, "shortcuts-editor"],
 ];

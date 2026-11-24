@@ -19,6 +19,9 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::Value;
 
+mod lead;
+pub use lead::{LeadDependency, LeadGrant, LeadMember, LeadState};
+
 /// The event version this build understands.
 pub const SUPPORTED_V: i64 = 1;
 
@@ -267,6 +270,10 @@ pub struct Run {
     pub agent: Option<Value>,
     /// One row per event of a known type, in file order.
     pub events: Vec<RunEvent>,
+    /// The members, dependencies and grant of a lead run (`orchestrate@1`, #1213); absent for
+    /// any other run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead: Option<LeadState>,
 }
 
 /// One event as the Events tab shows it.
@@ -383,6 +390,7 @@ pub struct Reducer {
     host: BTreeMap<String, String>,
     agent: Option<Value>,
     rows: Vec<RunEvent>,
+    lead: Option<LeadState>,
 }
 
 impl Default for Reducer {
@@ -421,6 +429,7 @@ impl Reducer {
             host: BTreeMap::new(),
             agent: None,
             rows: Vec::new(),
+            lead: None,
         }
     }
 
@@ -480,6 +489,14 @@ impl Reducer {
         }
         // Nothing folds after run.finished.
         if self.state.status == "finished" {
+            return;
+        }
+        let mut lead = self.lead.take().unwrap_or_default();
+        let is_lead = lead.push(e);
+        if is_lead || lead != LeadState::default() {
+            self.lead = Some(lead);
+        }
+        if is_lead {
             return;
         }
         let ty = e.get("type").and_then(Value::as_str).unwrap_or("");
@@ -671,6 +688,7 @@ impl Reducer {
             host: self.host.clone(),
             agent: self.agent.clone(),
             events: self.rows.clone(),
+            lead: self.lead.clone(),
         })
     }
 }

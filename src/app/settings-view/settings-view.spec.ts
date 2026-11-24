@@ -604,6 +604,7 @@ describe("SettingsView categories", () => {
       "Trusted projects",
       "Backend",
       "Server",
+      "Notifications",
       "Machines",
       "Agents",
       "General",
@@ -814,14 +815,12 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(16);
+    expect(titles(host)).toHaveLength(17);
   });
 
-  it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
+  it("has a Notifications page for the notify hooks (#1017), without system notification switches", () => {
     const { host } = setup(undefined, undefined, "notifications");
-    expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
-    expect(host.querySelector('section[aria-label="Notifications"]')).toBeNull();
-    expect(host.textContent).not.toContain("When an agent is done");
+    expect(crumb(host)).toBe("Backend › Notifications");
   });
 
   it("opens a retired color-scheme page as Appearance, with the scheme picker", () => {
@@ -969,6 +968,7 @@ describe("SettingsView categories", () => {
       snippets: read("snippets-editor"),
       palette: read("palette-editor"),
       keyboard: read("shortcuts-editor"),
+      notifications: read("notifications-page"),
     };
     for (const page of allPages()) {
       const source = sources[page.id] ?? html;

@@ -16,6 +16,7 @@ pub mod gui_path;
 pub mod harness;
 pub mod keep_awake;
 pub mod layout;
+pub mod notify;
 pub mod order;
 pub mod project;
 pub mod project_env;

@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use poimen_core::{harness, settings};
 use poimen_protocol::{
-    AgentConfirm, AgentStatus, AgentWriteAction, ConfirmReason, Event, Placement, TerminalCreate,
+    AgentConfirm, AgentGrantCheck, AgentStatus, AgentWriteAction, ConfirmReason, Event,
+    GrantVerdict, Placement, TerminalCreate,
 };
 use serde_json::Value;
 
@@ -63,7 +64,7 @@ pub struct WriteAsk<'a> {
 
 /// Allows a write into `space_id` for the agent in `caller`: freely in the caller's own space
 /// (unless `always_ask`), else only with the user's yes in the app. Returns whether the user
-/// confirmed. No calling terminal, an unknown one, a declined or unanswered question and a missing
+/// confirmed (a write under a grant counts as not confirmed: the user answered nothing). No calling terminal, an unknown one, a declined or unanswered question and a missing
 /// app all refuse with the reason.
 pub fn authorize_write(
     client: &Client,
@@ -89,7 +90,23 @@ pub fn authorize_write(
     let own = terminals.iter().find(|t| t.id == caller).ok_or_else(|| {
         WriteError::Refused(format!("terminal {caller} is not known to the server"))
     })?;
-    if own.space_id == space_id && !always_ask {
+    let own_space = own.space_id == space_id && !always_ask;
+    // A grant of this caller (ADR 0018) covers the write without a question; a limit it reached
+    // refuses, also in the caller's own space; no grant, or a server that does not know grants,
+    // falls back to the question (or, in the own space, to free).
+    if !always_ask {
+        let check = AgentGrantCheck {
+            caller_terminal_id: caller.to_owned(),
+            action,
+            space_id: space_id.to_owned(),
+        };
+        match client.check_agent_grant(&check) {
+            Ok(GrantVerdict::Covered { .. }) => return Ok(false),
+            Ok(GrantVerdict::Refused { reason }) => return Err(WriteError::Refused(reason)),
+            Ok(GrantVerdict::NeedsConfirmation) | Err(_) => {}
+        }
+    }
+    if own_space {
         return Ok(false);
     }
     let asked = AgentConfirm {

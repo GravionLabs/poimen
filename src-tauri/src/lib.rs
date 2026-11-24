@@ -1,5 +1,6 @@
 use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, tasks, templates};
 use poimen_core::{transcripts, trust};
+mod agent_grants;
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -24,6 +25,7 @@ mod hooks;
 mod layout;
 mod layout_file;
 mod machines;
+mod notify_settings;
 mod paste;
 mod poimen_backend;
 mod poimen_server;
@@ -366,20 +368,6 @@ async fn agent_prompt(
 ) -> Result<agent_session::PromptOutcome, String> {
     on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
         Ok(b.agent_prompt(id, &text))
-    })
-    .await
-}
-
-/// The user's answer to an agent that asks to write into another space (#615); the server holds
-/// the agent's call until it arrives.
-#[tauri::command]
-async fn agent_confirm_answer(
-    backend: State<'_, Shared>,
-    id: String,
-    approve: bool,
-) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_confirm_answer(&id, approve)
     })
     .await
 }
@@ -1654,22 +1642,6 @@ async fn quit_and_stop_server(
     Ok(())
 }
 
-/// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
-#[tauri::command]
-async fn hooks_status() -> Result<Vec<hooks::HookStatus>, String> {
-    tauri::async_runtime::spawn_blocking(|| hooks::status_all(&hooks::SystemExec))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Installs the poimen hooks of one agent (`claude` or `copilot`); only on a user click.
-#[tauri::command]
-async fn hooks_install(agent: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || hooks::install(&hooks::SystemExec, &agent))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -2677,8 +2649,8 @@ pub fn run() {
             machine_install_run,
             machine_install_cancel,
             set_terminal_colors,
-            hooks_status,
-            hooks_install,
+            hooks::hooks_status,
+            hooks::hooks_install,
             set_terminal_font_family,
             set_terminal_font_size,
             clear_terminal_font_size,
@@ -2695,7 +2667,10 @@ pub fn run() {
             agent_start,
             agent_rename,
             agent_prompt,
-            agent_confirm_answer,
+            agent_grants::agent_confirm_answer,
+            agent_grants::agent_grant_answer,
+            agent_grants::agent_grant_revoke,
+            agent_grants::agent_grants,
             pane_rename,
             space_rename,
             terminal_create,
@@ -2767,6 +2742,7 @@ pub fn run() {
             set_explorer_show_hidden,
             agent_settings::set_claude_classic_renderer,
             agent_settings::set_keep_awake,
+            notify_settings::notify_test,
             settings::set_sound,
             agent_settings::set_terminal_history,
             sound_file,

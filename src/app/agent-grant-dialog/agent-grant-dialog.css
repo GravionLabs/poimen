@@ -1,0 +1,45 @@
+.text {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 25vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.spaces {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spaces label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.path {
+  opacity: 0.7;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.limit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.limit input {
+  width: 4em;
+  height: var(--control-height);
+}

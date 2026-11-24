@@ -97,3 +97,28 @@
 .fix {
   padding: 0 8px 6px 24px;
 }
+
+.grants {
+  margin: 0;
+  padding: 0 14px 8px;
+  list-style: none;
+}
+
+.grant {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.grant .text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.grant .meta {
+  opacity: 0.7;
+  font-size: 12px;
+}
