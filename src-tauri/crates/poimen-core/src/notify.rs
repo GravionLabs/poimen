@@ -15,7 +15,7 @@
 
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -185,31 +185,27 @@ fn run_process(
         // A program that ends before reading is judged by its exit status.
         let _ = pipe.write_all(text.as_bytes());
     }
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => {
-                let mut err = String::new();
-                if let Some(mut e) = child.stderr.take() {
-                    let mut buf = Vec::new();
-                    let _ = std::io::Read::read_to_end(&mut e, &mut buf);
-                    err = String::from_utf8_lossy(&buf).trim().to_owned();
-                }
-                return Err(if err.is_empty() {
-                    format!("{what} failed: {status}")
-                } else {
-                    format!("{what} failed: {status}: {err}")
-                });
-            }
-            Ok(None) if start.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{what} timed out after {}s", timeout.as_secs()));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(format!("{what}: {e}")),
+    // The program ends, or closes its stderr, when its stderr reaches EOF: a thread reads it and
+    // the wait blocks on that, with the timeout, instead of polling the clock.
+    let stderr = child.stderr.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut e) = stderr {
+            let _ = std::io::Read::read_to_end(&mut e, &mut buf);
         }
+        let _ = tx.send(String::from_utf8_lossy(&buf).trim().to_owned());
+    });
+    let Ok(err) = rx.recv_timeout(timeout) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("{what} timed out after {}s", timeout.as_secs()));
+    };
+    match child.wait() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) if err.is_empty() => Err(format!("{what} failed: {status}")),
+        Ok(status) => Err(format!("{what} failed: {status}: {err}")),
+        Err(e) => Err(format!("{what}: {e}")),
     }
 }
 
@@ -272,6 +268,7 @@ pub fn machine_name() -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Instant;
 
     fn msg() -> Message {
         Message {

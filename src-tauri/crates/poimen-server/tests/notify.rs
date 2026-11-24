@@ -2,7 +2,10 @@
 //! only reaches `server.log`. Unix-only: the commands are `/bin/sh`.
 #![cfg(unix)]
 
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,12 +22,25 @@ struct Env {
     terminal: String,
 }
 
-fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !ok() {
-        assert!(start.elapsed() < LONG, "timed out waiting for {what}");
-        thread::sleep(Duration::from_millis(20));
-    }
+/// Lines of a command's output, read on a thread and delivered on a channel: a wait blocks on
+/// the channel (with a limit), never on the clock.
+fn lines_of(mut reader: impl BufRead + Send + 'static) -> Receiver<String> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut line = String::new();
+        while reader.read_line(&mut line).is_ok_and(|n| n > 0) {
+            if tx.send(line.trim_end().to_owned()).is_err() {
+                return;
+            }
+            line.clear();
+        }
+    });
+    rx
+}
+
+fn next_line(rx: &Receiver<String>, what: &str) -> String {
+    rx.recv_timeout(LONG)
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
 }
 
 impl Env {
@@ -76,46 +92,54 @@ impl Env {
             )
             .unwrap();
     }
-
-    fn lines(&self, file: &Path) -> Vec<String> {
-        std::fs::read_to_string(file)
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_owned)
-            .collect()
-    }
 }
 
-fn append_command(file: &Path) -> serde_json::Value {
+/// A named pipe the commands write to: opening it for reading blocks until a command writes.
+fn fifo(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("poimen-notify-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    path
+}
+
+fn write_command(file: &Path) -> serde_json::Value {
     json!([
         "sh",
         "-c",
-        format!("echo \"$0\" >> '{}'", file.display()),
+        format!("echo \"$0\" > '{}'", file.display()),
         "{status}|{agent}|{space}|{text}"
     ])
 }
 
 #[test]
 fn a_command_runs_once_per_transition_with_the_fields() {
-    let out = std::env::temp_dir().join(format!("poimen-notify-out-{}", std::process::id()));
-    let _ = std::fs::remove_file(&out);
+    let out = fifo("out");
     let env = Env::new(
         "once",
-        &json!({ "blocked": { "command": append_command(&out) },
-                 "done": { "command": append_command(&out) } }),
+        &json!({ "blocked": { "command": write_command(&out) },
+                 "done": { "command": write_command(&out) } }),
     );
+    let read = |what: &str| {
+        let file = std::fs::File::open(&out).unwrap();
+        next_line(&lines_of(BufReader::new(file)), what)
+    };
     env.report(1, "working", "");
     env.report(2, "blocked", "Allow Bash?");
     env.report(3, "blocked", "Allow Bash?");
-    wait_for("the blocked notification", || !env.lines(&out).is_empty());
+    assert_eq!(
+        read("the blocked notification"),
+        "blocked|claude|api|Allow Bash?"
+    );
     env.report(4, "working", "");
     env.report(5, "done", "");
-    wait_for("the done notification", || env.lines(&out).len() == 2);
-    thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        env.lines(&out),
-        vec!["blocked|claude|api|Allow Bash?", "done|claude|api|"]
-    );
+    // A second blocked call would arrive here, before the done one.
+    assert_eq!(read("the done notification"), "done|claude|api|");
     let _ = std::fs::remove_dir_all(&env.dir);
     let _ = std::fs::remove_file(&out);
 }
@@ -133,9 +157,26 @@ fn a_failing_or_hanging_command_is_logged_and_never_blocks_the_server() {
     assert!(started.elapsed() < Duration::from_secs(3), "reports waited");
     assert!(env.client.ping().is_ok());
     let log = env.dir.join("state").join("server.log");
-    wait_for("both failures in the log", || {
-        let text = std::fs::read_to_string(&log).unwrap_or_default();
-        text.contains("timed out") && text.contains("nope")
-    });
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log);
+    let mut tail = Command::new("tail")
+        .args(["-F"])
+        .arg(&log)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = lines_of(BufReader::new(tail.stdout.take().unwrap()));
+    let (mut timed_out, mut failed) = (false, false);
+    while !(timed_out && failed) {
+        let line = next_line(&rx, "both failures in the log");
+        timed_out |= line.contains("timed out");
+        failed |= line.contains("nope");
+    }
+    let _ = tail.kill();
+    let _ = tail.wait();
     let _ = std::fs::remove_dir_all(&env.dir);
 }
