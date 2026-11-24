@@ -24,6 +24,7 @@ mod hooks;
 mod layout;
 mod layout_file;
 mod machines;
+mod notify_settings;
 mod paste;
 mod poimen_backend;
 mod poimen_server;
@@ -1654,22 +1655,6 @@ async fn quit_and_stop_server(
     Ok(())
 }
 
-/// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
-#[tauri::command]
-async fn hooks_status() -> Result<Vec<hooks::HookStatus>, String> {
-    tauri::async_runtime::spawn_blocking(|| hooks::status_all(&hooks::SystemExec))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Installs the poimen hooks of one agent (`claude` or `copilot`); only on a user click.
-#[tauri::command]
-async fn hooks_install(agent: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || hooks::install(&hooks::SystemExec, &agent))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -2677,8 +2662,8 @@ pub fn run() {
             machine_install_run,
             machine_install_cancel,
             set_terminal_colors,
-            hooks_status,
-            hooks_install,
+            hooks::hooks_status,
+            hooks::hooks_install,
             set_terminal_font_family,
             set_terminal_font_size,
             clear_terminal_font_size,
@@ -2767,6 +2752,7 @@ pub fn run() {
             set_explorer_show_hidden,
             agent_settings::set_claude_classic_renderer,
             agent_settings::set_keep_awake,
+            notify_settings::notify_test,
             settings::set_sound,
             agent_settings::set_terminal_history,
             sound_file,

@@ -27,6 +27,7 @@ pub mod integration;
 pub mod log;
 pub mod mcp_config;
 mod memory;
+mod notify;
 mod outbox;
 mod pty;
 mod records;
@@ -39,6 +40,7 @@ pub mod stdio;
 mod store;
 mod stream;
 mod tab_ops;
+use tab_ops::{drop_terminal, publish_all};
 mod tabs;
 mod typing;
 
@@ -408,6 +410,10 @@ pub(crate) struct Shared {
     awake: Mutex<awake::Awake>,
     /// `agents.silentAfter` in minutes with the time it was read (#898).
     silent_after: Mutex<Option<(Instant, u64)>>,
+    /// The last agent status seen per terminal, so a notification goes out once (#1017).
+    notified: Mutex<notify::Seen>,
+    /// This `Shared`, for the threads `notify` starts from `publish`.
+    me: std::sync::OnceLock<std::sync::Weak<Shared>>,
     /// The process table `terminal.list` reads the memory of terminals from (#971).
     processes: Mutex<memory::Cache>,
     pty_host: PtyHost,
@@ -432,6 +438,7 @@ impl Shared {
     /// Sends the event to every subscriber, dropping the ones that went away. Called with the
     /// `inner` lock held, so events arrive in the order the changes happened.
     fn publish(&self, event: Event) {
+        self.notify_event(&event);
         lock(&self.subscribers).retain(|s| s.tx.send(event.clone()).is_ok());
     }
 
@@ -774,6 +781,8 @@ impl Server {
             home: config.home,
             awake: Mutex::default(),
             silent_after: Mutex::new(None),
+            notified: Mutex::new(Default::default()),
+            me: std::sync::OnceLock::new(),
             processes: Mutex::new(memory::Cache::default()),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
@@ -783,6 +792,7 @@ impl Server {
             stopped: AtomicBool::new(false),
             server_lock: Mutex::new(lock_file),
         });
+        let _ = shared.me.set(Arc::downgrade(&shared));
         shared.refresh_history(Instant::now());
         {
             // Under the lock, so an adopted host whose child has ended meanwhile reports its exit
@@ -1783,24 +1793,6 @@ fn build_tabs(
         setup_started,
         typing,
     })
-}
-
-fn publish_all(shared: &Shared, events: Vec<Event>) {
-    for event in events {
-        shared.publish(event);
-    }
-}
-
-/// Closes a terminal that is not in any leaf yet (`terminal.closed`).
-fn drop_terminal(shared: &Shared, inner: &mut Inner, terminal_id: &str) {
-    if let Some(i) = inner
-        .terminals
-        .iter()
-        .position(|t| t.info.id == terminal_id)
-    {
-        let entry = inner.terminals.remove(i);
-        close_entry(shared, entry);
-    }
 }
 
 fn space_rename(shared: &Shared, p: SpaceRename) -> ApiResult {

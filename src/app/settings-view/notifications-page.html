@@ -1,0 +1,53 @@
+<section aria-label="Notifications">
+  <p class="hint">
+    When an agent is <code>blocked</code> or <code>done</code>, poimen-server runs a command or
+    posts JSON to a URL. It works with the app closed. Set it in the <code>notify</code> key of
+    config.json (ntfy, Pushover and Telegram examples are in the installation guide).
+  </p>
+  @for (w of warnings(); track w) {
+    <p class="error" role="alert">{{ w }}</p>
+  }
+  <div class="rows">
+    @for (status of statuses; track status) {
+      <div class="row-item" [attr.data-status]="status">
+        <div class="grow">
+          <strong>{{ status === "blocked" ? "Blocked" : "Done" }}</strong>
+          @if (hook(status).command; as command) {
+            <div class="hint">
+              Command: <code>{{ command.join(" ") }}</code>
+            </div>
+          }
+          @if (hook(status).url; as url) {
+            <div class="hint">
+              POST: <code>{{ url }}</code>
+            </div>
+          }
+          @if (!configured(status)) {
+            <div class="hint">Nothing configured.</div>
+          }
+          @if (result(); as r) {
+            @if (r.status === status) {
+              @if (r.error; as error) {
+                <p class="error" role="alert">{{ error }}</p>
+              } @else {
+                <p class="hint" role="status">Sent.</p>
+              }
+            }
+          }
+        </div>
+        <button
+          hx-button
+          size="small"
+          variant="outlined"
+          severity="secondary"
+          type="button"
+          [attr.aria-label]="'Test ' + status + ' notification'"
+          [disabled]="!configured(status) || running() !== null"
+          (click)="test(status)"
+        >
+          Test
+        </button>
+      </div>
+    }
+  </div>
+</section>

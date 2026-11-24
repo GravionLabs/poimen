@@ -25,6 +25,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 ## Agents
 
 - `harnesses`: the agent CLIs poimen can start, with their model and prompt arguments. `claude` and `copilot` are built in.
+- `notify`: a command or URL for the agent states `blocked` and `done`, see [Notifications on your phone](/guide/installation#notifications-on-your-phone).
 - `agents.silentAfter`, `agents.keepAwake`, `agents.hibernateAfter` and `agents.claude.classicRenderer`, see [Agents](/guide/agents).
 - `usage.claude`: the Claude limits in the status bar.
 - `github.agentActions` and `tasks`: see [GitHub and tasks](/guide/github).

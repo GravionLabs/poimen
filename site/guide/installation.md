@@ -84,6 +84,25 @@ The `poimen` binary (TUI and CLI, see [Console](/guide/console)) ships with ever
 
 Run `poimen doctor` to check the setup.
 
+## Notifications on your phone
+
+poimen-server can run a command or post to a URL when an agent is **blocked** or **done**. It runs in the server, so it works with the app closed. Put it in `~/.config/poimen/config.json` (applied without a restart):
+
+```json
+"notify": {
+  "timeoutSeconds": 10,
+  "blocked": { "command": ["curl", "-sS", "-H", "Title: {agent} is blocked in {space}", "-d", "{text}", "https://ntfy.sh/my-secret-topic"] },
+  "done":    { "command": ["curl", "-sS", "-H", "Title: {agent} is done in {space}", "-d", "{text}", "https://ntfy.sh/my-secret-topic"] }
+}
+```
+
+- `command` is an argv (no shell). `{agent}`, `{space}`, `{status}`, `{text}` and `{machine}` are replaced inside each element. `url` instead gets a JSON POST of the same five fields (`agent`, `space`, `status`, `text`, `machine`); both can be set. The call is made once per agent and transition, ends after `timeoutSeconds` (default 10), and a failure is only a line in `server.log`. `url` needs `curl` on the `PATH` of the server.
+- **ntfy:** the example above; subscribe to the topic in the ntfy app. A self-hosted server works the same with its own URL.
+- **Pushover:** `["curl", "-sS", "--form-string", "token=<app token>", "--form-string", "user=<user key>", "--form-string", "title={agent} {status} in {space}", "--form-string", "message={text}", "https://api.pushover.net/1/messages.json"]`
+- **Telegram:** `["curl", "-sS", "--data-urlencode", "chat_id=<chat id>", "--data-urlencode", "text={agent} {status} in {space}: {text}", "https://api.telegram.org/bot<bot token>/sendMessage"]`
+
+The tokens are in `config.json` in plain text (the file is yours alone; do not export it with them). **Settings > Backend > Notifications** shows what is set and has a **Test** button per status that runs it once with a sample message.
+
 ## Build from source
 
 Needs Rust 1.99.1, Node.js 26 and pnpm. See "Development" in the [README](https://github.com/GravionLabs/poimen#development).

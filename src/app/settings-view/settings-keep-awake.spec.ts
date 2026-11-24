@@ -14,6 +14,7 @@ import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsView } from "./settings-view";
 import { ShortcutsEditor } from "./shortcuts-editor";
 import { PaletteEditor } from "./palette-editor";
+import { NotificationsPage } from "./notifications-page";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 
@@ -47,6 +48,7 @@ function agentsPage(keepAwake: boolean) {
     [SettingsImportPanel, "settings-import-panel"],
     [SpaceTemplatesEditor, "space-templates-editor"],
     [SnippetsEditor, "snippets-editor"],
+    [NotificationsPage, "notifications-page"],
     [PaletteEditor, "palette-editor"],
     [ShortcutsEditor, "shortcuts-editor"],
   ];

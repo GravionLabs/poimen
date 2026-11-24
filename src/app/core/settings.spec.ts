@@ -165,6 +165,11 @@ describe("parseSettings", () => {
       keepAwake: false,
       palette: { scripts: true, skills: true, hidden: {} },
       terminalHistory: { enabled: true, perTerminalMib: 8, totalMib: 256 },
+      notify: {
+        blocked: { command: null, url: null },
+        done: { command: null, url: null },
+        timeoutSeconds: 10,
+      },
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       layouts: [],
@@ -216,6 +221,15 @@ describe("parseSettings", () => {
     expect(parseSettings({}).keepAwake).toBe(false);
     expect(parseSettings({ keepAwake: true }).keepAwake).toBe(true);
     expect(parseSettings({ keepAwake: "yes" }).keepAwake).toBe(false);
+  });
+
+  it("reads notify from the backend's settings, empty by default", () => {
+    expect(parseSettings({}).notify.done).toEqual({ command: null, url: null });
+    const n = parseSettings({
+      notify: { blocked: { command: ["ntfy", "publish", "t"] }, done: { url: "https://x" } },
+    }).notify;
+    expect(n.blocked.command).toEqual(["ntfy", "publish", "t"]);
+    expect(n.done.url).toBe("https://x");
   });
 
   it("reads terminalHistory, on with 8 and 256 MiB by default", () => {
