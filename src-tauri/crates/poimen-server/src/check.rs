@@ -312,17 +312,17 @@ mod tests {
             None,
         )
         .unwrap();
-        let r = run(&env, "0.18.0", 7, Channel::Stable);
+        let r = run(&env, "0.18.0", 8, Channel::Stable);
         assert_eq!(get(&r, "hooks_claude").status, CheckStatus::Ok);
         assert_eq!(get(&r, "hooks_copilot").status, CheckStatus::Ok);
         assert_eq!(get(&r, "git").status, CheckStatus::Ok);
         assert_eq!(get(&r, "gh_auth").status, CheckStatus::Ok);
         assert_eq!(
             get(&r, "server").detail.as_deref(),
-            Some("poimen-server 0.18.0 (protocol 7)")
+            Some("poimen-server 0.18.0 (protocol 8)")
         );
         assert_eq!(r.version, "0.18.0");
-        assert_eq!(r.protocol, 7);
+        assert_eq!(r.protocol, 8);
         assert!(r.ok());
     }
 

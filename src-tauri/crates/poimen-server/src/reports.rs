@@ -129,13 +129,14 @@ impl Shared {
     }
 }
 
-/// Runs [`Shared::deliver_reports`] on a timer for the life of the server.
+/// Runs [`Shared::deliver_reports`] and drops ended grants (ADR 0018) on a timer for the life of the server.
 pub(crate) fn spawn_sweeper(shared: &std::sync::Arc<Shared>) {
     let shared = std::sync::Arc::clone(shared);
     thread::spawn(move || {
         loop {
             thread::sleep(SWEEP);
             shared.deliver_reports();
+            shared.prune_grants();
         }
     });
 }

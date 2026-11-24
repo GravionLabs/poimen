@@ -65,10 +65,13 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
 - `start_agent` (`harness`, `space?`, `model?`, `prompt?`, `name?`): a new terminal running a harness of your `harnesses` config.
 - `start_shell` (`command` argv list, `cwd?`, `name?`, `space?`, `env?`): a new terminal that runs a long command (for example the deliver loop); it stays listed after the command ends.
+- `list_repositories`: the git repositories poimen knows (spaces and trusted projects) with path, `origin` URL and `owner/repo` for GitHub.
+- `create_space` (`directory`, `name?`): a space for a directory, unchanged when one exists (`created: false`); always needs your confirmation in the app, refused for a project file you have not trusted.
 - `stop_terminal` (`terminal`, `mode?` `interrupt` (default, Ctrl-C) or `close`, `force?`): ends what a terminal runs; answers `ended`, `running` or `gone`. `close` of a terminal with a running agent needs `force`.
 - `write_terminal` (`terminal`, `text`, `enter?`): types into an existing terminal that runs no agent (the text runs in your shell); needs your confirmation in the app on every call unless the agent started that terminal with `start_shell`; control characters other than newline and tab are refused; a terminal with an agent is refused (use `prompt_agent`).
 - `prompt_agent` (`terminal`, `text`): types a prompt into the agent of a terminal, refused while it works or waits.
 - `wait_agent` (`terminal`, `timeout_s?`): waits until the agent of a terminal is done, blocked, in error or gone, or the timeout (default 300 s, at most 3600 s) passed; answers with the status and, when blocked, the notification text. Read tool; it includes the agent's report when there is one.
+- `wait_any` (`terminals?`, `runs?`, `timeout_s?`): like `wait_agent` over several terminals and runs; returns at the first agent done, blocked, in error or gone, or run finished or needing you, with the others' state.
 - `report_done` (`outcome`, `summary`, `files?`): an agent that was started with `start_agent` calls it once at its end (`start_agent` adds a short preamble with this rule to the prompt). poimen stores the report on the terminal, types one line (terminal and outcome) into the starting agent when it is idle (it waits while it works), and the Runs view shows the outcome and summary as the finished run.
 - `read_agent` (`terminal`): the last assistant message of the agent's transcript (Claude Code and Copilot CLI) with the session id; an error when the terminal has no agent transcript. Read tool, also for a terminal on a remote machine.
 

@@ -17,6 +17,8 @@ pub enum AgentWriteAction {
     StopTerminal,
     /// Types into an existing terminal.
     WriteTerminal,
+    /// Makes a space for a directory (#1209).
+    CreateSpace,
 }
 
 /// Params of `agent.confirm` (#615): an agent (the terminal `caller_terminal_id`) wants to write

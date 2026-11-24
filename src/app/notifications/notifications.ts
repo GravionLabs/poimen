@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, Injector, inject, output } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { AgentGrants } from "../core/agent-grants";
 import { NotificationCenter, type NotificationEntry } from "../core/notification-center";
 import { PrWatch } from "../core/pr-watch";
 
@@ -18,12 +19,18 @@ export function notificationTime(time: number): string {
 })
 export class Notifications {
   protected readonly center = inject(NotificationCenter);
+  protected readonly grants = inject(AgentGrants);
   private readonly injector = inject(Injector);
   /** An entry was clicked: open the tab of its pane. */
   readonly paneChosen = output<string>();
   /** An entry of a run was clicked: reveal its repository in the Runs view. */
   readonly runChosen = output<{ root: string; machine?: string }>();
   protected readonly timeOf = notificationTime;
+
+  /** The names of a grant's spaces, for one line. */
+  protected spaceNames(spaces: readonly { name: string }[]): string {
+    return spaces.map((s) => s.name).join(", ");
+  }
 
   /** The "Fix checks" button of a failed result: starts the action, opens nothing else. */
   protected fixChecks(entry: NotificationEntry): void {
