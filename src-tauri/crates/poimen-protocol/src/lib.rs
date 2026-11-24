@@ -1,8 +1,6 @@
 //! Wire types of the `poimen-server` socket API, documented in `docs/protocol.md`.
 //!
-//! NDJSON over a local socket (a Unix socket, a named pipe on Windows): one JSON object per line.
-//! A client sends [`Request`]s and reads one [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The
-//! crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
+//! NDJSON over a local socket (a Unix socket, a named pipe on Windows): one JSON object per line. A client sends [`Request`]s and reads one [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,6 +14,7 @@ mod confirm;
 pub mod files;
 mod grant;
 pub mod host;
+pub mod lead;
 pub mod report;
 pub mod status;
 pub use attach::{AttachMode, AttachResult, DetachReason, TerminalSetDraft};

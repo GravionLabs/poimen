@@ -139,7 +139,7 @@ fn write_run_finished(t: &Terminal, outcome: &str, summary: &Value, files: &Valu
     append(&dir, &run, &[started, finished(&run, 2)]).map_or(Value::Null, |()| json!(run))
 }
 
-fn append(dir: &Path, run: &str, events: &[Value]) -> std::io::Result<()> {
+pub(super) fn append(dir: &Path, run: &str, events: &[Value]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
