@@ -214,7 +214,13 @@ fn hooks(
     installed: Option<Result<claude::HookStatus, String>>,
     server: &str,
 ) -> MachineCheckItem {
-    let fix = Some(format!("{server} integration install {agent}"));
+    // The command is the console's (#1173); `server` tells the channel.
+    let console = if server.ends_with("-rc") {
+        crate::mcp_config::console_name(Channel::Rc)
+    } else {
+        crate::mcp_config::console_name(Channel::Stable)
+    };
+    let fix = Some(format!("{console} integration install {agent}"));
     match installed {
         Some(Ok(s)) if s.missing.is_empty() => item(id, CheckStatus::Ok, None, None),
         Some(Ok(s)) if s.installed.is_empty() => item(
@@ -425,14 +431,11 @@ mod tests {
         let r = run(&env, "1", 6, Channel::Stable);
         let c = get(&r, "hooks_claude");
         assert_eq!(c.status, CheckStatus::Warning);
-        assert_eq!(
-            c.fix.as_deref(),
-            Some("poimen-server integration install claude")
-        );
+        assert_eq!(c.fix.as_deref(), Some("poimen integration install claude"));
         let rc = run(&env, "1", 6, Channel::Rc);
         assert_eq!(
             get(&rc, "hooks_claude").fix.as_deref(),
-            Some("poimen-server-rc integration install claude")
+            Some("poimen-cli-rc integration install claude")
         );
     }
 
