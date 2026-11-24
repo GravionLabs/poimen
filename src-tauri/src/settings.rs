@@ -230,6 +230,7 @@ pub struct Settings {
     pub silent_after: u64,
     /// `terminalHistory`: whether the server logs terminal output to disk and the limits (#1196).
     pub terminal_history: poimen_core::terminal_history::TerminalHistory,
+    pub notify: poimen_core::notify::Notify,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -278,6 +279,7 @@ impl Default for Settings {
             claude_classic_renderer: false,
             keep_awake: false,
             terminal_history: Default::default(),
+            notify: Default::default(),
             silent_after: poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
             home: None,
             warnings: Vec::new(),
@@ -531,10 +533,8 @@ pub fn resolve_with(json: Option<&str>, sources: &dyn TerminalSources) -> Settin
     if let Some(value) = root.get("agents") {
         resolve_agents(value, &mut s);
     }
-    if let Some(value) = root.get("terminalHistory") {
-        s.terminal_history = poimen_core::terminal_history::resolve(value, &mut s.warnings);
-    }
-
+    s.terminal_history = poimen_core::terminal_history::from_root(&root, &mut s.warnings);
+    s.notify = poimen_core::notify::from_root(&root, &mut s.warnings);
     if let Some(ui) = root.get("ui") {
         if let Some(ui) = ui.as_object() {
             match ui.get("fontFamily") {

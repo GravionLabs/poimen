@@ -1,3 +1,4 @@
+import { DEFAULT_NOTIFY, parseNotify, type NotifySettings } from "./notify-settings";
 import { Injectable, inject, signal } from "@angular/core";
 import { injectMessages, TOAST_ERROR_MS } from "./toast";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
@@ -299,6 +300,7 @@ export interface Settings {
   palette: PaletteSettings;
   /** `terminalHistory`: the server logs terminal output to disk (#1196). */
   terminalHistory: TerminalHistorySettings;
+  notify: NotifySettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
@@ -427,6 +429,7 @@ export const DEFAULT_SETTINGS: Settings = {
   usage: { claude: true },
   palette: DEFAULT_PALETTE,
   terminalHistory: DEFAULT_TERMINAL_HISTORY,
+  notify: DEFAULT_NOTIFY,
   home: null,
   warnings: [],
 };
@@ -535,6 +538,7 @@ export function parseSettings(raw: unknown): Settings {
     usage: parseUsage(r["usage"]),
     palette: parsePalette(r["palette"]),
     terminalHistory: parseTerminalHistory(r["terminalHistory"]),
+    notify: parseNotify(r["notify"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")

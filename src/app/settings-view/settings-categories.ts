@@ -120,6 +120,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         ],
       },
       {
+        id: "notifications",
+        title: "Notifications",
+        labels: ["Blocked", "Done", "Test", "Command"],
+      },
+      {
         id: "machines",
         title: "Machines",
         labels: ["Remote machines", "Check machine"],
@@ -155,8 +160,6 @@ export const DEFAULT_SETTINGS_PAGE = SETTINGS_GROUPS[0].pages[0].id;
 /** Retired page ids, mapped to the page that now holds their settings (persisted selections, deep links). */
 const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([
   ["color-scheme", "appearance"],
-  // System notifications were removed (#676).
-  ["notifications", "appearance"],
   // The page was named after herdr, the former backend (#174).
   ["herdr", "server"],
   // "New space layout" is the layout `default` of the Layouts page (#855).
