@@ -100,7 +100,7 @@ pub(super) fn events_dir(dir: &str) -> Result<PathBuf, String> {
 
 /// The complete lines of an event file (a half-written last line waits); `None` for a file that
 /// is not regular, too big or unreadable.
-fn read_complete(path: &Path) -> Option<String> {
+pub(super) fn read_complete(path: &Path) -> Option<String> {
     let regular = std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() <= MAX_EVENTS_BYTES);
     let text = regular
         .then(|| std::fs::read_to_string(path).ok())

@@ -690,10 +690,8 @@ impl Backend for PoimenBackend {
         self.rename_terminal(target, name)
     }
 
-    fn agent_confirm_answer(&self, id: &str, approve: bool) -> Result<(), String> {
-        self.client
-            .answer_agent_confirm(id, approve)
-            .map_err(|e| e.to_string())
+    fn agent_client(&self) -> Option<&Client> {
+        Some(&self.client)
     }
 
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome {
@@ -2188,7 +2186,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(7), 7)
+            ("0.9.0", Some(8), 8)
         );
     }
 

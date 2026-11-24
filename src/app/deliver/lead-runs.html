@@ -1,0 +1,109 @@
+@for (lead of deliver.leadRuns(); track lead.key) {
+  <article class="card tone-{{ lead.tone }}" data-testid="lead-run">
+    <div class="card-head">
+      <h3 data-testid="lead-title">{{ lead.title }}</h3>
+      <span class="hint" data-testid="lead-state">{{ lead.stateText }}</span>
+      @if (lead.leadTerminal; as pane) {
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          data-testid="lead-terminal"
+          (click)="paneChosen.emit(pane)"
+        >
+          Lead terminal
+        </button>
+      }
+    </div>
+    @if (lead.grant; as grant) {
+      <div class="grant" data-testid="lead-grant">
+        <span>{{ grant.leadName }} {{ grantText(grant) }}</span>
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="danger"
+          size="small"
+          data-testid="lead-revoke"
+          (click)="grants.revoke(grant.id)"
+        >
+          Revoke
+        </button>
+      </div>
+    }
+    @if (lead.members.length === 0) {
+      <p class="hint" data-testid="lead-no-members">The lead has not started a loop yet.</p>
+    } @else {
+      <ul class="members" aria-label="Loops of the lead run">
+        @for (m of lead.members; track m.task) {
+          <li data-testid="lead-member" [attr.data-task]="m.task">
+            <div class="row">
+              <span class="mono">{{ m.repository }}</span>
+              <span class="mono hint">{{ m.task }}</span>
+              <hx-tag [severity]="severity(m.state)" data-testid="member-state">{{
+                stateLabel(m.state)
+              }}</hx-tag>
+              @if (m.runText) {
+                <span class="hint" data-testid="member-run">{{ m.runText }}</span>
+              }
+              @if (m.currentPbi; as pbi) {
+                <span data-testid="member-current">{{ pbi }}</span>
+              }
+              @if (m.sessionTerminal; as pane) {
+                <button
+                  type="button"
+                  hx-button
+                  variant="text"
+                  size="small"
+                  data-testid="member-terminal"
+                  (click)="paneChosen.emit(pane)"
+                >
+                  Show terminal
+                </button>
+              }
+              @if (m.leadTerminal; as pane) {
+                <button
+                  type="button"
+                  hx-button
+                  variant="text"
+                  size="small"
+                  data-testid="member-lead"
+                  (click)="paneChosen.emit(pane)"
+                >
+                  Lead terminal
+                </button>
+              }
+            </div>
+            @for (b of m.blocked; track b.id) {
+              <p class="blocked" data-testid="member-blocked">Blocked: {{ b.text }}</p>
+            }
+            @if (m.waitingOn.length > 0) {
+              <p class="hint" data-testid="member-waiting">
+                Waits for {{ m.waitingOn.join(", ") }}
+              </p>
+            }
+          </li>
+        }
+      </ul>
+    }
+    @if (lead.dependencies.length > 0) {
+      <h4>Dependencies</h4>
+      <ul class="dependencies" aria-label="Dependencies across repositories">
+        @for (d of lead.dependencies; track d.task + d.blockedBy) {
+          <li data-testid="lead-dependency" [attr.data-open]="d.open">
+            <span class="mono">{{ d.task }}</span> waits for
+            <span class="mono">{{ d.blockedBy }}</span>
+            <hx-tag [severity]="d.open ? 'warn' : 'success'" data-testid="dependency-state">{{
+              d.open ? "open" : "done"
+            }}</hx-tag>
+            @if (d.note) {
+              <span class="hint">{{ d.note }}</span>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </article>
+}

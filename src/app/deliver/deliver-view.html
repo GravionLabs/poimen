@@ -11,6 +11,14 @@
       here as soon as the file exists.
     </p>
   }
+  @if (deliver.leadRuns().length > 0) {
+    <section class="section" data-testid="lead-runs" aria-labelledby="runs-lead">
+      <h2 id="runs-lead" class="section-title">Lead runs</h2>
+      @defer {
+        <app-lead-runs (paneChosen)="paneChosen.emit($event)" />
+      }
+    </section>
+  }
   @if (overview.loading() && overview.repos().length === 0 && !overview.failure()) {
     <app-loading-rows [active]="true" label="Loading milestones" testId="runs-loading" [rows]="5" />
   }

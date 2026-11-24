@@ -1,8 +1,6 @@
 //! Wire types of the `poimen-server` socket API, documented in `docs/protocol.md`.
 //!
-//! NDJSON over a local socket (a Unix socket, a named pipe on Windows): one JSON object per line.
-//! A client sends [`Request`]s and reads one [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The
-//! crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
+//! NDJSON over a local socket (a Unix socket, a named pipe on Windows): one JSON object per line. A client sends [`Request`]s and reads one [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -11,22 +9,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod attach;
+mod channel;
 mod confirm;
 pub mod files;
+mod grant;
 pub mod host;
+pub mod lead;
 pub mod report;
 pub mod status;
 pub use attach::{AttachMode, AttachResult, DetachReason, TerminalSetDraft};
+pub use channel::Channel;
 pub use confirm::{
     AgentConfirm, AgentConfirmAnswer, AgentWriteAction, AgentWriteNotice, CONFIRM_WAIT_MS,
     ConfirmReason, ConfirmResult, Placement,
 };
 pub use files::windows_dir_from;
+pub use grant::{
+    AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentGrants,
+    GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace,
+    GrantVerdict,
+};
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -41,79 +48,6 @@ pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
 /// call instead of the running binary. The app sets it when it runs a copy whose path is not
 /// stable (inside an AppImage), pointing at the stable link of its staged copy.
 pub const ENV_HOOK_EXE: &str = "POIMEN_HOOK_EXE";
-
-/// The release channel a binary is built for, fixed at build time by `POIMEN_CHANNEL` (`rc` for
-/// the pre-release builds of `release.yml`, unset or `stable` otherwise). Every path a stable
-/// and an rc installation could share is named per channel, so the two run side by side, each
-/// with its own server, settings and hooks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Channel {
-    Stable,
-    Rc,
-}
-
-impl Channel {
-    pub const ALL: [Channel; 2] = [Channel::Stable, Channel::Rc];
-
-    /// The channel of a `POIMEN_CHANNEL` value: unset, empty or `stable` is stable, `rc` is rc, else `None`.
-    pub const fn parse(value: Option<&str>) -> Option<Channel> {
-        match value {
-            None => Some(Channel::Stable),
-            Some(v) if v.is_empty() || const_eq(v, "stable") => Some(Channel::Stable),
-            Some(v) if const_eq(v, "rc") => Some(Channel::Rc),
-            Some(_) => None,
-        }
-    }
-
-    /// `stable` or `rc`.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Channel::Stable => "stable",
-            Channel::Rc => "rc",
-        }
-    }
-
-    /// What names of this channel end with: nothing on stable, `-rc` on rc.
-    pub const fn suffix(self) -> &'static str {
-        match self {
-            Channel::Stable => "",
-            Channel::Rc => "-rc",
-        }
-    }
-
-    /// `base` with the channel suffix: `poimen` stays `poimen` on stable and is `poimen-rc` on rc.
-    pub fn named(self, base: &str) -> String {
-        format!("{base}{}", self.suffix())
-    }
-
-    /// The file name of this channel's `poimen-server` binary (`poimen-server-rc` on rc; `.exe` on Windows).
-    pub fn server_program(self, windows: bool) -> String {
-        let name = self.named("poimen-server");
-        if windows { format!("{name}.exe") } else { name }
-    }
-
-    /// The file name of this channel's `poimen-pty-host` binary, next to the server (`-rc` on rc; `.exe` on Windows).
-    pub fn host_program(self, windows: bool) -> String {
-        let name = self.named("poimen-pty-host");
-        if windows { format!("{name}.exe") } else { name }
-    }
-}
-
-const fn const_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
 
 /// The channel of this build (`POIMEN_CHANNEL` at build time). An unknown value fails the build.
 pub const CHANNEL: Channel = match Channel::parse(option_env!("POIMEN_CHANNEL")) {
@@ -1530,6 +1464,29 @@ pub enum Event {
     /// The confirmation `id` is settled (answered, timed out or abandoned).
     #[serde(rename = "agent.confirm_resolved")]
     AgentConfirmResolved { id: String },
+    /// A lead agent asks for a scoped write grant (ADR 0018, #1211); only to subscriptions of kind
+    /// `app`. Answered by `agent.grant_answer`; gone with [`Event::AgentGrantResolved`].
+    #[serde(rename = "agent.grant_requested")]
+    AgentGrantRequested {
+        id: String,
+        lead_terminal_id: String,
+        lead_name: String,
+        plan: String,
+        spaces: Vec<GrantSpace>,
+        tools: Vec<AgentWriteAction>,
+        max_agents: u32,
+        /// How long the grant lasts once confirmed.
+        duration_s: u64,
+        /// How long the request stays open.
+        wait_ms: u64,
+    },
+    /// The grant request `id` is settled (answered, timed out or abandoned).
+    #[serde(rename = "agent.grant_resolved")]
+    AgentGrantResolved { id: String },
+    /// The active grants changed (given, narrowed, revoked, expired or ended with the lead);
+    /// carries all of them. Only to subscriptions of kind `app`.
+    #[serde(rename = "agent.grants_changed")]
+    AgentGrantsChanged { grants: Vec<GrantInfo> },
     /// An agent wrote through `poimen mcp` (#615); only to subscriptions of kind `app`.
     #[serde(rename = "agent.wrote")]
     AgentWrote {

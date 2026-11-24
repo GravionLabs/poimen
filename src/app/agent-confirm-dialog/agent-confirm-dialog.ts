@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from "@angular/core";
+import { AgentGrantDialog } from "../agent-grant-dialog/agent-grant-dialog";
 import { AgentConfirm } from "../core/agent-confirm";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { HxButton } from "@gravionlabs/helix-ui";
@@ -9,7 +10,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
  */
 @Component({
   selector: "app-agent-confirm-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [AgentGrantDialog, DialogShell, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./agent-confirm-dialog.html",
   styleUrl: "./agent-confirm-dialog.css",
