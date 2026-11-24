@@ -5,6 +5,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.36.0] — 2026-11-24
+
+### Bug Fixes
+- **server**: E2e fake backend answers agent_grants; previous-release expects the protocol step (#1211)
+- **mcp**: Record_run writes only to the caller's repository, caps the plan (#1212)
+- **notifications**: Instant import only where the test runs (#1017)
+- **demo**: Answer agent_grants in the demo backend (#1017)
+
+
+### Documentation
+- **adr**: Scoped write grant and lead runs for orchestration (#1208) (#1272)
+- **adr**: Scoped write grant and lead runs for orchestration (#1208)
+- **adr**: Address review of ADR 0018 (#1208)
+- **mcp**: Guide and tool descriptions for orchestration (#1214) (#1279)
+- **mcp**: Guide and tool descriptions for orchestration (#1214)
+- **mcp**: Max_agents is required in request_grant (#1214)
+
+
+### Features
+- **mcp**: Create_space and list_repositories (#1209) (#1274)
+- **server**: Scoped write grant for a lead agent (#1211) (#1276)
+- **server**: Scoped write grant for a lead agent (#1211)
+- **mcp**: Record and resume the run of a lead agent (#1212) (#1277)
+- **mcp**: Record and resume the run of a lead agent (#1212)
+- **app**: Overview of a lead run across repositories (#1213) (#1278)
+- **notifications**: A webhook or command when an agent is blocked or done (#1017) (#1271)
+- **notifications**: A webhook or command when an agent is blocked or done (#1017)
+
+
 ## [0.35.0] — 2026-11-24
 
 ### Bug Fixes
@@ -20,6 +49,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **adr**: Script environment for runs (#748) (#1269)
 - **adr**: Script environment for runs (#748)
 - **adr**: State the CLI as proposed and split the remote cases (#748)
+- Update CHANGELOG.md for v0.35.0 [skip ci]
 
 
 ### Features
