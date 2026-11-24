@@ -9,6 +9,7 @@ pub mod commands;
 pub mod doctor;
 pub mod keys;
 pub mod mcp;
+pub mod remote;
 pub mod server_start;
 pub mod session;
 pub mod session_run;

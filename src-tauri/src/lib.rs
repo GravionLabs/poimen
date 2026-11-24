@@ -1527,7 +1527,7 @@ fn sync_machines(
         let handle = handle.clone();
         machines::Machine::start(
             config.clone(),
-            std::sync::Arc::new(machines::SshConnector::new(config)),
+            std::sync::Arc::new(machines::SshConnector::new(&config.ssh, config.server_path.as_deref())),
             {
                 let handle = handle.clone();
                 move |status| {
