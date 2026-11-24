@@ -64,6 +64,7 @@ import {
 } from "./deliver-status";
 import { delayedBusy } from "../ui/loading/delayed";
 import { LoadingRows } from "../ui/loading/loading-rows";
+import { LeadRuns } from "./lead-runs";
 
 /** "PR #343" for a pull request URL, the URL itself when it has no number at the end. */
 export function prLabel(url: string): string {
@@ -107,7 +108,7 @@ export function lineCounts(line: TimelineLine): string[] {
  */
 @Component({
   selector: "app-deliver-view",
-  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu],
+  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu, LeadRuns],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -24,6 +24,8 @@ import {
 } from "./deliver-status";
 import { effectiveStatus, runsByTerminal } from "./pane-status";
 import { taskTerminals } from "./task-terminal";
+import { leadRuns, parseLead, type LeadRecord } from "./lead-run";
+import { AgentGrants } from "../core/agent-grants";
 import { activeLoop, type ActiveLoop, type Launched } from "./deliver-start";
 
 /** How often the age texts and the stale rule are re-evaluated. */
@@ -74,6 +76,7 @@ export class Deliver {
   private readonly editor = inject(EditorTabs);
   private readonly center = inject(NotificationCenter);
   private readonly tokenTotals = inject(TokenTotalsService);
+  private readonly grants = inject(AgentGrants);
   /** Attentions already seen (notified or part of the first read), by machine, root, run and id. */
   private readonly seenAlerts = new Set<string>();
   /** Repositories whose first read is in; it only sets the baseline. */
@@ -89,6 +92,21 @@ export class Deliver {
     withMachines(
       this.received(),
       new Map(this.machines.machines().map((m) => [m.name, m.state] as const)),
+    ),
+  );
+  /** What the run files record of lead runs (#1213), by card key; read from the events, kept nowhere else. */
+  private readonly leads = signal<ReadonlyMap<string, LeadRecord>>(new Map());
+  /**
+   * The lead runs (ADR 0018) with their members, dependencies and grant: the record of the run
+   * file joined with the member runs, the terminals and the live grants. Nothing is stored.
+   */
+  readonly leadRuns = computed(() =>
+    leadRuns(
+      this.cards(),
+      this.leads(),
+      this.store.all().terminals,
+      this.grants.active(),
+      this.now(),
     ),
   );
   /** The runs grouped by subject (#584), the model of the Runs view. */
@@ -198,6 +216,7 @@ export class Deliver {
     const before = this.received().filter(same);
     const next = cardsOf(root, read, machine);
     this.notify(root, machine, next);
+    this.readLeads(root, machine, read);
     this.received.update((cards) => {
       const rest = cards.filter((c) => !same(c));
       // Keep the place of a card that is only updated; new cards come last.
@@ -206,6 +225,23 @@ export class Deliver {
         (x, y) => index(before, x) - index(before, y) || next.indexOf(x) - next.indexOf(y),
       );
       return at < 0 ? [...rest, ...placed] : [...rest.slice(0, at), ...placed, ...rest.slice(at)];
+    });
+  }
+
+  /** Replaces the lead records of the runs of a repository by those of this read. */
+  private readLeads(root: string, machine: string | undefined, read: DeliverRead): void {
+    const own = cardKey({ root, run: "", machine });
+    const fresh = new Map<string, LeadRecord>();
+    if (read.kind === "events") {
+      for (const run of read.runs) {
+        const lead = parseLead(run);
+        const id = (run as { run?: unknown }).run;
+        if (lead && typeof id === "string") fresh.set(cardKey({ root, run: id, machine }), lead);
+      }
+    }
+    this.leads.update((old) => {
+      const kept = [...old].filter(([k]) => !k.startsWith(own));
+      return new Map([...kept, ...fresh]);
     });
   }
 
