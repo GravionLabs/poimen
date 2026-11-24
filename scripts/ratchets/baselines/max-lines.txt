@@ -1,7 +1,7 @@
 src-tauri/crates/poimen-client/src/lib.rs	1391
-src-tauri/crates/poimen-console/src/tui/mod.rs	1301
+src-tauri/crates/poimen-console/src/tui/mod.rs	1299
 src-tauri/crates/poimen-console/src/tui/palette.rs	1209
-src-tauri/crates/poimen-console/src/tui/sidebar.rs	888
+src-tauri/crates/poimen-console/src/tui/sidebar.rs	886
 src-tauri/crates/poimen-console/tests/tui.rs	938
 src-tauri/crates/poimen-core/src/github.rs	1364
 src-tauri/crates/poimen-core/src/layout.rs	1186

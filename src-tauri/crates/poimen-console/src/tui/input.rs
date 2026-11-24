@@ -84,6 +84,13 @@ impl Router {
         }
     }
 
+    /// Takes a reloaded config. A prefix that is already pressed stays pending, so the next key
+    /// is still routed (against the new keys).
+    pub fn reconfigure(&mut self, config: &Config) {
+        self.prefix = config.prefix;
+        self.keys = config.keys.clone();
+    }
+
     /// Whether the prefix was pressed and the next key is the TUI's.
     pub fn pending(&self) -> bool {
         self.pending
