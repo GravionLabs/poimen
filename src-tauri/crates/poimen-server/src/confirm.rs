@@ -2,7 +2,9 @@
 //! the apps connected to the server and waits for `agent.confirm_answer`, and `agent.write_notice`
 //! tells them what an agent wrote. The server only relays; `poimen mcp` decides when to ask.
 
-use std::sync::mpsc;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use poimen_protocol::{
@@ -11,11 +13,39 @@ use poimen_protocol::{
 };
 use serde_json::json;
 
-use crate::{ApiResult, Shared, lock, not_found};
+use crate::{ApiResult, Shared, lock, not_found, parsed};
+
+mod grants;
+
+/// The open `agent.confirm` requests (#615): the answer of the app goes to the waiting one; and
+/// the scoped write grants (ADR 0018, #1211).
+#[derive(Default)]
+pub(crate) struct Confirms {
+    asks: Mutex<HashMap<String, Sender<bool>>>,
+    grants: grants::Grants,
+}
+
+/// Whether `method` is one of this module's.
+pub(crate) fn handles(method: &str) -> bool {
+    matches!(
+        method,
+        "agent.confirm" | "agent.confirm_answer" | "agent.write_notice" | "agent.grants"
+    ) || method.starts_with("agent.grant_")
+}
+
+/// `agent.confirm*`, `agent.write_notice` and the grant methods.
+pub(crate) fn dispatch(shared: &Shared, request: &poimen_protocol::Request) -> ApiResult {
+    match request.method.as_str() {
+        "agent.confirm" => agent_confirm(shared, parsed(request)?),
+        "agent.confirm_answer" => agent_confirm_answer(shared, parsed(request)?),
+        "agent.write_notice" => agent_write_notice(shared, parsed(request)?),
+        other => grants::dispatch(shared, other, request),
+    }
+}
 
 impl Shared {
     /// Sends the event to the subscriptions that said they are an app and show confirmations; false when there is none.
-    fn publish_to_apps(&self, event: &Event) -> bool {
+    pub(crate) fn publish_to_apps(&self, event: &Event) -> bool {
         let mut sent = false;
         lock(&self.subscribers).retain(|s| {
             if s.kind != ClientKind::App || !s.confirms {
@@ -57,7 +87,7 @@ pub(crate) fn agent_confirm(shared: &Shared, p: AgentConfirm) -> ApiResult {
     let wait_ms = p.wait_ms.unwrap_or(CONFIRM_WAIT_MS).min(CONFIRM_WAIT_MS);
     let id = shared.secret_id("confirm");
     let (tx, rx) = mpsc::channel();
-    lock(&shared.confirms).insert(id.clone(), tx);
+    lock(&shared.confirms.asks).insert(id.clone(), tx);
     let sent = shared.publish_to_apps(&Event::AgentConfirmRequested {
         id: id.clone(),
         caller_terminal_id: p.caller_terminal_id,
@@ -90,7 +120,7 @@ pub(crate) fn agent_confirm(shared: &Shared, p: AgentConfirm) -> ApiResult {
             },
         }
     };
-    lock(&shared.confirms).remove(&id);
+    lock(&shared.confirms.asks).remove(&id);
     if sent {
         shared.publish_to_apps(&Event::AgentConfirmResolved { id });
     }
@@ -99,7 +129,7 @@ pub(crate) fn agent_confirm(shared: &Shared, p: AgentConfirm) -> ApiResult {
 
 /// `agent.confirm_answer`: the user's answer; an id that is settled already is `not_found`.
 pub(crate) fn agent_confirm_answer(shared: &Shared, p: AgentConfirmAnswer) -> ApiResult {
-    let tx = lock(&shared.confirms).remove(&p.id);
+    let tx = lock(&shared.confirms.asks).remove(&p.id);
     match tx {
         Some(tx) => {
             let _ = tx.send(p.approve);

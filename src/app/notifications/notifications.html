@@ -12,6 +12,34 @@
     Mark all read
   </button>
 </div>
+@if (grants.active().length > 0) {
+  <ul class="grants" aria-label="Active write grants">
+    @for (grant of grants.active(); track grant.id) {
+      <li class="grant">
+        <span class="text">
+          <span class="message"
+            >{{ grant.leadName }} may write in {{ spaceNames(grant.spaces) }}</span
+          >
+          <span class="meta">
+            {{ grant.running }} of {{ grant.maxAgents }} agents running, until
+            {{ timeOf(grant.expiresAt) }}
+          </span>
+        </span>
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="revoke"
+          (click)="grants.revoke(grant.id)"
+        >
+          Revoke
+        </button>
+      </li>
+    }
+  </ul>
+}
 @if (center.entries().length === 0) {
   <p class="empty">No notifications yet. Agents that turn blocked or done show up here.</p>
 } @else {

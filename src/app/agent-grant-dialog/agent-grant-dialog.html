@@ -1,0 +1,77 @@
+@if (grants.current(); as request) {
+  <app-dialog-shell
+    label="A lead agent asks for a write grant"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="grants.answer(false)"
+  >
+    <ng-container dialogHeading>
+      <strong>{{ request.leadName }}</strong> asks to run a plan without a question per write
+    </ng-container>
+    <p class="hint">Its plan:</p>
+    <pre class="text">{{ request.plan }}</pre>
+    <p class="hint">Spaces (uncheck one to leave it out):</p>
+    <ul class="spaces">
+      @for (space of request.spaces; track space.id) {
+        <li>
+          <label>
+            <input
+              type="checkbox"
+              [checked]="checked(request, space.id)"
+              (change)="toggle(request, space.id)"
+            />
+            <strong>{{ space.name }}</strong>
+            @if (space.path) {
+              <span class="path">{{ space.path }}</span>
+            }
+          </label>
+        </li>
+      }
+    </ul>
+    <p class="hint">Tools: {{ request.tools.join(", ") }}.</p>
+    <label class="limit">
+      At most
+      <input
+        type="number"
+        min="1"
+        [max]="request.maxAgents"
+        [value]="limit(request)"
+        (input)="setLimit(request, $any($event.target).value)"
+      />
+      agents at once
+    </label>
+    <p class="hint">
+      The grant ends after {{ duration(request.durationS) }}, when {{ request.leadName }} ends, or
+      when you revoke it. Inside it, these tools run in the spaces above with no question, and every
+      write still shows in the notification center. A lead that was misled can prompt agents in
+      these spaces until then. Any other write still asks. It never covers another machine.
+    </p>
+    @if (grants.waiting() > 1) {
+      <p class="hint">{{ grants.waiting() - 1 }} more waiting.</p>
+    }
+    @if (grants.error(); as error) {
+      <p class="error" role="alert">{{ error }}</p>
+    }
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="deny"
+        (click)="grants.answer(false)"
+      >
+        Deny
+      </button>
+      <button
+        type="button"
+        hx-button
+        class="allow"
+        [disabled]="chosen(request).length === 0"
+        (click)="allow(request)"
+      >
+        Allow plan
+      </button>
+    </div>
+  </app-dialog-shell>
+}

@@ -5,6 +5,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentConfirm, type ConfirmRequest } from "../core/agent-confirm";
+import { AgentGrantDialog } from "../agent-grant-dialog/agent-grant-dialog";
 import { AgentConfirmDialog } from "./agent-confirm-dialog";
 import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
@@ -23,6 +24,10 @@ function setup(request: ConfirmRequest | null) {
       styleUrl: undefined,
       template: readFileSync("src/app/agent-confirm-dialog/agent-confirm-dialog.html", "utf8"),
     },
+  });
+  // The grant dialog is its own spec; here it only has to exist.
+  TestBed.overrideComponent(AgentGrantDialog, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "" },
   });
   const fixture = TestBed.createComponent(AgentConfirmDialog);
   fixture.detectChanges();

@@ -149,7 +149,7 @@ fn ping_reports_the_protocol_version() {
     let env = Env::new("ping");
     let client = start(&env.config());
     let ping = client.ping().unwrap();
-    assert_eq!(ping.protocol, 7);
+    assert_eq!(ping.protocol, 8);
     assert_eq!(ping.pid, std::process::id());
 }
 
