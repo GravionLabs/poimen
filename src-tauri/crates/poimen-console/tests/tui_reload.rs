@@ -117,7 +117,7 @@ impl Running {
                 "`{needle}` did not show:\n{}",
                 self.text()
             );
-            thread::sleep(Duration::from_millis(20));
+            thread::yield_now();
         }
     }
 
