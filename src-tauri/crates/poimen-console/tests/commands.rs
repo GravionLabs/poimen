@@ -98,10 +98,11 @@ fn eventually(what: &str, mut f: impl FnMut() -> bool) {
 }
 
 #[test]
-fn ls_lists_spaces_terminals_and_agent_status() {
+fn ls_lists_spaces_tabs_and_terminals_with_agent_status() {
     let f = fixture("ls");
     let t = f.terminal("sleep 30");
     f.report(&t, 1, AgentStatus::Working);
+    let tab = f.client.list_layout().unwrap().tabs[0].tab_id.clone();
     let text = f.run(&["ls"]).unwrap();
     let mut lines = text.lines();
     assert!(
@@ -110,9 +111,10 @@ fn ls_lists_spaces_terminals_and_agent_status() {
             .unwrap()
             .starts_with(&format!("{}  work  ", f.space))
     );
+    assert_eq!(lines.next().unwrap(), format!("  tab {tab}  shell"));
     assert_eq!(
         lines.next().unwrap(),
-        format!("  {t}  shell  running  claude:working")
+        format!("    {t}  shell  running  claude:working")
     );
     assert_eq!(lines.next(), None);
 }
@@ -126,6 +128,8 @@ fn ls_json_nests_terminals_in_spaces() {
     assert_eq!(v[0]["name"], "work");
     assert_eq!(v[0]["terminals"][0]["id"], t.as_str());
     assert_eq!(v[0]["terminals"][0]["status"], "running");
+    assert_eq!(v[0]["tabs"][0]["name"], "shell");
+    assert_eq!(v[0]["tabs"][0]["root"]["terminal_id"], t.as_str());
 }
 
 #[test]

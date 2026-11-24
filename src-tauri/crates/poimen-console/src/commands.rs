@@ -5,7 +5,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use poimen_client::agent::{AgentError, PromptResult};
-use poimen_client::protocol::{AgentStatus, Space, Terminal, TerminalCreate, TerminalStatus};
+use poimen_client::protocol::{AgentStatus, Space, Tab, Terminal, TerminalCreate, TerminalStatus};
 use poimen_client::{Client, ClientError};
 use serde_json::{Value, json};
 
@@ -45,6 +45,14 @@ pub fn run(
 ) -> Result<(), Failure> {
     match request {
         Request::Ls { json } => ls(client, *json, out),
+        Request::SpaceNew { .. }
+        | Request::SpaceRename { .. }
+        | Request::SpaceClose { .. }
+        | Request::TabNew { .. }
+        | Request::TabRename { .. }
+        | Request::TabClose { .. }
+        | Request::TabSplit { .. }
+        | Request::TabFocus { .. } => crate::space_tab::run(client, request, out),
         Request::Status { terminal, json } => status(client, terminal, *json, out),
         Request::New {
             space,
@@ -95,7 +103,7 @@ pub fn run(
 }
 
 /// A space by id, else by exact name (an ambiguous name is an error).
-fn find_space(client: &Client, key: &str) -> Result<Space, Failure> {
+pub(crate) fn find_space(client: &Client, key: &str) -> Result<Space, Failure> {
     let spaces = client.list_spaces()?;
     if let Some(s) = spaces.iter().find(|s| s.id == key) {
         return Ok(s.clone());
@@ -145,7 +153,8 @@ fn agent_word(t: &Terminal) -> String {
 }
 
 fn ls(client: &Client, json: bool, out: &mut dyn Write) -> Result<(), Failure> {
-    let spaces = client.list_spaces()?;
+    let layout = client.list_layout()?;
+    let spaces = layout.spaces;
     let terminals = client.list_terminals(None)?;
     if json {
         let list: Vec<Value> = spaces
@@ -154,23 +163,40 @@ fn ls(client: &Client, json: bool, out: &mut dyn Write) -> Result<(), Failure> {
                 let mut v = serde_json::to_value(s).expect("space serializes");
                 let own: Vec<&Terminal> = terminals.iter().filter(|t| t.space_id == s.id).collect();
                 v["terminals"] = serde_json::to_value(own).expect("terminal serializes");
+                let tabs: Vec<&Tab> = layout.tabs.iter().filter(|t| t.space_id == s.id).collect();
+                v["tabs"] = serde_json::to_value(tabs).expect("tab serializes");
                 v
             })
             .collect();
         writeln!(out, "{}", json!(list))?;
         return Ok(());
     }
+    let line = |out: &mut dyn Write, indent: &str, t: &Terminal| {
+        writeln!(
+            out,
+            "{indent}{}  {}  {}  {}",
+            t.id,
+            t.name,
+            state_word(t),
+            agent_word(t)
+        )
+    };
     for s in &spaces {
         writeln!(out, "{}  {}  {}", s.id, s.name, s.cwd)?;
-        for t in terminals.iter().filter(|t| t.space_id == s.id) {
-            writeln!(
-                out,
-                "  {}  {}  {}  {}",
-                t.id,
-                t.name,
-                state_word(t),
-                agent_word(t)
-            )?;
+        let own: Vec<&Terminal> = terminals.iter().filter(|t| t.space_id == s.id).collect();
+        let mut shown: Vec<&str> = Vec::new();
+        for tab in layout.tabs.iter().filter(|t| t.space_id == s.id) {
+            writeln!(out, "  tab {}  {}", tab.tab_id, tab.name)?;
+            for id in tab.root.terminal_ids() {
+                if let Some(t) = own.iter().find(|t| t.id == id) {
+                    line(out, "    ", t)?;
+                    shown.push(id);
+                }
+            }
+        }
+        // Terminals in no tab (ended ones kept as history).
+        for t in own.iter().filter(|t| !shown.contains(&t.id.as_str())) {
+            line(out, "  ", t)?;
         }
     }
     Ok(())
