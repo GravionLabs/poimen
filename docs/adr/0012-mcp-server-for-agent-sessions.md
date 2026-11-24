@@ -4,6 +4,7 @@
 - Date: 2026-11-15
 - Issues: #612
 - Builds on: [ADR 0006](0006-poimen-console-with-herdr-scope.md)
+- Amended by: [ADR 0018](0018-scoped-write-grant-and-lead-runs-for-orchestration.md) (scoped write grant for lead runs, `wait_any`, run state of a lead)
 
 ## Context
 
@@ -53,7 +54,7 @@ Results are text and structured content with ids that the tools accept. Tool err
 ### Permissions
 
 - A write tool acts freely in the space of the calling terminal (the space of `POIMEN_TERMINAL_ID`).
-- A write tool that targets any other space needs a confirmation in the app. The app shows the agent, the target space and terminal, and the prompt or command; the call waits for the user's answer, and a timeout counts as "no". The confirmation is per call; there is no "always".
+- A write tool that targets any other space needs a confirmation in the app. The app shows the agent, the target space and terminal, and the prompt or command; the call waits for the user's answer, and a timeout counts as "no". The confirmation is per call; there is no "always" (one scoped grant per lead run is decided in [ADR 0018](0018-scoped-write-grant-and-lead-runs-for-orchestration.md)).
 - Without a connected app, or outside a poimen terminal (no `POIMEN_TERMINAL_ID`), a write to another space is refused with the reason. Read tools do not need the app.
 - The check uses the space id of the target, resolved by the server, and not names that the agent supplies. The request reaches the app as `agent.confirm` and the event `agent.confirm_requested` for subscriptions of kind `app`, answered with `agent.confirm_answer` (`docs/protocol.md`, #615); every write is also announced to the app (`agent.write_notice`, `agent.wrote`) for the notification center. The confirmation guards `poimen mcp`; a process that speaks the socket protocol itself is not stopped by it.
 
