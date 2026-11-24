@@ -57,6 +57,7 @@ export function startup(snapshot: unknown = SNAPSHOT): Record<string, unknown> {
     backend_info: { version: "0.0.0", protocol: 1, supported: 1 },
     repo_info: { branch: null, worktree: false },
     hooks_status: [],
+    agent_grants: { grants: [] },
     branch_pulls: {},
     project_entries: { commands: [], presets: [], locked: false },
     detected_entries: [],
