@@ -155,6 +155,8 @@ fn initialize_and_tools_list() {
             "list_repositories",
             "request_grant",
             "revoke_grant",
+            "record_run",
+            "read_run",
             "prompt_agent",
             "wait_agent",
             "report_done",

@@ -11,6 +11,7 @@
 //! name the agent supplies.
 
 mod grant;
+mod lead;
 mod report;
 mod runs;
 mod screen;
@@ -250,6 +251,8 @@ fn tools() -> Value {
         space::list_tool(),
         grant::request_tool(),
         grant::revoke_tool(),
+        lead::record_tool(),
+        lead::read_tool(),
         {
             "name": "prompt_agent",
             "description": "Types a prompt into the agent of a terminal. Refused while that agent is working or blocked. In another space than your own the user must confirm in the poimen app (waits up to 60 s).",
@@ -361,6 +364,8 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         "list_repositories" => space::list_repositories(client, env, args),
         "request_grant" => grant::request_grant(client, env, args),
         "revoke_grant" => grant::revoke_grant(client, env, args),
+        "record_run" => lead::record_run(client, env, args),
+        "read_run" => lead::read_run(client, env, args),
         "stop_terminal" => stop::stop_terminal(client, env, args),
         "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
