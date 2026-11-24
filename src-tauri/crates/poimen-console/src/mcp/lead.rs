@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::{Env, Fail, report, runs, server_error, text_arg};
 
+const PLAN_MAX_BYTES: usize = 64 * 1024;
 const OUTCOMES: [&str; 4] = ["succeeded", "failed", "cancelled", "skipped"];
 const KEYS: [&str; 16] = [
     "event",
@@ -200,6 +201,19 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
     let me = caller(env)?;
     let event = need(args, "event", "record_run")?;
     let at = locate(client, env, args)?;
+    // A write goes only to the repository of the caller's own terminal (no confirmation needed).
+    let own_dir = locate(client, env, &json!({}))?.dir;
+    if own_dir != at.dir {
+        return Err(Fail::Tool(
+            "refused: a lead run is recorded in the repository of your own terminal".into(),
+        ));
+    }
+    if args
+        .get("plan")
+        .is_some_and(|p| p.to_string().len() > PLAN_MAX_BYTES)
+    {
+        return Err(Fail::Tool(format!("`plan` is over {PLAN_MAX_BYTES} bytes")));
+    }
     let own = open_runs(&at.dir)
         .into_iter()
         .find(|(_, s)| s.terminal.as_deref() == Some(me));
