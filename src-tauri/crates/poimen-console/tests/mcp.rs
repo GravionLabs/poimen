@@ -159,6 +159,7 @@ fn initialize_and_tools_list() {
             "read_run",
             "prompt_agent",
             "wait_agent",
+            "wait_any",
             "report_done",
             "read_agent"
         ]

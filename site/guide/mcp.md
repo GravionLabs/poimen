@@ -46,6 +46,7 @@ Read tools work on every space and never ask.
 | `read_terminal` | `terminal`, `lines?` | The last lines (default 50, at most 500) of a terminal's screen and scrollback as plain text, and whether it still runs. Cut to 64 KiB with a note. Observes only. |
 | `read_agent` | `terminal` | The last assistant message of the agent's transcript (Claude Code, Copilot CLI) with the session id. |
 | `wait_agent` | `terminal`, `timeout_s?` | Waits until the agent is done, blocked, in error or gone, or the timeout (default 300 s, at most 3600 s) passed. Returns the status, the question of a blocked agent and its `report_done` report. Uses the server's events, no polling. |
+| `wait_any` | `terminals?`, `runs?`, `timeout_s?` | Waits on several targets and returns at the first that needs you: an agent that is done, blocked, in error or gone, or a run (`{repository, run}`) that is finished or needs you. At least one target. Returns `fired` (the target, its status, the question of a blocked agent, the `report_done` report, the outcome of a run), the state of the `others` and `timed_out`. A target already in such a state returns at once. Prefer it over `wait_agent` when you wait on more than one terminal or run, for example a deliver loop per repository. Uses events and file watching, no polling. |
 | `list_runs` | `repository`, `status?`, `limit?`, `compact?` | The runs of the repository containing the directory, newest first (default 20). `status` is `running`, `finished` or `needs-you`; `compact` drops the `finished` and `links` lists. |
 | `list_repositories` | none | The git repositories poimen knows: those of your spaces (a linked worktree counts as its main checkout) and your trusted projects, each with the `path` of its main checkout, the `origin` URL, `owner/repo` when that remote is on GitHub, and the `spaces` on it. Use it to find the directory a repository name refers to. |
 | `get_events` | `repository`, `run`, `after?`, `type?`, `limit?` | The raw events of one run after a sequence number (default 100, at most 1000), and whether there are more. |
@@ -79,7 +80,7 @@ A typical loop of a lead agent:
 
 1. `whoami` and `list_terminals` to see where it is and what runs.
 2. `start_agent` per piece of work, best with `worktree: {issue}` so each worker has its own checkout.
-3. `wait_agent` on each worker. On `blocked`, answer with `prompt_agent` or ask you.
+3. `wait_any` on all workers (or `wait_agent` on one). On `blocked`, answer with `prompt_agent` or ask you.
 4. Read the `report_done` report (in the `wait_agent` answer), or `read_agent` / `read_terminal` when there is none.
 
 The sidebar shows which agent started which, and the Flow tab of the lead shows the agents it started.
