@@ -241,6 +241,17 @@ Shows one terminal in your terminal, without the TUI around it.
 
 `Ctrl+B d` detaches (the configured `console.prefix` when it is a Ctrl+letter key); `Ctrl+B Ctrl+B` sends one `Ctrl+B`. When it ends it says why: detached, the terminal exited (with its code), the server detached you (for example another client took over), or the connection ended.
 
+### Remote machines: `--machine` and `poimen machines`
+
+```sh
+poimen --machine <name> [<command>]
+poimen machines [--json]
+```
+
+`--machine <name>` before any command (or alone, for the TUI) talks to the `poimen-server` of a machine from `machines` in `config.json` instead of the local one. It connects the way the app does, with `ssh -T -o BatchMode=yes <target> poimen-server stdio`, so the key must work without a prompt and the machine needs `poimen-server` (see [Remote machines](/guide/remote-machines)). The local server is not started. `poimen mcp` and `poimen doctor` stay local and refuse `--machine`.
+
+`poimen machines` lists the configured machines and whether their server answers (`connected`, `offline` with ssh's error, or `incompatible` with both protocol versions). When a command cannot run, it says why in the app's words (a missing server, an older or newer server, a key or host key problem) and prints the command to try; poimen runs nothing itself.
+
 ### `poimen doctor`
 
 ```sh

@@ -15,10 +15,7 @@
 //! ssh processes; remote terminals keep running and are attached again once the machine is back.
 //! BatchMode only: poimen never prompts for, stores or logs a password or key.
 
-use std::collections::HashSet;
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
-use std::process::{Child, Stdio};
+use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -27,128 +24,19 @@ use std::time::Duration;
 use poimen_client::Client;
 use poimen_client::pipe::{Connector, Pipe, WeakPipe};
 use poimen_client::protocol::{self as wire, Event, PROTOCOL_VERSION, PingResult};
-use poimen_core::gui_path;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::backend::{Backend, BackendEvent};
 use crate::poimen_backend::{PoimenBackend, backend_event};
 
-/// `reposDir` when a machine sets none.
-pub const DEFAULT_REPOS_DIR: &str = "~/Source/{owner}/{repo}";
+pub use poimen_core::machines::{
+    DEFAULT_REPOS_DIR, MachineConfig, check_repos_dir, check_server_path, check_target, parse,
+};
 
 /// First wait after a failed or dropped connection; it doubles up to [`MAX_BACKOFF`].
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-
-/// How much of ssh's stderr is kept for the error of a failed connection.
-const MAX_SSH_ERROR: usize = 4096;
-
-/// One entry of `machines[]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MachineConfig {
-    /// Unique among the machines.
-    pub name: String,
-    /// The ssh target as in `~/.ssh/config` (a `Host` alias or `user@host`).
-    pub ssh: String,
-    /// Where repositories live on the machine (`{owner}`, `{repo}`).
-    pub repos_dir: String,
-    /// Where the server is on the machine when its non-interactive `PATH` lacks it (set by the
-    /// install of #865, e.g. `$HOME/.local/bin/poimen-server`); `None` calls it by name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub server_path: Option<String>,
-}
-
-/// The machines of `machines[]`; an invalid entry is a warning and is left out, the rest loads.
-pub fn parse(value: &Value, warnings: &mut Vec<String>) -> Vec<MachineConfig> {
-    let Some(entries) = value.as_array() else {
-        warnings.push("machines must be a list; no machines".into());
-        return Vec::new();
-    };
-    let mut names = HashSet::new();
-    let mut machines = Vec::new();
-    for (i, entry) in entries.iter().enumerate() {
-        match parse_entry(entry) {
-            Ok(m) if !names.insert(m.name.clone()) => warnings.push(format!(
-                "machines[{i}]: the name {:?} is already used; ignored",
-                m.name
-            )),
-            Ok(m) => machines.push(m),
-            Err(e) => warnings.push(format!("machines[{i}]: {e}; ignored")),
-        }
-    }
-    machines
-}
-
-fn parse_entry(entry: &Value) -> Result<MachineConfig, String> {
-    let Some(obj) = entry.as_object() else {
-        return Err("must be an object".into());
-    };
-    let text = |key: &str| match obj.get(key) {
-        Some(Value::String(s)) if !s.trim().is_empty() => Ok(Some(s.trim().to_owned())),
-        None | Some(Value::Null) => Ok(None),
-        Some(_) => Err(format!("{key} must be a non-empty string")),
-    };
-    let name = text("name")?.ok_or("name is missing")?;
-    let ssh = text("ssh")?.ok_or("ssh is missing")?;
-    check_target(&ssh)?;
-    let repos_dir = text("reposDir")?.unwrap_or_else(|| DEFAULT_REPOS_DIR.to_owned());
-    check_repos_dir(&repos_dir)?;
-    let server_path = match text("serverPath")? {
-        Some(path) => {
-            check_server_path(&path)?;
-            Some(path)
-        }
-        None => None,
-    };
-    Ok(MachineConfig {
-        name,
-        ssh,
-        repos_dir,
-        server_path,
-    })
-}
-
-/// A server path is one shell word of plain path characters (`$HOME` and `~` allowed): it is
-/// passed to the remote shell as the command.
-fn check_server_path(path: &str) -> Result<(), String> {
-    let plain = |c: char| c.is_ascii_alphanumeric() || "/._-$~".contains(c);
-    if path.starts_with('-') || !path.chars().all(plain) {
-        return Err(format!("serverPath {path:?} must be a plain path"));
-    }
-    Ok(())
-}
-
-/// A target is one ssh argument: no option (`-...`), no whitespace or control characters.
-pub(crate) fn check_target(ssh: &str) -> Result<(), String> {
-    if ssh.starts_with('-') {
-        return Err(format!("ssh {ssh:?} must be a host, not an option"));
-    }
-    if ssh.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(format!("ssh {ssh:?} must be one host without spaces"));
-    }
-    Ok(())
-}
-
-/// `reposDir` may only use the placeholders `{owner}` and `{repo}`.
-fn check_repos_dir(dir: &str) -> Result<(), String> {
-    let mut rest = dir;
-    while let Some(open) = rest.find('{') {
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('}') else {
-            return Err(format!("reposDir {dir:?} has an unclosed {{"));
-        };
-        let name = &after[..close];
-        if !matches!(name, "owner" | "repo") {
-            return Err(format!(
-                "reposDir {dir:?} uses {{{name}}}; only {{owner}} and {{repo}} are known"
-            ));
-        }
-        rest = &after[close + 1..];
-    }
-    Ok(())
-}
 
 /// A validation error of the machine form, shown under the field it names (`name`, `ssh`,
 /// `reposDir`); `field` is `None` for an error of the whole write (config.json unreadable).
@@ -958,128 +846,17 @@ impl RemoteStreams {
     }
 }
 
-/// `ssh -T -o BatchMode=yes ... <target> poimen-server stdio`: one ssh process per connection.
-pub struct SshConnector {
-    target: String,
-    /// The server's command on the machine: its name, or the `serverPath` of the machine.
-    server: String,
-    /// The ssh program; `None` resolves `ssh` on the login shell's `PATH` at every connect.
-    program: Option<PathBuf>,
-}
-
-impl SshConnector {
-    pub fn new(config: &MachineConfig) -> Self {
-        Self {
-            target: config.ssh.clone(),
-            server: config
-                .server_path
-                .clone()
-                .unwrap_or_else(|| wire::CHANNEL.named("poimen-server")),
-            program: None,
-        }
-    }
-}
-
-impl Connector for SshConnector {
-    fn connect(&self) -> io::Result<Pipe> {
-        // A target from an older config would still be refused here, never passed as an option.
-        check_target(&self.target).map_err(io::Error::other)?;
-        let program = match &self.program {
-            Some(p) => p.clone(),
-            None => gui_path::resolve_program("ssh", &gui_path::child_path())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ssh is not on the PATH"))?,
-        };
-        let mux = crate::machines::ssh_mux::for_target(&program, &self.target);
-        let mut child = gui_path::command(&program)
-            .args(ssh_args_with(&self.target, &self.server, &mux.options))
-            .env("PATH", gui_path::child_path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let (Some(stdin), Some(stdout), Some(stderr)) =
-            (child.stdin.take(), child.stdout.take(), child.stderr.take())
-        else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(io::Error::other("ssh started without its pipes"));
-        };
-        let message = Arc::new(Mutex::new(String::new()));
-        let collect = {
-            let message = message.clone();
-            thread::spawn(move || collect_stderr(stderr, &message))
-        };
-        let child = Arc::new(Mutex::new(child));
-        let reader = SshOutput {
-            stdout,
-            stderr: Some(collect),
-            message,
-        };
-        Ok(Pipe::new(reader, stdin, move || end(&child)))
-    }
-}
-
-/// Keeps the first [`MAX_SSH_ERROR`] bytes of ssh's stderr, one line at a time.
-fn collect_stderr(stderr: impl Read, message: &Mutex<String>) {
-    for line in BufReader::new(stderr).lines() {
-        let Ok(line) = line else { break };
-        let mut message = lock(message);
-        if message.len() + line.len() < MAX_SSH_ERROR {
-            if !message.is_empty() {
-                message.push('\n');
-            }
-            message.push_str(line.trim_end());
-        }
-    }
-}
-
-fn end(child: &Mutex<Child>) {
-    let mut child = lock(child);
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-/// ssh's stdout; its end of file is the ssh error when ssh wrote one (`Permission denied`,
-/// `Could not resolve hostname`, `poimen-server: command not found`).
-struct SshOutput<R> {
-    stdout: R,
-    stderr: Option<JoinHandle<()>>,
-    message: Arc<Mutex<String>>,
-}
-
-impl<R: Read> Read for SshOutput<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.stdout.read(buf)?;
-        if n > 0 || buf.is_empty() {
-            return Ok(n);
-        }
-        // ssh has closed its stdout, so it is ending: wait for the rest of its stderr.
-        if let Some(stderr) = self.stderr.take() {
-            let _ = stderr.join();
-        }
-        let message = lock(&self.message).trim().to_owned();
-        if message.is_empty() {
-            Ok(0)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                format!("ssh: {message}"),
-            ))
-        }
-    }
-}
-
-mod ssh_args;
-pub(crate) mod ssh_mux;
 pub mod wake;
+pub use poimen_client::ssh::SshConnector;
+pub(crate) use poimen_client::ssh::mux as ssh_mux;
 #[cfg(test)]
-pub use ssh_args::ssh_args;
-pub use ssh_args::ssh_args_with;
+pub use poimen_client::ssh::ssh_args;
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::VecDeque;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicU32;
 
     #[test]
@@ -1899,40 +1676,5 @@ mod tests {
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].kind, "terminal.closed");
         assert_eq!(seen[0].data["terminal_id"], "t1");
-    }
-
-    // --- ssh's error on the end of its output -------------------------------------------------
-
-    #[test]
-    fn the_end_of_ssh_output_is_its_error_message() {
-        let message = Arc::new(Mutex::new(String::new()));
-        let collect = {
-            let message = message.clone();
-            thread::spawn(move || {
-                collect_stderr(&b"me@box: Permission denied (publickey).\n"[..], &message)
-            })
-        };
-        let mut out = SshOutput {
-            stdout: &b"{}\n"[..],
-            stderr: Some(collect),
-            message,
-        };
-        let mut text = String::new();
-        let err = out.read_to_string(&mut text).unwrap_err();
-        assert_eq!(text, "{}\n");
-        assert_eq!(
-            err.to_string(),
-            "ssh: me@box: Permission denied (publickey)."
-        );
-    }
-
-    #[test]
-    fn a_quiet_end_of_ssh_output_is_end_of_file() {
-        let mut out = SshOutput {
-            stdout: &b""[..],
-            stderr: None,
-            message: Arc::default(),
-        };
-        assert_eq!(out.read(&mut [0; 8]).unwrap(), 0);
     }
 }
