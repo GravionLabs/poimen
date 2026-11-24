@@ -447,18 +447,22 @@ mod tests {
         Layout::new(spaces.iter().map(|id| space(id)).collect(), Vec::new())
     }
 
-    pub(super) fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-store-{}-{name}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        dir.join("server.json")
+    /// The state file path in a fresh directory; keep the guard, it removes the directory on drop.
+    pub(super) fn temp(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("poimen-store-{name}-"))
+            .tempdir()
+            .unwrap();
+        let path = dir.path().join("server.json");
+        (dir, path)
     }
 
     #[cfg(unix)]
     #[test]
     fn the_state_file_is_0600_and_a_new_directory_0700() {
         use std::os::unix::fs::PermissionsExt;
-        let base = temp("modes");
-        let path = base.parent().unwrap().join("fresh").join("server.json");
+        let (dir, _) = temp("modes");
+        let path = dir.path().join("fresh").join("server.json");
         save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
@@ -467,7 +471,7 @@ mod tests {
 
     #[test]
     fn save_then_load_round_trips_spaces_tabs_trees_and_the_counter() {
-        let path = temp("rt");
+        let (_dir, path) = temp("rt");
         let mut saved = layout(&["s1", "s4"]);
         saved.spaces[0].tabs = vec!["tab5".into()];
         saved.spaces[0].active_tab = Some("tab5".into());
@@ -556,7 +560,7 @@ mod tests {
 
     #[test]
     fn the_terminal_list_round_trips_with_endpoint_seq_status_and_tokens() {
-        let path = temp("terms");
+        let (_dir, path) = temp("terms");
         save(&path, &layout(&["s1"]), 20, vec![stored("t9")]).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.terminals, vec![stored("t9")]);
@@ -572,7 +576,7 @@ mod tests {
 
     #[test]
     fn a_file_without_terminals_has_no_terminal_key_and_loads_an_empty_list() {
-        let path = temp("noterms");
+        let (_dir, path) = temp("noterms");
         save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("terminals"));
         assert!(load(&path).unwrap().terminals.is_empty());
@@ -580,7 +584,7 @@ mod tests {
 
     #[test]
     fn stored_terminal_ids_are_never_given_again() {
-        let path = temp("termids");
+        let (_dir, path) = temp("termids");
         fs::write(
             &path,
             r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}],"terminals":[{"id":"t41","space_id":"s1","name":"sh","cwd":"/x","cols":80,"rows":24,"endpoint":"/e/t41"}]}"#,
@@ -596,7 +600,7 @@ mod tests {
 
     #[test]
     fn a_protocol_3_file_loads_its_spaces_without_tabs() {
-        let path = temp("v3");
+        let (_dir, path) = temp("v3");
         fs::write(
             &path,
             r#"{"spaces":[{"id":"s1","name":"api","cwd":"/x"},{"id":"s3","name":"b","cwd":"/y"}]}"#,
@@ -619,7 +623,7 @@ mod tests {
     #[test]
     fn the_persisted_counter_wins_over_the_ids_left_in_the_file() {
         // A split that was dropped took its id with it; the counter still remembers it.
-        let path = temp("counter");
+        let (_dir, path) = temp("counter");
         save(&path, &layout(&["s1"]), 30, Vec::new()).unwrap();
         assert_eq!(load(&path).unwrap().next_id, 30);
         save(&path, &layout(&["s50"]), 30, Vec::new()).unwrap();

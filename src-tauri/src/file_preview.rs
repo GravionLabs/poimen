@@ -167,13 +167,10 @@ pub fn preview_unwatch(watches: State<'_, Watches>, path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
 
-    fn temp(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-preview-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp(name: &str) -> TestDir {
+        TestDir::new(&format!("poimen-preview-{name}-"))
     }
 
     fn path_of(file: &Path) -> String {

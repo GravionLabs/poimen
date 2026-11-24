@@ -97,16 +97,10 @@ impl Detector for Skills {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
 
-    fn repo(files: &[(&str, &str)]) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "poimen-detect-skills-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn repo(files: &[(&str, &str)]) -> TestDir {
+        let dir = TestDir::new("poimen-detect-skills-");
         for (name, text) in files {
             let path = dir.join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();

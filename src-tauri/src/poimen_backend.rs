@@ -937,6 +937,7 @@ pub fn backend_event(event: &Event) -> BackendEvent {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
     use std::io::{BufRead, BufReader, Write};
     use std::path::PathBuf;
     use std::sync::mpsc;
@@ -1623,13 +1624,11 @@ mod tests {
 
     // --- against a scripted server on a temporary socket (never a real poimen-server) ---------
 
-    fn temp_socket(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-backend-test-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-            .unwrap();
-        dir.join("s.sock")
+    /// A socket path in a fresh directory; keep the guard, it removes the directory on drop.
+    fn temp_socket(name: &str) -> (TestDir, PathBuf) {
+        let dir = TestDir::new(&format!("poimen-backend-test-{name}-"));
+        let socket = dir.join("s.sock");
+        (dir, socket)
     }
 
     /// Answers requests with `reply(method, params)`; `Err` is an error response. A connection
@@ -1705,8 +1704,8 @@ mod tests {
         name: &str,
         extra: Vec<String>,
         conflict: bool,
-    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
-        let path = temp_socket(name);
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>, TestDir) {
+        let (dir, path) = temp_socket(name);
         let log = Arc::new(Mutex::new(Vec::new()));
         serve(
             &path,
@@ -1783,7 +1782,7 @@ mod tests {
             },
             extra,
         );
-        (PoimenBackend::new(Client::new(path)), log)
+        (PoimenBackend::new(Client::new(path)), log, dir)
     }
 
     fn params_of(log: &Arc<Mutex<Vec<String>>>, method: &str) -> Value {
@@ -1799,7 +1798,7 @@ mod tests {
 
     #[test]
     fn the_classic_renderer_env_is_passed_only_while_the_setting_is_on() {
-        let (backend, log) = backend_for("classic-off", vec![], false);
+        let (backend, log, _dir) = backend_for("classic-off", vec![], false);
         backend.create_terminal("s1", None).unwrap();
         backend
             .split("t1", SplitDirection::Right, None, None)
@@ -1826,7 +1825,7 @@ mod tests {
             assert!(params_of(&log, method).get("env").is_none(), "{method} off");
         }
 
-        let (backend, log) = backend_for("classic-on", vec![], false);
+        let (backend, log, _dir) = backend_for("classic-on", vec![], false);
         backend.set_claude_classic_renderer(true);
         backend.create_terminal("s1", None).unwrap();
         backend
@@ -1871,7 +1870,7 @@ mod tests {
 
     #[test]
     fn a_restart_splits_beside_the_terminal_then_closes_it() {
-        let (backend, log) = backend_for("restart", vec![], false);
+        let (backend, log, _dir) = backend_for("restart", vec![], false);
         let id = backend.restart_terminal("t1").unwrap();
         assert_eq!(id.as_deref(), Some("t9"));
         let params = params_of(&log, "tab.split");
@@ -1896,14 +1895,14 @@ mod tests {
 
     #[test]
     fn a_restart_of_an_unknown_terminal_fails_and_closes_nothing() {
-        let (backend, log) = backend_for("restart-unknown", vec![], false);
+        let (backend, log, _dir) = backend_for("restart-unknown", vec![], false);
         assert!(backend.restart_terminal("nope").is_err());
         assert!(!lock(&log).iter().any(|l| l.starts_with("terminal.close")));
     }
 
     #[test]
     fn a_split_goes_to_the_server_as_tab_split_and_returns_the_new_terminal() {
-        let (backend, log) = backend_for("split", vec![], false);
+        let (backend, log, _dir) = backend_for("split", vec![], false);
         let id = backend
             .split("t1", SplitDirection::Down, Some("/work/api"), Some(0.6))
             .unwrap();
@@ -1917,7 +1916,7 @@ mod tests {
 
     #[test]
     fn a_split_without_ratio_or_directory_leaves_both_to_the_server() {
-        let (backend, log) = backend_for("split-defaults", vec![], false);
+        let (backend, log, _dir) = backend_for("split-defaults", vec![], false);
         backend
             .split("t1", SplitDirection::Right, None, None)
             .unwrap();
@@ -1929,7 +1928,7 @@ mod tests {
 
     #[test]
     fn a_split_of_an_unknown_terminal_reports_the_server_error() {
-        let (backend, log) = backend_for("split-missing", vec![], false);
+        let (backend, log, _dir) = backend_for("split-missing", vec![], false);
         let err = backend
             .split("nope", SplitDirection::Down, None, None)
             .unwrap_err();
@@ -1939,7 +1938,7 @@ mod tests {
 
     #[test]
     fn sent_text_ends_with_enter_and_a_blank_label_falls_back_to_the_directory() {
-        let (backend, log) = backend_for("input", vec![], false);
+        let (backend, log, _dir) = backend_for("input", vec![], false);
         backend.send_input("t1", "claude").unwrap();
         assert_eq!(params_of(&log, "terminal.input")["data"], "claude\r");
         backend.rename_terminal("t1", Some("  ")).unwrap();
@@ -1948,7 +1947,7 @@ mod tests {
 
     #[test]
     fn renaming_the_only_terminal_of_a_tab_renames_the_tab_too() {
-        let (backend, log) = backend_for("rename-alone", vec![], false);
+        let (backend, log, _dir) = backend_for("rename-alone", vec![], false);
         backend.rename_terminal("t1", Some(" build ")).unwrap();
         assert_eq!(
             params_of(&log, "tab.rename"),
@@ -1961,8 +1960,8 @@ mod tests {
     fn backend_failing(
         name: &str,
         failing: &'static str,
-    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
-        let path = temp_socket(name);
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>, TestDir) {
+        let (dir, path) = temp_socket(name);
         let log = Arc::new(Mutex::new(Vec::new()));
         serve(
             &path,
@@ -1978,12 +1977,12 @@ mod tests {
             },
             vec![],
         );
-        (PoimenBackend::new(Client::new(path)), log)
+        (PoimenBackend::new(Client::new(path)), log, dir)
     }
 
     #[test]
     fn a_failed_tab_lookup_after_the_terminal_rename_does_not_fail_the_rename() {
-        let (backend, log) = backend_failing("rename-list-fails", "space.list");
+        let (backend, log, _dir) = backend_failing("rename-list-fails", "space.list");
         assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
         assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
         assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
@@ -1991,7 +1990,7 @@ mod tests {
 
     #[test]
     fn a_failed_tab_rename_after_the_terminal_rename_does_not_fail_the_rename() {
-        let (backend, log) = backend_failing("rename-tab-fails", "tab.rename");
+        let (backend, log, _dir) = backend_failing("rename-tab-fails", "tab.rename");
         assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
         assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
         assert_eq!(
@@ -2002,7 +2001,7 @@ mod tests {
 
     #[test]
     fn renaming_a_terminal_of_a_split_tab_leaves_the_tab_name() {
-        let (backend, log) = backend_for("rename-split", vec![], false);
+        let (backend, log, _dir) = backend_for("rename-split", vec![], false);
         backend.rename_terminal("t2", Some("tests")).unwrap();
         assert_eq!(params_of(&log, "terminal.rename")["name"], "tests");
         assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
@@ -2010,7 +2009,7 @@ mod tests {
 
     #[test]
     fn a_tab_is_closed_and_renamed_through_the_tab_requests() {
-        let (backend, log) = backend_for("tab-ops", vec![], false);
+        let (backend, log, _dir) = backend_for("tab-ops", vec![], false);
         backend.close_tab("tab2").unwrap();
         assert_eq!(params_of(&log, "tab.close"), json!({"tab_id": "tab2"}));
         backend.rename_tab("tab1", " logs ").unwrap();
@@ -2022,7 +2021,7 @@ mod tests {
 
     #[test]
     fn a_divider_drag_goes_to_the_server_as_tab_resize_split() {
-        let (backend, log) = backend_for("resize", vec![], false);
+        let (backend, log, _dir) = backend_for("resize", vec![], false);
         backend.resize_split("tab1", "split5", 0.7).unwrap();
         assert_eq!(
             params_of(&log, "tab.resize_split"),
@@ -2032,7 +2031,7 @@ mod tests {
 
     #[test]
     fn a_ratio_outside_zero_and_one_is_refused_before_the_server() {
-        let (backend, log) = backend_for("resize-bad", vec![], false);
+        let (backend, log, _dir) = backend_for("resize-bad", vec![], false);
         for ratio in [0.0, 1.0, -0.2, f64::NAN] {
             assert!(backend.resize_split("tab1", "split5", ratio).is_err());
         }
@@ -2041,7 +2040,7 @@ mod tests {
 
     #[test]
     fn focusing_a_pane_goes_to_the_server_as_tab_focus() {
-        let (backend, log) = backend_for("focus", vec![], false);
+        let (backend, log, _dir) = backend_for("focus", vec![], false);
         backend.focus_tab("tab1", "t2").unwrap();
         assert_eq!(
             params_of(&log, "tab.focus"),
@@ -2051,7 +2050,7 @@ mod tests {
 
     #[test]
     fn a_blank_tab_name_is_refused_before_the_server() {
-        let (backend, log) = backend_for("tab-blank", vec![], false);
+        let (backend, log, _dir) = backend_for("tab-blank", vec![], false);
         assert!(backend.rename_tab("tab1", "  ").is_err());
         assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
     }
@@ -2062,7 +2061,7 @@ mod tests {
 
     #[test]
     fn an_untrusted_project_is_the_trust_question_and_creates_nothing() {
-        let (backend, log) = backend_for("space-trust", vec![], false);
+        let (backend, log, _dir) = backend_for("space-trust", vec![], false);
         let request = layout_request("/work/untrusted", None, None);
         let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
         assert_eq!(
@@ -2092,7 +2091,7 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let (backend, log) = backend_for(&format!("space-answer-{n}"), vec![], false);
+            let (backend, log, _dir) = backend_for(&format!("space-answer-{n}"), vec![], false);
             let request = layout_request("/work/untrusted", Some(&decision), None);
             let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
             assert!(matches!(outcome, LaidOut::Created { .. }));
@@ -2102,7 +2101,7 @@ mod tests {
 
     #[test]
     fn apply_layout_goes_to_the_server_with_space_cwd_preset_and_answer() {
-        let (backend, log) = backend_for("apply", vec![], false);
+        let (backend, log, _dir) = backend_for("apply", vec![], false);
         let request = ApplyRequest {
             space_id: "s1",
             cwd: "/work/api",
@@ -2124,7 +2123,7 @@ mod tests {
         // The server built the tabs: nothing else was sent.
         assert_eq!(lock(&log).len(), 1);
 
-        let (backend, log) = backend_for("apply-preset", vec![], false);
+        let (backend, log, _dir) = backend_for("apply-preset", vec![], false);
         let preset = ApplyRequest {
             preset: Some("duo"),
             ..request
@@ -2155,7 +2154,7 @@ mod tests {
 
     #[test]
     fn a_failing_space_create_is_an_error() {
-        let path = temp_socket("space-fail");
+        let (_dir, path) = temp_socket("space-fail");
         serve(
             &path,
             Arc::default(),
@@ -2172,7 +2171,7 @@ mod tests {
 
     #[test]
     fn the_snapshot_reads_the_server_tabs() {
-        let (backend, _) = backend_for("snapshot-tabs", vec![], false);
+        let (backend, _, _dir) = backend_for("snapshot-tabs", vec![], false);
         let snapshot = serde_json::to_value(backend.snapshot().unwrap()).unwrap();
         // tab1 holds t1; the leaves t2 and t3 of tab2 are not in the terminal list (closed).
         assert_eq!(snapshot["tabs"].as_array().unwrap().len(), 1);
@@ -2182,7 +2181,7 @@ mod tests {
 
     #[test]
     fn info_reports_the_server_version_and_protocol() {
-        let (backend, _) = backend_for("info", vec![], false);
+        let (backend, _, _dir) = backend_for("info", vec![], false);
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
@@ -2194,8 +2193,8 @@ mod tests {
     fn agent_backend(
         name: &str,
         status: Option<&'static str>,
-    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
-        let path = temp_socket(name);
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>, TestDir) {
+        let (dir, path) = temp_socket(name);
         let log = Arc::new(Mutex::new(Vec::new()));
         serve(
             &path,
@@ -2215,7 +2214,7 @@ mod tests {
             },
             vec![],
         );
-        (PoimenBackend::new(Client::new(path)), log)
+        (PoimenBackend::new(Client::new(path)), log, dir)
     }
 
     fn typed(log: &Arc<Mutex<Vec<String>>>) -> bool {
@@ -2225,7 +2224,7 @@ mod tests {
     #[test]
     fn a_prompt_is_refused_while_the_agent_works_or_is_blocked_and_nothing_is_typed() {
         for (status, expected) in [("working", "working"), ("blocked", "blocked")] {
-            let (backend, log) = agent_backend(&format!("prompt-{status}"), Some(status));
+            let (backend, log, _dir) = agent_backend(&format!("prompt-{status}"), Some(status));
             let outcome = backend.agent_prompt("t1", "hi");
             match status {
                 "blocked" => assert_eq!(outcome, PromptOutcome::Blocked),
@@ -2239,7 +2238,7 @@ mod tests {
 
     #[test]
     fn a_prompt_without_an_agent_fails_and_types_nothing() {
-        let (backend, log) = agent_backend("prompt-none", None);
+        let (backend, log, _dir) = agent_backend("prompt-none", None);
         assert!(matches!(
             backend.agent_prompt("t1", "hi"),
             PromptOutcome::Failed { .. }
@@ -2249,7 +2248,7 @@ mod tests {
 
     #[test]
     fn a_prompt_to_an_agent_started_without_hooks_is_typed() {
-        let (backend, log) = agent_backend("prompt-unreported", None);
+        let (backend, log, _dir) = agent_backend("prompt-unreported", None);
         backend.agent_start("t1", "aider", None, &[]).unwrap();
         lock(&log).clear();
         let outcome = backend.agent_prompt("t1", "hi");
@@ -2262,7 +2261,7 @@ mod tests {
 
     #[test]
     fn a_prompt_to_an_idle_agent_is_typed_with_enter() {
-        let (backend, log) = agent_backend("prompt-idle", Some("idle"));
+        let (backend, log, _dir) = agent_backend("prompt-idle", Some("idle"));
         // The fake never reports work, so the wait ends; the text was typed all the same.
         let _ = backend
             .client
@@ -2272,7 +2271,7 @@ mod tests {
 
     #[test]
     fn starting_in_a_terminal_that_has_an_agent_is_refused_untouched() {
-        let (backend, log) = agent_backend("start-busy", Some("idle"));
+        let (backend, log, _dir) = agent_backend("start-busy", Some("idle"));
         let err = backend.agent_start("t1", "claude", None, &[]).unwrap_err();
         assert!(err.contains("already has an agent"));
         assert!(!typed(&log));
@@ -2280,17 +2279,17 @@ mod tests {
 
     #[test]
     fn the_agent_name_is_the_terminal_name() {
-        let (backend, log) = agent_backend("agent-rename", Some("idle"));
+        let (backend, log, _dir) = agent_backend("agent-rename", Some("idle"));
         backend.agent_rename("t1", Some(" review ")).unwrap();
         assert_eq!(params_of(&log, "terminal.rename")["name"], "review");
-        let (backend, log) = agent_backend("agent-rename-blank", Some("idle"));
+        let (backend, log, _dir) = agent_backend("agent-rename-blank", Some("idle"));
         backend.agent_rename("t1", None).unwrap();
         assert_eq!(params_of(&log, "terminal.rename")["name"], "api");
     }
 
     #[test]
     fn a_renamed_agent_pane_shows_its_name_in_the_snapshot() {
-        let path = temp_socket("agent-rename-snapshot");
+        let (_dir, path) = temp_socket("agent-rename-snapshot");
         let log = Arc::new(Mutex::new(Vec::new()));
         // The server keeps the name a rename sets, as it does for the next snapshot.
         let name = Arc::new(Mutex::new("api".to_owned()));
@@ -2337,7 +2336,7 @@ mod tests {
 
     #[test]
     fn the_agent_session_is_the_id_and_directory_the_hooks_reported() {
-        let path = temp_socket("session");
+        let (_dir, path) = temp_socket("session");
         let log = Arc::new(Mutex::new(Vec::new()));
         serve(
             &path,
@@ -2428,7 +2427,7 @@ mod tests {
             r#"{"event":"terminal.resized","data":{"terminal_id":"t1","seq":2,"cols":90,"rows":20}}"#.into(),
             r#"{"event":"terminal.exited","data":{"terminal_id":"t1","exit_code":0}}"#.into(),
         ];
-        let (backend, log) = backend_for("stream", extra, false);
+        let (backend, log, _dir) = backend_for("stream", extra, false);
         let (opened, rx) = collect(&backend, Mode::Control, false);
         assert!(opened.is_ok());
         let records: Vec<_> = rx.iter().map(|(_, r)| r).collect();
@@ -2461,7 +2460,7 @@ mod tests {
 
     #[test]
     fn an_observer_gets_no_controller_record_and_input_goes_through_the_attachment() {
-        let (backend, log) = backend_for("observer", vec![], false);
+        let (backend, log, _dir) = backend_for("observer", vec![], false);
         let (opened, rx) = collect(&backend, Mode::Observe, false);
         let id = opened.unwrap().id;
         assert!(matches!(rx.recv().unwrap().1, StreamRecord::Reset { .. }));
@@ -2480,7 +2479,7 @@ mod tests {
                 .into(),
             GONE.into(),
         ];
-        let (backend, _) = backend_for("gone", extra, false);
+        let (backend, _, _dir) = backend_for("gone", extra, false);
         let (opened, rx) = collect(&backend, Mode::Control, false);
         opened.unwrap();
         let last = rx.iter().map(|(_, r)| r).last().unwrap();

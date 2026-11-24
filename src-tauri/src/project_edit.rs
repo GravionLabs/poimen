@@ -189,13 +189,11 @@ pub fn save(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
     use serde_json::json;
 
-    fn temp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-edit-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp(name: &str) -> TestDir {
+        TestDir::new(&format!("poimen-edit-{name}-"))
     }
 
     fn write(root: &Path, text: &str) {

@@ -36,3 +36,6 @@ pub mod transcripts;
 pub mod trust;
 pub mod usage;
 pub mod worktree;
+
+#[cfg(test)]
+mod test_dir;

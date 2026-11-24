@@ -3245,6 +3245,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tempfile",
  "toml 1.2.1+spec-1.1.0",
 ]
 
@@ -3257,6 +3258,7 @@ dependencies = [
  "poimen-protocol",
  "serde",
  "serde_json",
+ "tempfile",
  "widestring",
 ]
 
@@ -3286,6 +3288,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "tempfile",
  "toml 1.2.1+spec-1.1.0",
 ]
 
@@ -3296,6 +3299,7 @@ dependencies = [
  "base64 0.23.1",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3323,6 +3327,7 @@ dependencies = [
  "poimen-pty-host",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

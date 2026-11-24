@@ -60,18 +60,18 @@ fn describe_with(error: poimen_server::StartError, log: &Path, now: SystemTime) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
 
-    fn log_with(name: &str, text: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-fail-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn log_with(name: &str, text: &str) -> (TestDir, std::path::PathBuf) {
+        let dir = TestDir::new(&format!("poimen-fail-{name}-"));
         let log = dir.join("server.log");
         std::fs::write(&log, text).unwrap();
-        log
+        (dir, log)
     }
 
     #[test]
     fn a_timeout_shows_the_refusal_of_the_server() {
-        let log = log_with(
+        let (_dir, log) = log_with(
             "refused",
             "2026-11-20T06:00:00Z server started\n2026-11-20T06:01:00Z server refusing to start: server.json has version 9\n",
         );
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn a_timeout_without_a_refusal_names_the_log() {
-        let log = log_with("plain", "2026-11-20T06:00:00Z server started\n");
+        let (_dir, log) = log_with("plain", "2026-11-20T06:00:00Z server started\n");
         let StartError::Other(message) = describe_with(
             poimen_server::StartError::Timeout(START_TIMEOUT),
             &log,
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn an_old_refusal_is_not_this_start() {
-        let log = log_with(
+        let (_dir, log) = log_with(
             "old",
             "2026-11-20T06:01:00Z server refusing to start: old\n",
         );
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn other_errors_keep_their_text() {
-        let log = log_with("other", "");
+        let (_dir, log) = log_with("other", "");
         assert_eq!(
             describe_with(poimen_server::StartError::NotFound, &log, SystemTime::now()),
             StartError::Other(poimen_server::StartError::NotFound.to_string())

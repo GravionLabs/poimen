@@ -332,19 +332,9 @@ mod sys {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_socket::temp_socket;
     use std::io::{BufRead, BufReader};
-    use std::path::PathBuf;
     use std::thread;
-
-    fn temp_socket(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "poimen-transport-test-{}-{name}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("s.sock")
-    }
 
     #[test]
     fn pipe_name_prefixes_the_path() {
@@ -366,7 +356,7 @@ mod tests {
 
     #[test]
     fn bind_connect_round_trip() {
-        let path = temp_socket("round-trip");
+        let (_dir, path) = temp_socket("round-trip");
         let listener = Listener::bind(&path).unwrap();
         let server = thread::spawn(move || {
             let conn = listener.accept().unwrap();
@@ -385,7 +375,7 @@ mod tests {
 
     #[test]
     fn a_clone_writes_while_another_handle_reads() {
-        let path = temp_socket("duplex");
+        let (_dir, path) = temp_socket("duplex");
         let listener = Listener::bind(&path).unwrap();
         let server = thread::spawn(move || {
             let conn = listener.accept().unwrap();
@@ -409,7 +399,7 @@ mod tests {
 
     #[test]
     fn a_large_record_passes_while_the_peer_reads() {
-        let path = temp_socket("large");
+        let (_dir, path) = temp_socket("large");
         let listener = Listener::bind(&path).unwrap();
         let record = format!("{}\n", "x".repeat(32 * 1024));
         let sent = record.clone();
@@ -426,7 +416,8 @@ mod tests {
 
     #[test]
     fn connect_to_nothing_fails_as_not_running() {
-        let err = Conn::connect(&temp_socket("nothing")).unwrap_err();
+        let (_dir, path) = temp_socket("nothing");
+        let err = Conn::connect(&path).unwrap_err();
         assert!(
             matches!(
                 err.kind(),
@@ -434,12 +425,12 @@ mod tests {
             ),
             "{err:?}"
         );
-        assert!(!is_listening(&temp_socket("nothing")));
+        assert!(!is_listening(&path));
     }
 
     #[test]
     fn a_second_bind_fails_while_the_first_lives() {
-        let path = temp_socket("second");
+        let (_dir, path) = temp_socket("second");
         let _first = Listener::bind(&path).unwrap();
         assert!(is_listening(&path));
         let err = Listener::bind(&path).unwrap_err();
@@ -448,7 +439,7 @@ mod tests {
 
     #[test]
     fn inspect_classifies_missing_socket_and_other() {
-        let path = temp_socket("inspect");
+        let (_dir, path) = temp_socket("inspect");
         assert_eq!(inspect(&path).unwrap(), Entry::Missing);
         let listener = Listener::bind(&path).unwrap();
         assert_eq!(inspect(&path).unwrap(), Entry::Socket);
@@ -473,7 +464,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn shutdown_wakes_a_blocked_reader() {
-        let path = temp_socket("shutdown");
+        let (_dir, path) = temp_socket("shutdown");
         let listener = Listener::bind(&path).unwrap();
         let conn = Conn::connect(&path).unwrap();
         let _server = listener.accept().unwrap();
@@ -490,7 +481,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn timeouts_can_be_set_after_the_peer_shut_down_and_buffered_data_stays_readable() {
-        let path = temp_socket("after-shutdown");
+        let (_dir, path) = temp_socket("after-shutdown");
         let listener = Listener::bind(&path).unwrap();
         let conn = Conn::connect(&path).unwrap();
         let server = listener.accept().unwrap();
@@ -512,7 +503,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_zero_timeout_is_still_refused() {
-        let path = temp_socket("zero");
+        let (_dir, path) = temp_socket("zero");
         let listener = Listener::bind(&path).unwrap();
         let conn = Conn::connect(&path).unwrap();
         let _server = listener.accept().unwrap();
@@ -523,7 +514,7 @@ mod tests {
     #[test]
     fn the_socket_is_0600() {
         use std::os::unix::fs::PermissionsExt;
-        let path = temp_socket("mode");
+        let (_dir, path) = temp_socket("mode");
         let _listener = Listener::bind(&path).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
@@ -532,7 +523,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn read_timeouts_apply_on_unix() {
-        let path = temp_socket("timeout");
+        let (_dir, path) = temp_socket("timeout");
         let listener = Listener::bind(&path).unwrap();
         let conn = Conn::connect(&path).unwrap();
         let _server = listener.accept().unwrap();

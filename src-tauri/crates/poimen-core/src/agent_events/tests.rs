@@ -184,16 +184,14 @@ fn timestamps_parse_with_fraction_and_offset() {
     }
 }
 
-fn temp_file(name: &str) -> std::path::PathBuf {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static N: AtomicU32 = AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "poimen-core-events-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join(name)
+/// A file path in a fresh directory; keep the guard, it removes the directory on drop.
+fn temp_file(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::Builder::new()
+        .prefix("poimen-core-events-")
+        .tempdir()
+        .unwrap();
+    let path = dir.path().join(name);
+    (dir, path)
 }
 
 fn read(tail: &mut LineTail, path: &Path) -> Tailed {
@@ -203,7 +201,7 @@ fn read(tail: &mut LineTail, path: &Path) -> Tailed {
 
 #[test]
 fn first_subject_reads_only_the_first_line() {
-    let path = temp_file("r1.jsonl");
+    let (_dir, path) = temp_file("r1.jsonl");
     std::fs::write(
         &path,
         "{\"v\":1,\"type\":\"run.started\",\"subject\":{\"kind\":\"github.milestone\",\"id\":\"M16\"}}\n{\"type\":\"x\"}\n",
@@ -227,7 +225,7 @@ fn first_subject_reads_only_the_first_line() {
 
 #[test]
 fn the_line_tail_gives_complete_lines_once_and_waits_for_a_half_written_one() {
-    let path = temp_file("r1.jsonl");
+    let (_dir, path) = temp_file("r1.jsonl");
     std::fs::write(&path, "{\"seq\":1}\n\n{\"seq\":2}\n{\"se").unwrap();
     let mut tail = LineTail::default();
     assert_eq!(

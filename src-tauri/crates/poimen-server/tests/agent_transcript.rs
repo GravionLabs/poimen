@@ -22,13 +22,17 @@ struct Env {
     work: PathBuf,
     client: Client,
     terminal: String,
+    /// Removes the directory of the server when the test ends.
+    _dir: tempfile::TempDir,
 }
 
 impl Env {
     fn new(name: &str, with_home: bool) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-transcript-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("poimen-transcript-{name}-"))
+            .tempdir()
+            .unwrap();
+        let dir = guard.path().to_path_buf();
         std::fs::create_dir_all(dir.join("work")).unwrap();
         std::fs::create_dir_all(dir.join("home")).unwrap();
         let config = Config {
@@ -62,6 +66,7 @@ impl Env {
             work,
             client,
             terminal,
+            _dir: guard,
         }
     }
 

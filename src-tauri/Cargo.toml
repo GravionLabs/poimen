@@ -45,6 +45,10 @@ poimen-client = { path = "crates/poimen-client" }
 poimen-core = { path = "crates/poimen-core" }
 poimen-protocol = { path = "crates/poimen-protocol" }
 
+[dev-dependencies]
+# Test directories that remove themselves, also when the test panics (docs/agents/tests.md).
+tempfile = "3"
+
 [lints.rust]
 unsafe_code = "forbid"
 

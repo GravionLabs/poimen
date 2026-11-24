@@ -252,6 +252,8 @@ mod tests {
         tools: HashSet<&'static str>,
         auth: Option<io::Result<(bool, String)>>,
         home: Option<PathBuf>,
+        /// Removes the home directory when the fake drops.
+        _guard: Option<tempfile::TempDir>,
     }
 
     impl Env for Fake {
@@ -273,18 +275,20 @@ mod tests {
         }
     }
 
-    fn home(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("poimen-check-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn home(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("poimen-check-{name}-"))
+            .tempdir()
+            .unwrap()
     }
 
     fn fake(tools: &[&'static str], auth: Option<io::Result<(bool, String)>>, h: &str) -> Fake {
+        let guard = home(h);
         Fake {
             tools: tools.iter().copied().collect(),
             auth,
-            home: Some(home(h)),
+            home: Some(guard.path().to_path_buf()),
+            _guard: Some(guard),
         }
     }
 

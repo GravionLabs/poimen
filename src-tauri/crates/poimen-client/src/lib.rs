@@ -16,6 +16,8 @@ use std::time::Duration;
 
 pub mod agent;
 pub mod pipe;
+#[cfg(test)]
+mod test_socket;
 pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
@@ -932,18 +934,8 @@ impl Iterator for EventStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_socket::temp_socket;
     use transport::Listener;
-
-    fn temp_socket(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-client-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        #[cfg(unix)]
-        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-            .unwrap();
-        dir.join("s.sock")
-    }
 
     /// A server that answers each connection with the given lines, after reading one request.
     fn fake_server(path: &Path, lines: Vec<String>) -> thread::JoinHandle<String> {
@@ -967,7 +959,7 @@ mod tests {
 
     #[test]
     fn request_returns_the_result_and_sends_one_ndjson_line() {
-        let path = temp_socket("ok");
+        let (_dir, path) = temp_socket("ok");
         let server = fake_server(
             &path,
             vec![r#"{"id":"$ID","result":{"spaces":[{"id":"s1","name":"a","cwd":"/x"}]}}"#.into()],
@@ -981,7 +973,7 @@ mod tests {
 
     #[test]
     fn list_layout_reads_spaces_with_their_tabs() {
-        let path = temp_socket("layout");
+        let (_dir, path) = temp_socket("layout");
         let server =
             fake_server(
                 &path,
@@ -1001,7 +993,7 @@ mod tests {
 
     #[test]
     fn split_sends_its_params_and_returns_the_tab_and_the_new_terminal() {
-        let path = temp_socket("split");
+        let (_dir, path) = temp_socket("split");
         let server =
             fake_server(
                 &path,
@@ -1037,7 +1029,7 @@ mod tests {
 
     #[test]
     fn machine_check_reads_the_checks_and_unknown_method_is_an_error() {
-        let path = temp_socket("mcheck");
+        let (_dir, path) = temp_socket("mcheck");
         let server = fake_server(
             &path,
             vec![
@@ -1054,7 +1046,7 @@ mod tests {
                 .contains(r#""method":"machine.check""#)
         );
 
-        let path = temp_socket("mcheck-old");
+        let (_dir, path) = temp_socket("mcheck-old");
         let server = fake_server(
             &path,
             vec![r#"{"id":"$ID","error":{"code":"unknown_method","message":"no"}}"#.into()],
@@ -1065,7 +1057,7 @@ mod tests {
 
     #[test]
     fn ensure_repo_and_create_worktree_send_their_params() {
-        let path = temp_socket("repo");
+        let (_dir, path) = temp_socket("repo");
         let server = fake_server(
             &path,
             vec![r#"{"id":"$ID","result":{"path":"/s/o/r","cloned":true}}"#.into()],
@@ -1077,7 +1069,7 @@ mod tests {
         assert!(sent.contains(r#""method":"repo.ensure""#), "{sent}");
         assert!(sent.contains(r#""owner":"o""#), "{sent}");
 
-        let path = temp_socket("wt");
+        let (_dir, path) = temp_socket("wt");
         let server = fake_server(
             &path,
             vec![
@@ -1098,7 +1090,7 @@ mod tests {
         assert!(sent.contains(r#""method":"worktree.create""#), "{sent}");
         assert!(sent.contains(r#""mode":"agent""#), "{sent}");
 
-        let path = temp_socket("repo-err");
+        let (_dir, path) = temp_socket("repo-err");
         let server = fake_server(
             &path,
             vec![r#"{"id":"$ID","error":{"code":"conflict","message":"taken"}}"#.into()],
@@ -1109,7 +1101,7 @@ mod tests {
 
     #[test]
     fn cleanup_worktrees_sends_the_merged_pulls_and_reads_the_report() {
-        let path = temp_socket("cleanup");
+        let (_dir, path) = temp_socket("cleanup");
         let server = fake_server(
             &path,
             vec![
@@ -1138,7 +1130,7 @@ mod tests {
 
     #[test]
     fn apply_layout_sends_space_and_preset_and_reads_the_trust_question() {
-        let path = temp_socket("apply");
+        let (_dir, path) = temp_socket("apply");
         let server = fake_server(
             &path,
             vec![
@@ -1165,7 +1157,7 @@ mod tests {
 
     #[test]
     fn server_errors_keep_code_and_message() {
-        let path = temp_socket("err");
+        let (_dir, path) = temp_socket("err");
         let server = fake_server(
             &path,
             vec![r#"{"id":"$ID","error":{"code":"not_found","message":"no such space"}}"#.into()],
@@ -1182,13 +1174,14 @@ mod tests {
 
     #[test]
     fn a_missing_socket_is_not_running() {
-        let err = Client::new(temp_socket("missing")).ping().unwrap_err();
+        let (_dir, path) = temp_socket("missing");
+        let err = Client::new(path).ping().unwrap_err();
         assert!(err.is_not_running());
     }
 
     #[test]
     fn subscribe_yields_events_then_an_error_when_the_connection_ends() {
-        let path = temp_socket("events");
+        let (_dir, path) = temp_socket("events");
         let server = fake_server(
             &path,
             vec![
@@ -1209,7 +1202,7 @@ mod tests {
 
     #[test]
     fn garbage_from_the_server_is_a_protocol_error() {
-        let path = temp_socket("garbage");
+        let (_dir, path) = temp_socket("garbage");
         let server = fake_server(&path, vec!["not json".into()]);
         assert!(matches!(
             Client::new(&path).ping(),
@@ -1220,7 +1213,7 @@ mod tests {
 
     #[test]
     fn an_attachment_writer_sends_on_the_same_connection_and_close_ends_the_reader() {
-        let path = temp_socket("writer");
+        let (_dir, path) = temp_socket("writer");
         let listener = Listener::bind(&path).unwrap();
         let server = thread::spawn(move || {
             let mut stream = listener.accept().unwrap();
@@ -1386,7 +1379,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_socket_in_a_loose_directory_is_refused_before_connecting() {
-        let path = temp_socket("loose");
+        let (_dir, path) = temp_socket("loose");
         let _server = Listener::bind(&path).unwrap();
         let dir = path.parent().unwrap();
         std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o777)).unwrap();

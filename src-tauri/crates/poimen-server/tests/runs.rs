@@ -20,12 +20,17 @@ use serde_json::Value;
 struct Env {
     repo: PathBuf,
     client: Client,
+    /// Removes the directory of the server when the test ends.
+    _dir: tempfile::TempDir,
 }
 
 impl Env {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("poimen-runs-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("poimen-runs-{name}-"))
+            .tempdir()
+            .unwrap();
+        let dir = guard.path().to_path_buf();
         let repo = dir.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let repo = repo.canonicalize().unwrap();
@@ -52,7 +57,11 @@ impl Env {
         client
             .create_space("api", &repo.display().to_string())
             .unwrap();
-        Self { repo, client }
+        Self {
+            repo,
+            client,
+            _dir: guard,
+        }
     }
 
     fn events_file(&self, run: &str) -> PathBuf {

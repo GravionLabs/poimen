@@ -6,13 +6,9 @@ use std::path::{Path, PathBuf};
 use super::tests::{layout, temp};
 use super::*;
 
-/// A fresh directory, so files of an earlier run do not count.
-fn fresh(name: &str) -> PathBuf {
-    let path = temp(name);
-    let dir = path.parent().unwrap();
-    fs::remove_dir_all(dir).unwrap();
-    fs::create_dir_all(dir).unwrap();
-    path
+/// A fresh directory, so files of an earlier run do not count; keep the guard, it removes it on drop.
+fn fresh(name: &str) -> (tempfile::TempDir, PathBuf) {
+    temp(name)
 }
 
 fn damaged_files(path: &Path) -> Vec<String> {
@@ -32,7 +28,7 @@ fn ids(stored: &Stored) -> Vec<&str> {
 
 #[test]
 fn nothing_on_disk_gives_no_spaces() {
-    let path = fresh("missing");
+    let (_dir, path) = fresh("missing");
     let loaded = load(&path).unwrap();
     assert!(loaded.layout.spaces.is_empty());
     assert_eq!(loaded.next_id, 1);
@@ -41,7 +37,7 @@ fn nothing_on_disk_gives_no_spaces() {
 
 #[test]
 fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
-    let path = fresh("bad-bak");
+    let (_dir, path) = fresh("bad-bak");
     save(&path, &layout(&["s1"]), 5, Vec::new()).unwrap();
     save(&path, &layout(&["s1", "s2"]), 6, Vec::new()).unwrap();
     fs::write(&path, "{ nope").unwrap();
@@ -61,7 +57,7 @@ fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
 
 #[test]
 fn a_damaged_file_without_a_backup_starts_empty_and_is_kept() {
-    let path = fresh("bad-nobak");
+    let (_dir, path) = fresh("bad-nobak");
     fs::write(&path, "{ nope").unwrap();
     let loaded = load(&path).unwrap();
     assert!(loaded.layout.spaces.is_empty());
@@ -72,7 +68,7 @@ fn a_damaged_file_without_a_backup_starts_empty_and_is_kept() {
 
 #[test]
 fn a_missing_file_loads_the_backup() {
-    let path = fresh("missing-bak");
+    let (_dir, path) = fresh("missing-bak");
     save(&path, &layout(&["s1"]), 5, Vec::new()).unwrap();
     save(&path, &layout(&["s1", "s2"]), 6, Vec::new()).unwrap();
     fs::remove_file(&path).unwrap();
@@ -83,7 +79,7 @@ fn a_missing_file_loads_the_backup() {
 
 #[test]
 fn a_damaged_backup_is_set_aside_too() {
-    let path = fresh("bad-bak-only");
+    let (_dir, path) = fresh("bad-bak-only");
     fs::write(backup_path(&path), "[").unwrap();
     assert!(load(&path).unwrap().layout.spaces.is_empty());
     assert!(!backup_path(&path).exists());
@@ -102,7 +98,7 @@ fn a_damaged_backup_is_set_aside_too() {
 
 #[test]
 fn at_most_three_damaged_files_are_kept_and_the_oldest_goes() {
-    let path = fresh("cap");
+    let (_dir, path) = fresh("cap");
     let dir = path.parent().unwrap();
     for secs in [100, 200, 300] {
         fs::write(dir.join(format!("server.json.damaged-{secs}")), "x").unwrap();
@@ -117,7 +113,7 @@ fn at_most_three_damaged_files_are_kept_and_the_oldest_goes() {
 
 #[test]
 fn a_newer_version_is_refused_and_the_file_stays_untouched() {
-    let path = fresh("newer");
+    let (_dir, path) = fresh("newer");
     let text = r#"{"version":2,"spaces":[],"future":{"x":1}}"#;
     fs::write(&path, text).unwrap();
     let newer = load(&path).unwrap_err();
@@ -131,7 +127,7 @@ fn a_newer_version_is_refused_and_the_file_stays_untouched() {
 
 #[test]
 fn a_file_without_a_version_is_read_and_written_with_one() {
-    let path = fresh("noversion");
+    let (_dir, path) = fresh("noversion");
     fs::write(&path, r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}]}"#).unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
@@ -145,7 +141,7 @@ fn a_file_without_a_version_is_read_and_written_with_one() {
 
 #[test]
 fn a_save_keeps_the_previous_file_as_backup() {
-    let path = fresh("bak");
+    let (_dir, path) = fresh("bak");
     save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
     assert!(!backup_path(&path).exists());
     save(&path, &layout(&["s2"]), 3, Vec::new()).unwrap();
@@ -159,7 +155,7 @@ fn a_save_keeps_the_previous_file_as_backup() {
 #[test]
 fn a_damaged_file_that_cannot_be_moved_aside_refuses_the_start_and_keeps_the_backup() {
     use std::os::unix::fs::PermissionsExt;
-    let path = fresh("stuck");
+    let (_dir, path) = fresh("stuck");
     save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
     save(&path, &layout(&["s1", "s2"]), 3, Vec::new()).unwrap();
     fs::write(&path, "{ nope").unwrap();

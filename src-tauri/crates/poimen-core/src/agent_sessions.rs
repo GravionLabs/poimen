@@ -240,14 +240,11 @@ fn copilot_session(dir: &Path, cwd: &str) -> Option<SessionInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_dir::TestDir;
     use std::fs;
-    use std::path::PathBuf;
 
-    fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("poimen-sessions-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        d
+    fn temp(tag: &str) -> TestDir {
+        TestDir::new(&format!("poimen-sessions-{tag}-"))
     }
 
     fn claude_file(home: &Path, cwd: &str, session: &str, body: &str) {
