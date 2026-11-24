@@ -22,7 +22,7 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - `frontend.md`: app shell, tab layout, terminal search, sidebar order.
 - `release-and-site.md`: the updater and `site/`.
 - `ci-and-releases.md`: workflows, Renovate, security settings, macOS signing.
-- `tests.md`: before you add or review a test; the revert question.
+- `tests.md`: before you add or review a test; the revert question, test directories (they must remove themselves).
 
 ## Rules
 
