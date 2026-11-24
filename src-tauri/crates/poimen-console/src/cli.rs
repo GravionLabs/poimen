@@ -1,6 +1,6 @@
 //! Arguments of `poimen`: none for the TUI, else a command.
 
-use poimen_protocol::AttachMode;
+use poimen_protocol::{AttachMode, Placement};
 
 /// A raw string: a `\` line continuation would drop the indentation of the next line.
 pub const USAGE: &str = r#"usage: poimen [<command>]
@@ -14,6 +14,20 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked
+  session run --harness <id> --prompt <text> [--model <m>] [--cwd <dir>] [--space <id>]
+              [--run <id>] [--task <id>] [--env KEY=VALUE].. [--name <n>]
+              [--placement editor|panel] [--close-on-end]
+                                      runs one agent session in a new terminal and waits for its
+                                      end (ADR 0016). Prints one JSON object per line on stdout:
+                                      {"type":"started","terminal":..,"space":..}, {"type":"status",
+                                      "status":"working|blocked|done|error|gone"} per change and
+                                      {"type":"ended","status":"done|error|gone","terminal":..}
+                                      last. --space defaults to the space of POIMEN_TERMINAL_ID.
+                                      SIGINT/SIGTERM end the wait and leave the terminal running;
+                                      --close-on-end ends the agent (its exitInput) and closes the
+                                      terminal instead. Exit: 0 done, 2 usage, 3 start failed,
+                                      4 error or gone, 5 connection lost, 6 permission refused,
+                                      130 SIGINT, 143 SIGTERM
   mcp                                 a stdio MCP server for agents: read tools, start_agent,
                                       prompt_agent, wait_agent, report_done
   doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;
@@ -32,6 +46,22 @@ pub struct AttachArgs {
     pub terminal_id: String,
     pub mode: AttachMode,
     pub take_over: bool,
+}
+
+/// The arguments of `poimen session run` (#1257).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SessionRunArgs {
+    pub harness: String,
+    pub prompt: String,
+    pub model: Option<String>,
+    pub cwd: Option<String>,
+    pub space: Option<String>,
+    pub run: Option<String>,
+    pub task: Option<String>,
+    pub env: Vec<(String, String)>,
+    pub name: Option<String>,
+    pub placement: Option<Placement>,
+    pub close_on_end: bool,
 }
 
 /// The commands that talk to the server in single requests (everything but `attach`).
@@ -66,6 +96,8 @@ pub enum Command {
     Request(Request),
     /// A stdio MCP server (ADR 0012).
     Mcp,
+    /// `poimen session run` (#1257, ADR 0016).
+    SessionRun(SessionRunArgs),
     /// `poimen doctor` (#972).
     Doctor {
         json: bool,
@@ -89,6 +121,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-h" | "--help" | "help" => Ok(Command::Help),
         "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
+        "session" => parse_session(rest),
         "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
         "doctor" => parse_doctor(rest),
         "ls" => {
@@ -128,7 +161,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 /// `prompt` (free text) only before the first positional argument.
 fn wants_help(name: &str, rest: &[String]) -> bool {
     let free_text = matches!(name, "send" | "prompt");
+    let mut value_next = false;
     for a in rest {
+        // The value of a `session run` option (a prompt) may be `--help`.
+        if std::mem::take(&mut value_next) {
+            continue;
+        }
+        if name == "session" && SESSION_VALUE_OPTIONS.contains(&a.as_str()) {
+            value_next = true;
+            continue;
+        }
         if a == "--" {
             return false;
         }
@@ -219,6 +261,71 @@ fn parse_new(args: &[String]) -> Result<Command, String> {
     }))
 }
 
+const SESSION_VALUE_OPTIONS: [&str; 9] = [
+    "--harness",
+    "--model",
+    "--prompt",
+    "--cwd",
+    "--space",
+    "--run",
+    "--task",
+    "--env",
+    "--name",
+];
+
+fn parse_session(args: &[String]) -> Result<Command, String> {
+    match args.split_first() {
+        Some((sub, rest)) if sub == "run" => parse_session_run(rest),
+        Some((sub, _)) => Err(format!("unknown session command `{sub}`")),
+        None => Err("missing session command (run)".into()),
+    }
+}
+
+fn parse_session_run(args: &[String]) -> Result<Command, String> {
+    let mut a = SessionRunArgs::default();
+    let (mut harness, mut prompt) = (None, None);
+    let mut it = args.iter();
+    while let Some(opt) = it.next() {
+        let mut value = || {
+            it.next()
+                .cloned()
+                .ok_or_else(|| format!("{opt} needs a value"))
+        };
+        match opt.as_str() {
+            "--harness" => harness = Some(value()?),
+            "--prompt" => prompt = Some(value()?),
+            "--model" => a.model = Some(value()?),
+            "--cwd" => a.cwd = Some(value()?),
+            "--space" => a.space = Some(value()?),
+            "--run" => a.run = Some(value()?),
+            "--task" => a.task = Some(value()?),
+            "--name" => a.name = Some(value()?),
+            "--env" => {
+                let kv = value()?;
+                match kv.split_once('=') {
+                    Some((k, v)) if !k.is_empty() => a.env.push((k.to_string(), v.to_string())),
+                    _ => return Err(format!("--env needs KEY=VALUE, got `{kv}`")),
+                }
+            }
+            "--placement" => {
+                a.placement = Some(match value()?.as_str() {
+                    "editor" => Placement::Editor,
+                    "panel" => Placement::Panel,
+                    other => return Err(format!("--placement is editor or panel, got `{other}`")),
+                });
+            }
+            "--close-on-end" => a.close_on_end = true,
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
+            word => return Err(format!("unexpected argument `{word}`")),
+        }
+    }
+    a.harness = harness
+        .filter(|h| !h.is_empty())
+        .ok_or("missing --harness")?;
+    a.prompt = prompt.ok_or("missing --prompt")?;
+    Ok(Command::SessionRun(a))
+}
+
 fn parse_doctor(args: &[String]) -> Result<Command, String> {
     let (mut json, mut bundle) = (false, None);
     let mut it = args.iter();
@@ -289,6 +396,87 @@ mod tests {
         assert!(p(&["doctor", "--x"]).is_err());
         assert!(p(&["doctor", "extra"]).is_err());
         assert_eq!(p(&["doctor", "--help"]), Ok(Command::Help));
+    }
+
+    fn session(args: &[&str]) -> Result<SessionRunArgs, String> {
+        let mut all = vec!["session", "run"];
+        all.extend(args);
+        match p(&all)? {
+            Command::SessionRun(a) => Ok(a),
+            other => Err(format!("{other:?}")),
+        }
+    }
+
+    #[test]
+    fn session_run_options() {
+        let a = session(&[
+            "--harness",
+            "claude",
+            "--prompt",
+            "fix it's \"$(x); y\nnow",
+            "--model",
+            "opus",
+            "--cwd",
+            "/w",
+            "--space",
+            "s1",
+            "--run",
+            "r1",
+            "--task",
+            "t1",
+            "--env",
+            "A=1",
+            "--env",
+            "B=x=y",
+            "--name",
+            "tab",
+            "--placement",
+            "panel",
+            "--close-on-end",
+        ])
+        .unwrap();
+        assert_eq!(a.harness, "claude");
+        assert_eq!(a.prompt, "fix it's \"$(x); y\nnow");
+        assert_eq!(a.model.as_deref(), Some("opus"));
+        assert_eq!(a.cwd.as_deref(), Some("/w"));
+        assert_eq!(a.space.as_deref(), Some("s1"));
+        assert_eq!(a.run.as_deref(), Some("r1"));
+        assert_eq!(a.task.as_deref(), Some("t1"));
+        assert_eq!(
+            a.env,
+            vec![("A".into(), "1".into()), ("B".into(), "x=y".into())]
+        );
+        assert_eq!(a.name.as_deref(), Some("tab"));
+        assert_eq!(a.placement, Some(Placement::Panel));
+        assert!(a.close_on_end);
+        let min = session(&["--harness", "claude", "--prompt", "go"]).unwrap();
+        assert_eq!((min.model, min.space, min.placement), (None, None, None));
+        assert!(!min.close_on_end);
+    }
+
+    #[test]
+    fn session_run_rejects_bad_arguments() {
+        for bad in [
+            &["--prompt", "go"][..],
+            &["--harness", "claude"],
+            &["--harness", "claude", "--prompt"],
+            &["--harness", "claude", "--prompt", "go", "--env", "NOEQ"],
+            &["--harness", "claude", "--prompt", "go", "--env", "=v"],
+            &["--harness", "claude", "--prompt", "go", "--placement", "x"],
+            &["--harness", "claude", "--prompt", "go", "--bogus"],
+            &["--harness", "claude", "--prompt", "go", "extra"],
+        ] {
+            assert!(session(bad).is_err(), "{bad:?}");
+        }
+        assert!(p(&["session"]).is_err());
+        assert!(p(&["session", "stop"]).is_err());
+    }
+
+    #[test]
+    fn session_run_prompt_may_be_a_help_flag() {
+        assert!(session(&["--harness", "claude", "--prompt", "--help"]).is_ok());
+        assert_eq!(p(&["session", "run", "--help"]), Ok(Command::Help));
+        assert_eq!(p(&["session", "--help"]), Ok(Command::Help));
     }
 
     #[test]

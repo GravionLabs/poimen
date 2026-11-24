@@ -60,6 +60,37 @@ fn started_by_is_optional_and_round_trips() {
 }
 
 #[test]
+fn run_task_and_placement_are_optional_and_round_trip() {
+    use poimen_protocol::{Placement, TerminalCreate};
+    let old: TerminalCreate = serde_json::from_str(r#"{"space_id":"s1"}"#).unwrap();
+    assert_eq!((old.run, old.task, old.placement), (None, None, None));
+    let json = serde_json::to_value(TerminalCreate::default()).unwrap();
+    for key in ["run", "task", "placement"] {
+        assert_eq!(json.get(key), None, "{key}");
+    }
+    let with: TerminalCreate =
+        serde_json::from_str(r#"{"space_id":"s1","run":"M016","task":"744","placement":"panel"}"#)
+            .unwrap();
+    assert_eq!(with.run.as_deref(), Some("M016"));
+    assert_eq!(with.task.as_deref(), Some("744"));
+    assert_eq!(with.placement, Some(Placement::Panel));
+    let t: Terminal = serde_json::from_value(serde_json::json!({
+        "id":"t2","space_id":"s1","name":"n","cwd":"/","cols":80,"rows":24,
+        "status":"running","run":"M016","task":"744"
+    }))
+    .unwrap();
+    assert_eq!(
+        (t.run.as_deref(), t.task.as_deref()),
+        (Some("M016"), Some("744"))
+    );
+    let back = serde_json::to_value(&t).unwrap();
+    assert_eq!(
+        (&back["run"], &back["task"]),
+        (&"M016".into(), &"744".into())
+    );
+}
+
+#[test]
 fn the_agent_report_is_optional_and_round_trips() {
     use poimen_protocol::report::{AgentReport, TerminalReportDone};
     let t: Terminal = serde_json::from_value(serde_json::json!({

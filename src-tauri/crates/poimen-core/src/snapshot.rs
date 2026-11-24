@@ -174,6 +174,11 @@ pub struct Terminal {
     /// The terminal whose agent started this one through `start_agent` (#982).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// The agent-events run and its task the session belongs to (#744, read by #745).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
     /// The child records of the terminal, least recently updated first (#684).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<ChildRecord>,
@@ -249,6 +254,7 @@ mod tests {
                  "agent_message": "Allow Bash?", "agent_message_at": 1700, "cwd": "/work/api",
                  "agent_reported_at": 1800, "agent_status_since": 1600,
                  "agent_silent_since": 1900,
+                 "run": "20261108-100000-loop", "task": "t12",
                  "label": "review", "tokens": {"deliver_step": "build"},
                  "survives_restart": true, "memory_bytes": 52428800, "program": "/bin/zsh", "host_version": "0.15.0",
                  "host_bundled_version": "0.16.0", "focused": false},
@@ -264,6 +270,7 @@ mod tests {
         );
         assert_eq!(snapshot.terminals[0].agent_status, AgentStatus::Blocked);
         assert_eq!(snapshot.terminals[0].tokens["deliver_step"], "build");
+        assert_eq!(snapshot.terminals[0].task.as_deref(), Some("t12"));
         // Nothing is added or lost on the way back.
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), wire);
     }

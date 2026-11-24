@@ -1,0 +1,116 @@
+@if (launcher.opened(); as open) {
+  <app-dialog-shell heading="Deliver" width="560px" (cancelled)="launcher.close()">
+    @if (refusal(); as why) {
+      <p class="hint" data-testid="refusal">{{ why }}</p>
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          data-testid="cancel"
+          (click)="launcher.close()"
+        >
+          Cancel
+        </button>
+        <button type="button" hx-button data-testid="show-run" (click)="showRun()">Show run</button>
+      </div>
+    } @else if (plan()?.available === false) {
+      <p class="error" role="alert" data-testid="missing">{{ missing }}</p>
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          data-testid="cancel"
+          (click)="launcher.close()"
+        >
+          Close
+        </button>
+      </div>
+    } @else {
+      <p class="hint">
+        Starts <code>deliver-loop</code> in a new tab of this repository's space. The loop starts
+        its agent sessions itself.
+      </p>
+      @if (open.target.kind === "milestone") {
+        <label class="field">
+          <span>Milestone</span>
+          <select
+            data-testid="milestone"
+            [value]="milestone()"
+            (change)="milestone.set(value($event))"
+          >
+            @for (name of open.milestones; track name) {
+              <option [value]="name" [selected]="name === milestone()">{{ name }}</option>
+            }
+          </select>
+        </label>
+      } @else {
+        <label class="field">
+          <span>Issues</span>
+          <input type="text" readonly data-testid="issues" [value]="targetText(open.target)" />
+        </label>
+      }
+      <label class="field">
+        <span>Harness</span>
+        <select data-testid="harness" [value]="harness()" (change)="harness.set(value($event))">
+          <option value="">loop default</option>
+          @for (h of harnesses; track h) {
+            <option [value]="h">{{ h }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Model (optional)</span>
+        <input
+          type="text"
+          data-testid="model"
+          placeholder="loop default"
+          [value]="model()"
+          (input)="model.set(value($event))"
+        />
+      </label>
+      <label class="field">
+        <span>Max (optional)</span>
+        <input
+          type="text"
+          inputmode="numeric"
+          data-testid="max"
+          placeholder="loop default"
+          [value]="max()"
+          (input)="max.set(value($event))"
+        />
+      </label>
+      <p class="hint" data-testid="base">Base branch: {{ plan()?.base ?? "loop default" }}</p>
+      @if (invalid(); as why) {
+        <p class="error" role="alert" data-testid="invalid">{{ why }}</p>
+      } @else if (plan()?.error; as why) {
+        <p class="error" role="alert" data-testid="invalid">{{ why }}</p>
+      }
+      <pre class="command" data-testid="command">{{ plan()?.command }}</pre>
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          data-testid="cancel"
+          (click)="launcher.close()"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          hx-button
+          data-testid="start"
+          [disabled]="!canStart()"
+          (click)="start()"
+        >
+          Start loop
+        </button>
+      </div>
+    }
+  </app-dialog-shell>
+}

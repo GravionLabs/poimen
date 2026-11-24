@@ -64,7 +64,7 @@
       </h1>
     </header>
     <div class="scroll">
-      <div class="page">
+      <div class="page" [class.wide]="isWide()">
         @if (writeError(); as reason) {
           <p class="error" role="alert">{{ reason }}</p>
         }

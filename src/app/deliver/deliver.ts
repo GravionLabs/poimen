@@ -3,7 +3,6 @@ import { agentKind, paneDir, rowName, type AgentStatus, type Terminal } from "..
 import { starterOf } from "../core/started-by";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
-import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
 import { NotificationCenter, type RunAlert } from "../core/notification-center";
 import { EditorTabs } from "../core/editor-tabs";
@@ -20,15 +19,12 @@ import {
   runState,
   type DeliverCard,
   type DeliverRead,
-  type DeliverStatus,
-  type Subject,
   startedAt,
   withMachines,
 } from "./deliver-status";
 import { effectiveStatus, runsByTerminal } from "./pane-status";
-
-/** The task mode `Start loop` runs; `{nr}` is the milestone number, `{title}` its title. */
-export const DELIVER_MODE = "deliver-loop";
+import { taskTerminals } from "./task-terminal";
+import { activeLoop, type ActiveLoop, type Launched } from "./deliver-start";
 
 /** How often the age texts and the stale rule are re-evaluated. */
 const CLOCK_MS = 30_000;
@@ -62,15 +58,6 @@ export function loopPane(
 }
 
 /**
- * The number of a milestone subject: from `M5` / `M5.1` in its id or title (the deliver loop's
- * naming), else the `#<number>` at the end of its id (`owner/repo#number`); 0 when there is none.
- */
-export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number {
-  const named = /^M(\d+)/.exec(subject.id) ?? /^M(\d+)/.exec(subject.title);
-  return Number(named?.[1] ?? /#(\d+)$/.exec(subject.id)?.[1] ?? 0);
-}
-
-/**
  * The deliver runs of the repositories of the open spaces: the backend watches each repository's
  * progress events (`.agents/events` of the common dir, else the legacy
  * `.agents/deliver-loop/status.json`; `deliver_watch`) and pushes `deliver` events; this keeps one
@@ -82,7 +69,6 @@ export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number 
 export class Deliver {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(SpacesStore);
-  private readonly tasks = inject(TaskStarter);
   private readonly machines = inject(Machines);
   private readonly ui = inject(UiState);
   private readonly editor = inject(EditorTabs);
@@ -290,20 +276,36 @@ export class Deliver {
   }
 
   /**
-   * Starts `deliver-loop` for the milestone: the task mode named {@link DELIVER_MODE} (no
-   * worktree: a tab in the space of the repository), with the milestone number as `{nr}`.
+   * The terminals poimen started for `task` of the run of `card` (#745), newest first: matched by
+   * `Terminal.run` and `Terminal.task` of the run's machine only, none for an offline machine.
    */
-  startLoop(status: DeliverStatus, root: string, machine?: string): Promise<boolean> {
-    const milestone = status.subject;
-    // Tasks on a machine are started from its spaces (#693), not from here.
-    if (machine !== undefined) return Promise.resolve(false);
-    // Only a run on a milestone has a loop to start.
-    if (milestone?.kind !== "github.milestone") return Promise.resolve(false);
-    return this.tasks.run(root, {
-      number: milestoneNumber(milestone),
-      title: milestone.title,
-      url: milestone.url,
-      mode: DELIVER_MODE,
-    });
+  terminalsOfTask(card: DeliverCard, task: string): Terminal[] {
+    return taskTerminals(
+      this.store.all().terminals,
+      { run: card.run, machine: card.machine, offline: card.offline },
+      task,
+    );
+  }
+
+  /** Starts by this action (#746), by repository root: the terminal and when. */
+  private readonly launched = new Map<string, Launched>();
+
+  /** Records the terminal of a loop this action just started in the repository at `root`. */
+  markLaunched(root: string, terminalId: string): void {
+    this.launched.set(root, { terminalId, at: Date.now() });
+  }
+
+  /**
+   * The loop that makes a second start for `root` (this Mac) pointless: a running run, or a start
+   * by this action whose run has not appeared yet. `undefined` when it may start.
+   */
+  activeLoop(root: string): ActiveLoop | undefined {
+    return activeLoop(
+      this.received(),
+      this.launched.get(root),
+      this.store.all().terminals,
+      root,
+      this.now(),
+    );
   }
 }

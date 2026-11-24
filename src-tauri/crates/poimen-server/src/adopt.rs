@@ -123,6 +123,8 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
             records: Vec::new(),
             hibernated,
             started_by: t.started_by.clone(),
+            run: t.run.clone(),
+            task: t.task.clone(),
             report: t.report.clone(),
             agent_source: None,
             memory_bytes: None,
@@ -233,6 +235,8 @@ fn adopted(
             records: view,
             hibernated: t.hibernated,
             started_by: t.started_by,
+            run: t.run,
+            task: t.task,
             report: t.report,
             agent_source: t.agent.as_ref().map(|a| {
                 if t.osc {

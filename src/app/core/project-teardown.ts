@@ -39,6 +39,12 @@ export class ProjectTeardown {
   private readonly dialog = inject(ResultDialog);
   private readonly spaces = inject(SpaceActions);
 
+  /** The palette entry: runs it in the directory of the active pane; without one it says so. */
+  runIn(dir: string | undefined): void {
+    if (dir) void this.run(dir);
+    else this.spaces.notify("Project: Run teardown: the active pane has no directory");
+  }
+
   /** Runs it in `dir` (the worktree of the focused space) and shows the output. */
   async run(dir: string): Promise<TeardownReport | null> {
     let report: TeardownReport;
