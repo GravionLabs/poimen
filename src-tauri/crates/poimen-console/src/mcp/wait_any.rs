@@ -180,7 +180,8 @@ fn run_file(repository: &str, run: &str) -> Result<PathBuf, Fail> {
 pub(super) fn wait_any(client: &Client, args: &Value) -> Result<Value, Fail> {
     only_keys(args, &["terminals", "runs", "timeout_s"])?;
     let mut ids = string_list(args, "terminals")?;
-    ids.dedup();
+    let mut seen = std::collections::HashSet::new();
+    ids.retain(|id| seen.insert(id.clone()));
     let specs = run_specs(args)?;
     if ids.is_empty() && specs.is_empty() {
         return Err(Fail::Tool(
