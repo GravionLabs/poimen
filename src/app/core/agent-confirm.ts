@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import type { BackendEvent } from "./backend";
 import { plainText } from "./snapshot";
+import { AgentGrants } from "./agent-grants";
 import { NotificationCenter } from "./notification-center";
 import { TauriBridge } from "./tauri";
 
@@ -71,13 +72,14 @@ export function writeMessage(
 
 /**
  * The questions of agents that want to write into another space (ADR 0012, #615) and the list of
- * what agents wrote. The server holds the agent's call until `answer`, or until it times out,
+ * what agents wrote; it also feeds the grants of lead agents (`AgentGrants`, ADR 0018). The server holds the agent's call until `answer`, or until it times out,
  * which settles the question without us (`agent.confirm_resolved`). In memory only.
  */
 @Injectable({ providedIn: "root" })
 export class AgentConfirm {
   private readonly bridge = inject(TauriBridge);
   private readonly center = inject(NotificationCenter);
+  private readonly grants = inject(AgentGrants);
 
   private readonly queue = signal<readonly ConfirmRequest[]>([]);
   /** The question on screen: the oldest open one. */
@@ -87,7 +89,11 @@ export class AgentConfirm {
 
   /** Listens to the backend events; returns the function that stops it. */
   start(): () => void {
-    const stop = this.bridge.listen<BackendEvent>("backend", (event) => this.handle(event));
+    this.grants.start();
+    const stop = this.bridge.listen<BackendEvent>("backend", (event) => {
+      this.handle(event);
+      this.grants.handle(event);
+    });
     return () => void stop.then((f) => f());
   }
 

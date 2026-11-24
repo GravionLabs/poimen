@@ -275,10 +275,48 @@ pub trait Backend: Send + Sync {
     ) -> Result<(), String>;
     fn agent_rename(&self, target: &str, name: Option<&str>) -> Result<(), String>;
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome;
+    /// The client of the poimen-server behind this backend; only the poimen backend has one.
+    /// The confirmations and grants of agents (ADR 0012, ADR 0018) go through it.
+    fn agent_client(&self) -> Option<&poimen_client::Client> {
+        None
+    }
     /// The user's answer to an agent's request to write into another space
     /// (`agent.confirm_requested`, #615). Only the poimen backend has such requests.
-    fn agent_confirm_answer(&self, _id: &str, _approve: bool) -> Result<(), String> {
-        Err("this backend has no confirmations".into())
+    fn agent_confirm_answer(&self, id: &str, approve: bool) -> Result<(), String> {
+        let client = self
+            .agent_client()
+            .ok_or("this backend has no confirmations")?;
+        client
+            .answer_agent_confirm(id, approve)
+            .map_err(|e| e.to_string())
+    }
+    /// The user's answer to a lead agent's request for a scoped write grant
+    /// (`agent.grant_requested`, ADR 0018, #1211): no, or yes with fewer spaces or a lower limit.
+    fn agent_grant_answer(
+        &self,
+        answer: &poimen_client::protocol::AgentGrantAnswer,
+    ) -> Result<(), String> {
+        let client = self.agent_client().ok_or("this backend has no grants")?;
+        client.answer_agent_grant(answer).map_err(|e| e.to_string())
+    }
+    /// Revokes the grant `id`; running agents are left alone (ADR 0018).
+    fn agent_grant_revoke(&self, id: &str) -> Result<(), String> {
+        let client = self.agent_client().ok_or("this backend has no grants")?;
+        let revoke = poimen_client::protocol::AgentGrantRevoke {
+            id: Some(id.to_owned()),
+            caller_terminal_id: None,
+        };
+        client
+            .revoke_agent_grant(&revoke)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+    /// The active grants (`agent.grants`); none for a backend without.
+    fn agent_grants(&self) -> Result<poimen_client::protocol::AgentGrants, String> {
+        match self.agent_client() {
+            Some(client) => client.agent_grants().map_err(|e| e.to_string()),
+            None => Ok(Default::default()),
+        }
     }
     /// The agent session of a terminal whose transcript poimen can read.
     fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String>;

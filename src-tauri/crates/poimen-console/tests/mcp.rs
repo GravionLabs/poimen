@@ -153,6 +153,8 @@ fn initialize_and_tools_list() {
             "write_terminal",
             "create_space",
             "list_repositories",
+            "request_grant",
+            "revoke_grant",
             "prompt_agent",
             "wait_agent",
             "report_done",

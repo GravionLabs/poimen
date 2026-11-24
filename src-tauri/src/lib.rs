@@ -1,5 +1,6 @@
 use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, tasks, templates};
 use poimen_core::{transcripts, trust};
+mod agent_grants;
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -366,20 +367,6 @@ async fn agent_prompt(
 ) -> Result<agent_session::PromptOutcome, String> {
     on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
         Ok(b.agent_prompt(id, &text))
-    })
-    .await
-}
-
-/// The user's answer to an agent that asks to write into another space (#615); the server holds
-/// the agent's call until it arrives.
-#[tauri::command]
-async fn agent_confirm_answer(
-    backend: State<'_, Shared>,
-    id: String,
-    approve: bool,
-) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_confirm_answer(&id, approve)
     })
     .await
 }
@@ -2695,7 +2682,10 @@ pub fn run() {
             agent_start,
             agent_rename,
             agent_prompt,
-            agent_confirm_answer,
+            agent_grants::agent_confirm_answer,
+            agent_grants::agent_grant_answer,
+            agent_grants::agent_grant_revoke,
+            agent_grants::agent_grants,
             pane_rename,
             space_rename,
             terminal_create,

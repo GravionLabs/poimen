@@ -3,6 +3,7 @@
 //! (`terminal.report_agent`), so both calls here are typed input plus a wait on the terminal's
 //! `agent` field.
 
+mod grant;
 mod session;
 
 use std::fmt;
