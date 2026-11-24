@@ -54,6 +54,7 @@ export function createPoimenDemo(): DemoBackend {
     get_harnesses: HARNESSES,
     list_agent_sessions: [],
     get_agent_actions: { actions: [] },
+    agent_grants: { grants: [] },
     set_terminal_colors: null,
     get_color_schemes: { schemes: [], warnings: [] },
     list_machines: MACHINES,
