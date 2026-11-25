@@ -17,9 +17,9 @@ mod terminal_import;
 use terminal_import::{HomeSources, TerminalSources};
 
 pub use poimen_core::settings::{
-    SidebarRows, SidebarSort, config_path, parse_space_templates, parse_tasks,
-    parse_trusted_projects, resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort,
-    revoke_project, trust_project,
+    SidebarRows, SidebarSort, config_path, parse_space_templates, parse_trusted_projects,
+    resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort, revoke_project,
+    trust_project,
 };
 use poimen_core::settings::{
     find_value, remove_path_text, root_open, save_with, set_key_text, set_path_text,
@@ -394,17 +394,6 @@ fn resolve_trusted_projects(value: &Value, s: &mut Settings) {
     s.trusted_projects = parse_trusted_projects(value, &mut s.warnings);
 }
 
-/// `tasks` of the user config: `modes[]` and `worktreeDir` over the defaults.
-fn resolve_tasks(value: &Value, s: &mut Settings) {
-    let parsed = parse_tasks(value, "using the default agent mode", &mut s.warnings);
-    if let Some(dir) = parsed.worktree_dir {
-        s.tasks.worktree_dir = dir;
-    }
-    if let Some(modes) = parsed.modes {
-        s.tasks.modes = modes;
-    }
-}
-
 /// `github.agentActions`: invalid entries and unknown harnesses warn and are skipped.
 fn resolve_github(value: &Value, s: &mut Settings) {
     let Some(obj) = value.as_object() else {
@@ -507,8 +496,9 @@ pub fn resolve_with(json: Option<&str>, sources: &dyn TerminalSources) -> Settin
     }
     resolve_layout_names(&root, &mut s);
     if let Some(value) = root.get("tasks") {
-        resolve_tasks(value, &mut s);
+        crate::schedules::resolve_tasks(value, &mut s);
     }
+    crate::schedules::check(&root, &mut s.warnings);
     if let Some(value) = root.get("harnesses") {
         s.harnesses = crate::harness::resolve(value, &mut s.warnings);
     }

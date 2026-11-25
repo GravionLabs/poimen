@@ -679,6 +679,11 @@
           @case ("palette") {
             <app-palette-editor />
           }
+          @case ("schedules") {
+            @defer {
+              <app-schedules-editor />
+            }
+          }
           @case ("layouts") {
             @defer {
               <app-layouts-editor />

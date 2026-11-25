@@ -22,7 +22,7 @@ import {
   withRoot,
 } from "./settings-view";
 import { overrideEditors } from "./settings-editors.mock";
-import { allPages, SETTINGS_GROUPS } from "./settings-categories";
+import { allPages } from "./settings-categories";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -600,6 +600,7 @@ describe("SettingsView categories", () => {
       "Layouts",
       "Snippets",
       "Palette",
+      "Schedules",
       "Keyboard",
       "Trusted projects",
       "Backend",
@@ -815,7 +816,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(17);
+    expect(titles(host)).toHaveLength(18);
   });
 
   it("has a Notifications page for the notify hooks (#1017), without system notification switches", () => {
@@ -949,34 +950,6 @@ describe("SettingsView categories", () => {
     await fixture.whenStable();
     await new Promise((resolve) => setTimeout(resolve));
     expect(tauri.calls("settings_export")).toEqual([{ path: "/tmp/out.json", template: null }]);
-  });
-
-  it("has every label of the category list in its page template", () => {
-    // Option labels such as the theme's Light/Dark/System live in the component's option lists.
-    const html =
-      readFileSync("src/app/settings-view/settings-view.html", "utf8") +
-      readFileSync("src/app/settings-view/settings-view.ts", "utf8");
-    const layouts =
-      readFileSync("src/app/settings-view/layouts-editor.html", "utf8") +
-      readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8");
-    const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
-    const read = (name: string) => readFileSync(`src/app/settings-view/${name}.html`, "utf8");
-    const sources: Record<string, string> = {
-      layouts,
-      spaces: read("space-templates-editor"),
-      machines: machinesPage,
-      snippets: read("snippets-editor"),
-      palette: read("palette-editor"),
-      keyboard: read("shortcuts-editor"),
-      notifications: read("notifications-page"),
-    };
-    for (const page of allPages()) {
-      const source = sources[page.id] ?? html;
-      for (const label of page.labels) {
-        expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
-      }
-    }
-    expect(SETTINGS_GROUPS.length).toBeGreaterThan(0);
   });
 
   it("moves with the arrow keys, expands and collapses with Left and Right", () => {

@@ -16,6 +16,7 @@ mod grant;
 pub mod host;
 pub mod lead;
 pub mod report;
+mod schedule;
 pub mod status;
 pub use attach::{AttachMode, AttachResult, DetachReason, TerminalSetDraft};
 pub use channel::Channel;
@@ -29,10 +30,10 @@ pub use grant::{
     GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace,
     GrantVerdict,
 };
+pub use schedule::{ScheduleInfo, ScheduleList, ScheduleOutcome, ScheduleResult, ScheduleRun};
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
-/// The protocol version the server speaks and this crate is written for. Raised on every
-/// incompatible change; `ping` reports it.
+/// The protocol version of the server and this crate, raised on incompatible changes (`ping`).
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
@@ -44,9 +45,8 @@ pub const HOOK_KINDS: [&str; 3] = ["claude", "copilot", "gemini"];
 
 /// Environment variable set in every terminal: its own id.
 pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
-/// Environment variable of `poimen-server integration install`: the absolute path the hooks
-/// call instead of the running binary. The app sets it when it runs a copy whose path is not
-/// stable (inside an AppImage), pointing at the stable link of its staged copy.
+/// Environment variable of `poimen-server integration install`: the absolute path the hooks call
+/// instead of the running binary (inside an AppImage the app points it at its staged copy).
 pub const ENV_HOOK_EXE: &str = "POIMEN_HOOK_EXE";
 
 /// The channel of this build (`POIMEN_CHANNEL` at build time). An unknown value fails the build.

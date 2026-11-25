@@ -35,6 +35,7 @@ pub mod report;
 mod reports;
 mod revive;
 mod runs;
+mod scheduler;
 mod settings_reread;
 pub mod stdio;
 mod store;
@@ -42,9 +43,11 @@ mod stream;
 mod tab_ops;
 use tab_ops::{drop_terminal, publish_all};
 mod tabs;
+mod transcript;
+use transcript::{Followed, agent_transcript};
 mod typing;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -60,14 +63,14 @@ use emulator::Colors;
 use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
-    self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
-    ClientKind, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure,
-    RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space, SpaceApplyLayout,
-    SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList,
-    SpaceRename, TabClose, TabCreate, TabPlace, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
-    TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
-    TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
-    TranscriptState, WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
+    self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, ErrorCode, Event,
+    EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure, RepoEnsureResult, Request, Response,
+    ServerShutdown, SetColors, Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose,
+    SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate,
+    TabPlace, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
+    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalRename,
+    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, WorktreeCleanup,
+    WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -359,6 +362,7 @@ struct Inner {
     /// The spaces with their tabs and split trees.
     layout: tabs::Layout,
     terminals: Vec<TerminalEntry>,
+    schedules: scheduler::State,
 }
 
 /// How long `server.shutdown` waits so its answer reaches the client first.
@@ -419,6 +423,8 @@ pub(crate) struct Shared {
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
+    /// The scheduler's wall clock in milliseconds; tests set their own ([`Server::set_clock`]).
+    clock: RwLock<Arc<dyn Fn() -> u64 + Send + Sync>>,
     /// How long a resumed agent has to report before the resume counts as failed, milliseconds
     /// (#904); tests shorten it with [`Server::set_resume_timeout`].
     resume_timeout_ms: AtomicU64,
@@ -565,9 +571,10 @@ impl Shared {
 
     /// Writes spaces, tabs, the id counter and the running terminals. Called on every change of
     /// them (the `seq` read from each host goes along, it is not a change of its own).
-    fn persist(&self, inner: &Inner) {
+    /// Writes `server.json`; `false` when it was not written.
+    fn persist(&self, inner: &Inner) -> bool {
         if self.stopped.load(Ordering::SeqCst) {
-            return;
+            return false;
         }
         let next_id = self.next_id.load(Ordering::Relaxed);
         let (now, now_ms) = (Instant::now(), now_millis());
@@ -576,12 +583,12 @@ impl Shared {
             .iter()
             .filter_map(|t| t.stored(now, now_ms))
             .collect();
-        if let Err(e) = store::save(&self.state_file, &inner.layout, next_id, terminals) {
-            self.log(
-                "store",
-                &format!("could not save {}: {e}", self.state_file.display()),
-            );
+        let (file, schedules) = (&self.state_file, inner.schedules.stored());
+        let saved = store::save(file, &inner.layout, next_id, terminals, schedules);
+        if let Err(e) = &saved {
+            self.log("store", &format!("could not save {}: {e}", file.display()));
         }
+        saved.is_ok()
     }
 
     /// One line in `server.log` and on stderr.
@@ -722,6 +729,7 @@ impl Server {
             layout,
             next_id,
             terminals,
+            schedules,
         } = store::load_or_refuse(&config.state_file)?;
         match transport::inspect(&config.socket)? {
             Entry::Missing => {}
@@ -766,6 +774,7 @@ impl Server {
             inner: Mutex::new(Inner {
                 layout,
                 terminals: Vec::new(),
+                schedules: scheduler::State::load(schedules),
             }),
             subscribers: Mutex::new(Vec::new()),
             runs: Mutex::default(),
@@ -786,6 +795,7 @@ impl Server {
             processes: Mutex::new(memory::Cache::default()),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
+            clock: RwLock::new(Arc::new(now_millis)),
             resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
@@ -864,6 +874,7 @@ impl Server {
             }
         });
         awake::spawn_sweeper(&self.shared);
+        scheduler::spawn_sweeper(&self.shared);
         reports::spawn_sweeper(&self.shared);
         let runs = Arc::clone(&self.shared);
         thread::spawn(move || {
@@ -1154,6 +1165,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
         "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
+        "schedule.list" => scheduler::list(shared),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {
@@ -1208,6 +1220,7 @@ fn server_shutdown(shared: &Arc<Shared>, p: ServerShutdown) -> ApiResult {
         );
         {
             let mut inner = lock(&shared.inner);
+            inner.schedules.halt();
             if p.keep_terminals {
                 // The list with the last `seq` read from every host, then no write any more: a
                 // host this server lets go is never reported as an exit here.
@@ -1994,95 +2007,6 @@ fn terminal_mut<'a>(
         .iter_mut()
         .find(|t| t.info.id == id)
         .ok_or_else(|| not_found("terminal", id))
-}
-
-/// Most transcript readers kept; one per view that follows an agent, so this is never reached by
-/// normal use. A reader past it replaces an arbitrary one, which then starts over (`fresh`).
-const MAX_FOLLOWERS: usize = 64;
-
-/// A transcript reader and the session it follows.
-struct Followed {
-    session: String,
-    follow: poimen_core::transcripts::Follow,
-}
-
-/// `agent.transcript` (#698): the updates the agent transcript of a terminal gained since this
-/// follower's last request, read from the files of this machine (`Config.home`) through
-/// `poimen_core::transcripts`. The agent and session are those the hooks reported; Claude Code
-/// also needs the terminal's directory. `not_found` for an unknown terminal; every other miss is
-/// a `state` of the result, so a client can tell it from a failed request.
-fn agent_transcript(shared: &Shared, p: AgentTranscript) -> ApiResult {
-    use poimen_core::transcripts::{OpenError, open};
-    let (agent, session, cwd, live) = {
-        let mut inner = lock(&shared.inner);
-        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-        let agent = entry.info.agent.as_ref();
-        let found = (
-            agent.and_then(|a| a.agent.clone()),
-            agent.and_then(|a| a.session_id.clone()),
-            entry.info.cwd.clone(),
-        );
-        let live: HashSet<String> = inner.terminals.iter().map(|t| t.info.id.clone()).collect();
-        (found.0, found.1, found.2, live)
-    };
-    let state = |state, reason: Option<String>| {
-        Ok(json!(AgentTranscriptResult {
-            state,
-            reason,
-            session: None,
-            fresh: false,
-            updates: Vec::new(),
-        }))
-    };
-    let mut followers = lock(&shared.transcripts);
-    followers.retain(|(terminal, _), _| live.contains(terminal));
-    let key = (p.terminal_id, p.follower);
-    let (Some(agent), Some(session)) = (agent, session) else {
-        followers.remove(&key);
-        return state(TranscriptState::NoAgent, None);
-    };
-    let fresh = p.restart || followers.get(&key).is_none_or(|f| f.session != session);
-    if fresh {
-        followers.remove(&key);
-        let Some(home) = shared.home.as_deref() else {
-            return state(TranscriptState::Missing, None);
-        };
-        match open(home, &agent, &session, &cwd) {
-            Ok(follow) => {
-                if followers.len() >= MAX_FOLLOWERS
-                    && let Some(old) = followers.keys().next().cloned()
-                {
-                    followers.remove(&old);
-                }
-                followers.insert(
-                    key.clone(),
-                    Followed {
-                        session: session.clone(),
-                        follow,
-                    },
-                );
-            }
-            Err(OpenError::NoAgent) => return state(TranscriptState::NoAgent, None),
-            Err(OpenError::Missing) => return state(TranscriptState::Missing, None),
-            Err(OpenError::Unreadable(reason)) => {
-                return state(TranscriptState::Unreadable, Some(reason));
-            }
-        }
-    }
-    let followed = followers.get_mut(&key).expect("inserted above or kept");
-    let updates = followed
-        .follow
-        .refresh()
-        .into_iter()
-        .map(|u| json!(u))
-        .collect();
-    Ok(json!(AgentTranscriptResult {
-        state: TranscriptState::Ok,
-        reason: None,
-        session: Some(session),
-        fresh,
-        updates,
-    }))
 }
 
 fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {

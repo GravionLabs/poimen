@@ -393,3 +393,21 @@ app-lead-runs p {
 app-lead-runs .blocked {
   color: var(--status-blocked);
 }
+
+/* Scheduled runs of the Runs view (#1000); global for the same reason as the lead runs. */
+app-schedule-runs ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+app-schedule-runs li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+app-schedule-runs .hint {
+  color: var(--h-text-muted-color);
+}

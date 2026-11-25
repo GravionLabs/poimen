@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   allPages,
@@ -8,6 +9,34 @@ import {
 } from "./settings-categories";
 
 describe("settings categories", () => {
+  it("has every label of the category list in its page template", () => {
+    // Option labels such as the theme's Light/Dark/System live in the component's option lists.
+    const html =
+      readFileSync("src/app/settings-view/settings-view.html", "utf8") +
+      readFileSync("src/app/settings-view/settings-view.ts", "utf8");
+    const layouts =
+      readFileSync("src/app/settings-view/layouts-editor.html", "utf8") +
+      readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8");
+    const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
+    const read = (name: string) => readFileSync(`src/app/settings-view/${name}.html`, "utf8");
+    const sources: Record<string, string> = {
+      layouts,
+      spaces: read("space-templates-editor"),
+      machines: machinesPage,
+      snippets: read("snippets-editor"),
+      palette: read("palette-editor"),
+      schedules: read("schedules-editor"),
+      keyboard: read("shortcuts-editor"),
+      notifications: read("notifications-page"),
+    };
+    for (const page of allPages()) {
+      const source = sources[page.id] ?? html;
+      for (const label of page.labels) {
+        expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
+      }
+    }
+  });
+
   it("maps every existing section to one page under a group", () => {
     const tree = Object.fromEntries(
       filterGroups("").map((g) => [g.title, g.pages.map((p) => p.title)]),
@@ -20,6 +49,7 @@ describe("settings categories", () => {
         "Layouts",
         "Snippets",
         "Palette",
+        "Schedules",
         "Keyboard",
         "Trusted projects",
       ],
@@ -37,7 +67,7 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(13);
+    expect(allPages()).toHaveLength(14);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {

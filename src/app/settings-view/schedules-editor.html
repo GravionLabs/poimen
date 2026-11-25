@@ -1,0 +1,49 @@
+<p class="hint">
+  At the set times <code>poimen-server</code> runs a command task mode in a terminal of the
+  repository, also while the app window is closed. Schedules are the <code>schedules</code> of your
+  <code>config.json</code> (<code>cron</code>, <code>timezone</code>, <code>dir</code>,
+  <code>mode</code>, optional <code>precheck</code>). They run with your rights.
+</p>
+@if (error(); as m) {
+  <p class="field-error" role="alert">{{ m }}</p>
+}
+<label class="check">
+  <input
+    hx-checkbox
+    type="checkbox"
+    name="schedules-paused"
+    [checked]="paused()"
+    (change)="pause($event)"
+  />
+  Pause all schedules
+</label>
+<section aria-label="Schedules">
+  <h3>Schedules</h3>
+  @if (rows().length > 0) {
+    <ul class="rows" aria-label="Schedules">
+      @for (s of rows(); track s.key) {
+        <li class="row-item">
+          <label class="check">
+            <input
+              hx-checkbox
+              type="checkbox"
+              [checked]="s.enabled"
+              [attr.aria-label]="'Run ' + s.mode + ' in ' + s.dir"
+              (change)="toggle(s.key, $event)"
+            />
+            <strong>{{ s.mode }}</strong>
+          </label>
+          <span class="hint">{{ s.dir }}</span>
+          <span class="hint"
+            ><code>{{ s.cron }}</code> {{ s.timezone }}</span
+          >
+          <span class="spacer"></span>
+          <span data-testid="schedule-next">Next: {{ s.next }}</span>
+          <span data-testid="schedule-last">Last: {{ s.result }}</span>
+        </li>
+      }
+    </ul>
+  } @else {
+    <p class="hint">No schedule. A schedule that cannot run is named in the settings warnings.</p>
+  }
+</section>

@@ -96,6 +96,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         labels: ["Detected sources", "Hidden entries", "Scripts", "Skills"],
       },
       {
+        id: "schedules",
+        title: "Schedules",
+        labels: ["Pause all schedules", "Next", "Last", "Cron"],
+      },
+      {
         id: "keyboard",
         title: "Keyboard",
         labels: ["Record", "Reset", "Clear", "Unbound"],

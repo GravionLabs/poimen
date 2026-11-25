@@ -24,6 +24,7 @@ pub mod project_env;
 pub mod project_runner;
 pub mod remote;
 pub mod repos;
+pub mod schedules;
 pub mod schemes;
 pub mod settings;
 pub mod snapshot;

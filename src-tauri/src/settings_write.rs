@@ -41,3 +41,15 @@ pub fn set_palette(palette: serde_json::Value) -> Result<(), String> {
         crate::settings::set_palette_text(text, &palette)
     })
 }
+
+/// Exports the user settings (without `trustedProjects`) to `path`, a file chosen in the save
+/// dialog; `template` exports only that space template.
+#[tauri::command]
+pub async fn settings_export(path: String, template: Option<String>) -> Result<(), String> {
+    let home = crate::home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::settings_transfer::export(&home, std::path::Path::new(&path), template.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

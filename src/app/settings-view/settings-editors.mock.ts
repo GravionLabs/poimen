@@ -4,6 +4,7 @@ import { TestBed } from "@angular/core/testing";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
 import { PaletteEditor } from "./palette-editor";
+import { SchedulesEditor } from "./schedules-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { ShortcutsEditor } from "./shortcuts-editor";
 import { NotificationsPage } from "./notifications-page";
@@ -19,6 +20,7 @@ export const EDITORS: [Type<unknown>, string][] = [
   [SnippetsEditor, "snippets-editor"],
   [NotificationsPage, "notifications-page"],
   [PaletteEditor, "palette-editor"],
+  [SchedulesEditor, "schedules-editor"],
   [ShortcutsEditor, "shortcuts-editor"],
 ];
 
