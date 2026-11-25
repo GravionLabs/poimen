@@ -4,7 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationCenter } from "./notification-center";
-import { Schedules } from "./schedules";
+import { SCHEDULES_POLL_MS, Schedules } from "./schedules";
 import type { Snapshot } from "./snapshot";
 import { SpaceActions } from "./space-actions";
 import { tauri } from "./tauri.mock";
@@ -68,7 +68,7 @@ describe("Schedules.readAlerts", () => {
   });
 
   it("is read at the start of every server session, until the owner is destroyed", async () => {
-    tauri.answer("schedules_alerts", () => ({ alerts: [alert(1)] }));
+    tauri.answer("schedules_alerts", () => ({ alerts: [] }));
     const listeners = new Set<(snapshot: Snapshot) => void>();
     const store = {
       onSessionStart: (listener: (snapshot: Snapshot) => void) => {
@@ -83,8 +83,10 @@ describe("Schedules.readAlerts", () => {
         return () => {};
       },
     } as DestroyRef;
-    schedules().followSessions(store, owner);
-    expect(tauri.calls("schedules_alerts")).toEqual([]);
+    schedules().follow(store, owner);
+    // The first poll of the list reads the alerts too; wait for it before the session starts.
+    await schedules().readAlerts();
+    tauri.answer("schedules_alerts", () => ({ alerts: [alert(1)] }));
     listeners.forEach((l) => l({} as Snapshot));
     await vi.waitFor(() => expect(entries()).toHaveLength(1));
     destroy.forEach((fn) => fn());
@@ -120,5 +122,50 @@ describe("Schedules.readAlerts", () => {
     expect(entries()).toEqual([]);
     expect(schedules().error()).toBeNull();
     expect(fail).not.toHaveBeenCalled();
+  });
+});
+
+describe("Schedules.hint", () => {
+  const list = {
+    paused: false,
+    schedules: [
+      {
+        key: "k",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        dir: "/repo",
+        mode: "loop",
+        enabled: true,
+        next_ms: Date.now(),
+      },
+    ],
+  };
+
+  it("follows the poll of the list", async () => {
+    vi.useFakeTimers();
+    const destroy: (() => void)[] = [];
+    const owner = { onDestroy: (fn: () => void) => void destroy.push(fn) };
+    tauri.answer("schedules_list", () => list);
+    schedules().follow({ onSessionStart: () => () => {} }, owner as unknown as DestroyRef);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(schedules().hint()?.text).toMatch(/^Schedules · next /);
+    tauri.answer("schedules_list", () => ({ ...list, paused: true }));
+    await vi.advanceTimersByTimeAsync(SCHEDULES_POLL_MS);
+    expect(schedules().hint()?.text).toBe("Schedules paused");
+    expect(schedules().active()).toEqual([]);
+    destroy.forEach((fn) => fn());
+    vi.useRealTimers();
+  });
+
+  it("is absent with an older server, also after a list was read", async () => {
+    tauri.answer("schedules_list", () => list);
+    await schedules().refresh();
+    expect(schedules().active()).toHaveLength(1);
+    tauri.answer("schedules_list", () => {
+      throw "poimen-server: unknown_method";
+    });
+    await schedules().refresh();
+    expect(schedules().hint()).toBeNull();
+    expect(schedules().active()).toEqual([]);
   });
 });

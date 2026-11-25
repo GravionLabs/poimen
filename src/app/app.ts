@@ -270,7 +270,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
-  private readonly schedules = inject(Schedules);
+  protected readonly schedules = inject(Schedules);
   private readonly tokenTotals = inject(TokenTotalsService);
   private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
@@ -446,7 +446,7 @@ export class App {
     void this.prefs.start();
     void this.userSchemes.start();
     void this.machines.start();
-    this.schedules.followSessions(this.store, destroyRef);
+    this.schedules.follow(this.store, destroyRef);
     void this.store.start().then(() => this.dropMissing());
     void this.remoteSpaces.start();
     void seedSpaceDefaults(this.bridge, this.ui);
