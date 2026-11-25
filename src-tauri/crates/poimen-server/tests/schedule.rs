@@ -465,3 +465,24 @@ fn the_runs_per_day_are_limited() {
     env.tick(NINE + DAY);
     env.finished(3);
 }
+
+#[test]
+fn runs_of_one_repository_that_are_due_at_once_share_one_new_space() {
+    let d = Dirs::new();
+    let crons = ["0 9 * * *", "0 9 10 * *", "0 9 * 1 *", "0 9 * * 6"];
+    d.config(json!(crons.map(|c| d.schedule(c))), json!({}));
+    let env = d.start();
+    env.tick(BEFORE);
+    env.tick(NINE);
+    let deadline = Instant::now() + LONG;
+    while !env.list().schedules.iter().all(|s| {
+        s.runs
+            .first()
+            .is_some_and(|r| r.outcome == ScheduleOutcome::Ok)
+    }) {
+        assert!(Instant::now() < deadline, "{:?}", env.list());
+        let _ = env.events.recv_timeout(Duration::from_millis(50));
+    }
+    assert_eq!(d.runs_log().len(), 4);
+    assert_eq!(env.spaces().spaces.len(), 1);
+}

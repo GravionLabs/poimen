@@ -45,22 +45,24 @@ export class Schedules {
     }
   }
 
-  setEnabled(key: string, enabled: boolean): Promise<void> {
+  /** `false` when the switch was not written. */
+  setEnabled(key: string, enabled: boolean): Promise<boolean> {
     return this.write("set_schedule_enabled", { key, enabled });
   }
 
-  setPaused(paused: boolean): Promise<void> {
+  setPaused(paused: boolean): Promise<boolean> {
     return this.write("set_schedules_paused", { paused });
   }
 
-  private async write(command: string, args: Record<string, unknown>): Promise<void> {
+  private async write(command: string, args: Record<string, unknown>): Promise<boolean> {
     try {
       await this.bridge.invoke(command, args);
     } catch (e) {
       await this.refresh();
       this._error.set(`The schedule could not be changed: ${String(e)}`);
-      return;
+      return false;
     }
     await this.refresh();
+    return true;
   }
 }

@@ -32,11 +32,18 @@ export class SchedulesEditor {
     this.schedules.watch(inject(DestroyRef));
   }
 
-  protected toggle(key: string, event: Event): void {
-    void this.schedules.setEnabled(key, (event.target as HTMLInputElement).checked);
+  protected toggle(key: string, event: Event): Promise<void> {
+    return this.write(event, (checked) => this.schedules.setEnabled(key, checked));
   }
 
-  protected pause(event: Event): void {
-    void this.schedules.setPaused((event.target as HTMLInputElement).checked);
+  protected pause(event: Event): Promise<void> {
+    return this.write(event, (checked) => this.schedules.setPaused(checked));
+  }
+
+  /** Writes a checkbox; one that was not written goes back to what the config says. */
+  private async write(event: Event, set: (checked: boolean) => Promise<boolean>): Promise<void> {
+    const box = event.target as HTMLInputElement;
+    const checked = box.checked;
+    if (!(await set(checked))) box.checked = !checked;
   }
 }

@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -38,6 +38,10 @@ const PRECHECK_POLL: Duration = Duration::from_millis(50);
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 /// The runs kept per schedule: at least a day's worth of the highest runs per day limit.
 const KEEP_RUNS: usize = 96;
+
+/// Held while a run finds or creates the space of its repository, so that two runs due at once
+/// make one space.
+static SPACES: Mutex<()> = Mutex::new(());
 
 /// What `server.json` keeps of a schedule.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +203,8 @@ fn precheck(argv: &[String], dir: &str) -> Result<(), String> {
     let mut child = gui_path::command(&argv[0])
         .args(&argv[1..])
         .current_dir(dir)
+        // The server's own `PATH` can be the thin one of a GUI app.
+        .env("PATH", gui_path::child_path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -331,6 +337,9 @@ impl Shared {
             if changed && !self.persist(inner) {
                 for d in due.drain(..) {
                     inner.schedules.starting.remove(&d.schedule.key);
+                    if let Some(entry) = inner.schedules.entries.get_mut(&d.schedule.key) {
+                        entry.skipped(now, "server.json could not be written");
+                    }
                 }
             }
         }
@@ -356,9 +365,14 @@ impl Shared {
                 Some(c) if !c.list.iter().any(|n| n.key == s.key && n.enabled) => {
                     Err((ScheduleOutcome::Skipped, "switched off".to_owned()))
                 }
-                _ => self
+                Some(_) => self
                     .start_run(&due)
                     .map_err(|e| (ScheduleOutcome::Failed, e)),
+                // Whether it is paused or switched off now is not known.
+                None => Err((
+                    ScheduleOutcome::Skipped,
+                    "config.json cannot be read".to_owned(),
+                )),
             },
         };
         if let Err((outcome, reason)) = result {
@@ -379,6 +393,7 @@ impl Shared {
     /// The space of `dir`; without one it is created with the user's layout. The project file
     /// is not read: it neither asks nor starts anything here.
     fn space_for(self: &Arc<Self>, dir: &str) -> Result<String, String> {
+        let _one = SPACES.lock().unwrap_or_else(|e| e.into_inner());
         let spaces = lock(&self.inner).layout.spaces.clone();
         // The exact directory wins over another one of the same checkout.
         let found = spaces
@@ -403,6 +418,9 @@ impl Shared {
         let name = Path::new(dir)
             .file_name()
             .map_or_else(|| dir.to_owned(), |n| n.to_string_lossy().into_owned());
+        if lock(&self.inner).schedules.halted {
+            return Err("the server is shutting down".into());
+        }
         let (mut created, typing) =
             build_space(self, name, build).map_err(|(_, message)| message)?;
         type_commands(typing, &mut created);
@@ -431,6 +449,7 @@ impl Shared {
                 name: Some(format!("schedule {}", s.mode)),
                 cwd: Some(s.dir.clone()),
                 command: Some(command),
+                env: [("PATH".to_owned(), gui_path::child_path())].into(),
                 ..TerminalCreate::default()
             },
         )

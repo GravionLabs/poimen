@@ -105,6 +105,23 @@ describe("SchedulesEditor", () => {
     expect(tauri.calls("set_schedules_paused")).toEqual([{ paused: true }]);
   });
 
+  it("puts a switch back that could not be written", async () => {
+    const fixture = await setup();
+    tauri.answer("set_schedules_paused", () => {
+      throw "triggers is not an object";
+    });
+    const host = fixture.nativeElement as HTMLElement;
+    const box = host.querySelector<HTMLInputElement>("[name=schedules-paused]")!;
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await fixture.whenStable();
+    await vi.waitFor(() => expect(tauri.calls("schedules_list").length).toBe(2));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(box.checked).toBe(false);
+    expect(host.querySelector("[role=alert]")?.textContent).toContain("triggers is not an object");
+  });
+
   it("says why the list cannot be read", async () => {
     const host = (
       await setup(() => {
