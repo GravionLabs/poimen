@@ -313,6 +313,8 @@ pub struct Config {
     pub sort: SidebarSort,
     /// `sidebar.groupWorktrees` (default true): spaces of linked worktrees below their repository.
     pub group_worktrees: bool,
+    /// `sidebar.showBaseBranch` (default false): the `branch` token shows the base branch too (#711).
+    pub show_base_branch: bool,
     /// The user scheme `colorSchema` names; `None` uses the colors of the local terminal.
     pub scheme: Option<Scheme>,
     pub warnings: Vec<String>,
@@ -326,6 +328,7 @@ impl Default for Config {
             rows: SidebarRows::default(),
             sort: SidebarSort::default(),
             group_worktrees: true,
+            show_base_branch: false,
             scheme: None,
             warnings: Vec::new(),
         }
@@ -348,6 +351,7 @@ pub fn parse(root: &Value, schemes: &[Scheme]) -> Config {
         c.rows = resolve_sidebar_rows(sidebar, &mut c.warnings);
         c.sort = resolve_sidebar_sort(sidebar, &mut c.warnings);
         c.group_worktrees = resolve_group_worktrees(sidebar, &mut c.warnings);
+        c.show_base_branch = sidebar.get("showBaseBranch") == Some(&Value::Bool(true));
     }
     if let Some(name) = scheme_name(root) {
         c.scheme = schemes.iter().find(|s| s.name == name).cloned();
@@ -430,15 +434,46 @@ fn scheme_name(root: &Value) -> Option<String> {
 
 /// The config under `home`; a missing or unreadable file is the default.
 pub fn load(home: Option<&Path>) -> Config {
+    try_load(home).unwrap_or_default()
+}
+
+/// Like [`load`], but a file that exists and is not valid JSON is an error with the reason (a
+/// reload keeps the last valid config then). A missing file is the default.
+pub fn try_load(home: Option<&Path>) -> Result<Config, String> {
     let Some(home) = home else {
-        return Config::default();
+        return Ok(Config::default());
     };
-    let root = std::fs::read_to_string(poimen_core::settings::config_path(home))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .unwrap_or(Value::Null);
+    let root = match std::fs::read_to_string(poimen_core::settings::config_path(home)) {
+        Ok(text) => serde_json::from_str::<Value>(&text)
+            .map_err(|e| format!("config.json is not valid JSON ({e}); keeping the last config"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(e) => {
+            return Err(format!(
+                "config.json cannot be read ({e}); keeping the last config"
+            ));
+        }
+    };
     let schemes = poimen_core::schemes::load(home);
-    parse(&root, &schemes.schemes)
+    Ok(parse(&root, &schemes.schemes))
+}
+
+/// Watches the config directory (`config.json` and `themes/`) and calls `changed` on every
+/// write, create, rename or removal. The watcher stops when the value is dropped; `None` when
+/// the directory does not exist or cannot be watched.
+pub fn watch(
+    home: &Path,
+    changed: impl Fn() + Send + 'static,
+) -> Option<notify::RecommendedWatcher> {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    let dir = poimen_core::settings::config_dir(home);
+    let mut watcher = notify::recommended_watcher(move |e: notify::Result<notify::Event>| {
+        if e.is_ok_and(|e| !matches!(e.kind, EventKind::Access(_))) {
+            changed();
+        }
+    })
+    .ok()?;
+    watcher.watch(&dir, RecursiveMode::Recursive).ok()?;
+    Some(watcher)
 }
 
 #[cfg(test)]

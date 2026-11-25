@@ -92,7 +92,7 @@ export function protocolWarning(info: BackendInfo | null | undefined, backend = 
 
 /**
  * The agent kinds that report their state through the poimen hooks
- * (`poimen-server integration install <kind>`, the server's `integration.rs`): the one place
+ * (`poimen integration install <kind>`, the server's `integration.rs`): the one place
  * on this side. A further kind is one entry here plus its mapper on the server. `start_agent`
  * waits for the hooks' `SessionStart`, so any other kind would time out although it runs.
  * `transcripts`: whether Output and Flow can follow its session files.

@@ -4,7 +4,6 @@ use poimen_console::tui::sidebar::{Model, Row};
 use poimen_core::settings::{SidebarRows, SidebarSort};
 use poimen_protocol::{Space, Terminal};
 use serde_json::json;
-use std::collections::HashMap;
 
 fn terminal(id: &str, name: &str, started_by: Option<&str>) -> Terminal {
     serde_json::from_value(json!({
@@ -43,7 +42,7 @@ fn a_started_terminal_names_its_starter_and_a_gone_starter_names_nobody() {
             terminal("helper", "helper", Some("lead")),
             terminal("orphan", "orphan", Some("gone")),
         ],
-        repos: HashMap::new(),
+        ..Model::default()
     };
     let rows = model.rows(&SidebarRows::default(), SidebarSort::Manual, None);
     assert!(

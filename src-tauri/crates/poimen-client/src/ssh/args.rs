@@ -2,7 +2,6 @@
 
 /// The arguments of ssh for `target`: no terminal, never a prompt, bounded connect, a dead link
 /// noticed within 45 s, and the server of this build's channel in stdio mode.
-#[cfg(test)]
 pub fn ssh_args(target: &str, server: &str) -> Vec<String> {
     ssh_args_with(target, server, &[])
 }

@@ -3,13 +3,9 @@
 //! Subcommands: `report tokens|clear|agent` (see `report.rs`), `hook <kind> [event]` (run by the agents, `claude`, `copilot` or `gemini`; the kinds are in
 //! `integration.rs`) and `integration install|uninstall|status <kind> [--settings <path>]`.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use poimen_protocol::CHANNEL;
-use poimen_server::{
-    Config, Server, StartError, claude, hook, integration, mcp_config, report, stdio,
-};
+use poimen_server::{Config, Server, StartError, claude, hook, integration, report, stdio};
 
 const HELP: &str = "\
 usage:
@@ -21,7 +17,7 @@ usage:
   poimen-server hook claude
   poimen-server hook copilot <event>
   poimen-server hook gemini
-  poimen-server integration install|uninstall|status claude|copilot|gemini [--settings <path>]";
+  poimen-server integration ...      deprecated: use `poimen integration install|uninstall|status claude|copilot|gemini [--settings <path>]`";
 
 /// What the first argument asks for. Pure: no process is started by deciding it.
 #[derive(Debug, PartialEq, Eq)]
@@ -97,121 +93,22 @@ fn subcommand(args: &[String]) -> ExitCode {
             claude::terminal_id_from_env(),
             poimen_protocol::terminal_socket_path(),
         )),
-        Some("integration") => integration(&args[1..]),
+        Some("integration") => {
+            eprintln!(
+                "poimen-server: `integration` is deprecated and goes away in a later release; use `poimen integration {}`",
+                args[1..].join(" ")
+            );
+            integration::run(
+                &args[1..],
+                "poimen-server",
+                claude::hook_exe(
+                    std::env::var_os(poimen_protocol::ENV_HOOK_EXE),
+                    std::env::current_exe,
+                ),
+            )
+        }
         _ => ExitCode::from(2),
     }
-}
-
-fn integration(args: &[String]) -> ExitCode {
-    let (Some(action), Some(kind)) = (args.first(), args.get(1).and_then(|a| integration::kind(a)))
-    else {
-        eprintln!("{}", usage());
-        return ExitCode::from(2);
-    };
-    let path = match args.get(2).map(String::as_str) {
-        Some("--settings") => args.get(3).map(PathBuf::from),
-        None => std::env::home_dir().map(|h| (kind.default_path)(&h, CHANNEL)),
-        _ => None,
-    };
-    let Some(path) = path else {
-        eprintln!("{}", usage());
-        return ExitCode::from(2);
-    };
-    // The MCP config is the agent's own file below the home directory; an explicit `--settings`
-    // path is a test or special setup and leaves it alone.
-    let mcp = kind
-        .mcp
-        .filter(|_| args.get(2).is_none())
-        .and_then(|m| Some((m, (m.default_path)(&std::env::home_dir()?))));
-    let cli = kind.cli_version(&claude::SystemCli);
-    let result = match action.as_str() {
-        "install" => claude::hook_exe(
-            std::env::var_os(poimen_protocol::ENV_HOOK_EXE),
-            std::env::current_exe,
-        )
-        .and_then(|exe| {
-            (kind.install)(&path, &exe, CHANNEL, cli)?;
-            let mut message = format!("installed in {}", path.display());
-            if let Some((m, mcp_path)) = &mcp {
-                let path_var = std::env::var_os("PATH");
-                match mcp_config::console_exe(&exe, CHANNEL, path_var.as_deref()) {
-                    Some(console) => {
-                        mcp_config::install(mcp_path, *m, &console, CHANNEL)?;
-                        message.push_str(&format!("; mcp in {}", mcp_path.display()));
-                    }
-                    None => message.push_str("; mcp skipped: the poimen binary was not found"),
-                }
-            }
-            Ok(message)
-        }),
-        "uninstall" => (kind.uninstall)(&path, CHANNEL).and_then(|removed| {
-            let mcp_removed = match &mcp {
-                Some((_, mcp_path)) => mcp_config::uninstall(mcp_path, CHANNEL)?,
-                None => false,
-            };
-            Ok(if removed || mcp_removed {
-                format!("removed from {}", path.display())
-            } else {
-                "nothing to remove".to_owned()
-            })
-        }),
-        "status" => (kind.status)(&path, CHANNEL, cli).and_then(|status| {
-            let mut out = if status.installed.is_empty() {
-                "not installed".to_owned()
-            } else if status.missing.is_empty() {
-                "installed".to_owned()
-            } else {
-                format!(
-                    "partially installed: {}; missing: {}",
-                    status.installed.join(", "),
-                    status.missing.join(", ")
-                )
-            };
-            if let Some((_, mcp_path)) = &mcp {
-                out.push('\n');
-                out.push_str(mcp_status_line(mcp_path)?);
-            }
-            Ok(out)
-        }),
-        _ => {
-            eprintln!("{}", usage());
-            return ExitCode::from(2);
-        }
-    };
-    match result {
-        Ok(message) => {
-            println!("{message}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("poimen-server: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// `mcp: installed|not installed|unavailable` (`unavailable`: no `poimen` binary to register).
-fn mcp_status_line(path: &std::path::Path) -> Result<&'static str, String> {
-    Ok(match mcp_config::status(path, CHANNEL)? {
-        mcp_config::McpState::Installed => "mcp: installed",
-        mcp_config::McpState::Missing => {
-            let found = std::env::current_exe().ok().and_then(|exe| {
-                mcp_config::console_exe(&exe, CHANNEL, std::env::var_os("PATH").as_deref())
-            });
-            if found.is_some() {
-                "mcp: not installed"
-            } else {
-                "mcp: unavailable"
-            }
-        }
-    })
-}
-
-fn usage() -> String {
-    format!(
-        "usage: poimen-server integration install|uninstall|status {} [--settings <path>]",
-        integration::names()
-    )
 }
 
 fn serve() -> ExitCode {
@@ -288,10 +185,7 @@ mod tests {
 
     #[test]
     fn help_lists_the_integration_usage() {
-        assert!(HELP.contains(&format!(
-            "integration install|uninstall|status {} [--settings <path>]",
-            integration::names()
-        )));
+        assert!(HELP.contains("poimen integration install|uninstall|status"));
         for kind in integration::KINDS {
             assert!(
                 HELP.contains(&format!("hook {}", kind.name)),

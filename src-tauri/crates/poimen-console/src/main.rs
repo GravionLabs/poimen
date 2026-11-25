@@ -8,13 +8,92 @@ use std::thread;
 use poimen_client::Client;
 use poimen_console::cli::{self, Command, USAGE};
 use poimen_console::commands;
+use poimen_console::remote;
 use poimen_console::session::{self, Options, Outcome};
 use poimen_console::tty::{LocalTerminal, RawGuard};
 use poimen_console::tui::{self, screen::LocalScreen, screen::ScreenGuard};
+use poimen_core::machines::MachineConfig;
+
+/// Where the commands go: the local server, or the server of a machine over ssh (#1176).
+enum Target {
+    Local,
+    Machine(Box<MachineConfig>),
+}
+
+impl Target {
+    fn client(&self) -> Client {
+        match self {
+            Target::Local => Client::new(poimen_protocol::terminal_socket_path()),
+            Target::Machine(m) => remote::client(m),
+        }
+    }
+
+    /// `POIMEN_TERMINAL_ID` names a terminal of the local server only.
+    fn own_terminal(&self) -> Option<String> {
+        match self {
+            Target::Local => std::env::var(poimen_protocol::ENV_TERMINAL_ID)
+                .ok()
+                .filter(|id| !id.is_empty()),
+            Target::Machine(_) => None,
+        }
+    }
+}
+
+/// The machine of `--machine`, checked: its server must answer with this protocol.
+fn machine_target(name: &str) -> Result<Target, String> {
+    let home = std::env::home_dir().filter(|h| !h.as_os_str().is_empty());
+    let (machines, warnings) = remote::load(home.as_deref())?;
+    for w in warnings {
+        eprintln!("poimen: config.json: {w}");
+    }
+    let machine = remote::find(&machines, name)?;
+    remote::require(&machine)?;
+    Ok(Target::Machine(Box::new(machine)))
+}
+
+/// `poimen machines`: no server is started and none is needed.
+fn machines(json: bool) -> ExitCode {
+    let home = std::env::home_dir().filter(|h| !h.as_os_str().is_empty());
+    let (list, warnings) = match remote::load(home.as_deref()) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("poimen: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for w in warnings {
+        eprintln!("poimen: config.json: {w}");
+    }
+    match remote::list(&list, json, &mut std::io::stdout()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("poimen: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match cli::parse(&args) {
+    let (machine, command) = match cli::parse_invocation(&args) {
+        Ok(cli::Invocation { machine, command }) => (machine, Ok(command)),
+        Err(e) => (None, Err(e)),
+    };
+    let target = match (&command, machine) {
+        (Ok(Command::Help | Command::Version | Command::Machines { .. }), _) | (Err(_), _) => {
+            Target::Local
+        }
+        (_, None) => Target::Local,
+        (_, Some(name)) => match machine_target(&name) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("poimen: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let local = matches!(target, Target::Local);
+    match command {
         Ok(Command::Help) => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -23,9 +102,17 @@ fn main() -> ExitCode {
             println!("poimen {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Command::Tui) => tui(),
-        Ok(Command::Attach(a)) => attach(a),
-        Ok(Command::SessionRun(a)) => session_run(&a),
+        Ok(Command::Machines { json }) => machines(json),
+        Ok(cmd)
+            if local
+                && !matches!(cmd, Command::Doctor { .. } | Command::Integration(_))
+                && !start_server() =>
+        {
+            ExitCode::FAILURE
+        }
+        Ok(Command::Tui) => tui(&target),
+        Ok(Command::Attach(a)) => attach(a, &target),
+        Ok(Command::SessionRun(a)) => session_run(&a, &target),
         Ok(Command::Mcp) => {
             let client = Client::new(poimen_protocol::terminal_socket_path());
             let terminal = std::env::var(poimen_protocol::ENV_TERMINAL_ID).ok();
@@ -43,9 +130,10 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Ok(Command::Integration(i)) => integration(&i),
         Ok(Command::Doctor { json, bundle }) => doctor(json, bundle.as_deref()),
         Ok(Command::Request(r)) => {
-            let client = Client::new(poimen_protocol::terminal_socket_path());
+            let client = target.client();
             match commands::run(&client, &r, commands::PROMPT_WAIT, &mut std::io::stdout()) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(commands::Failure(m)) => {
@@ -61,8 +149,19 @@ fn main() -> ExitCode {
     }
 }
 
-fn attach(a: cli::AttachArgs) -> ExitCode {
-    let client = Client::new(poimen_protocol::terminal_socket_path());
+/// Starts `poimen-server` when none runs (#1171); false after printing why it could not.
+fn start_server() -> bool {
+    match poimen_console::server_start::ensure_for_console() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("poimen: {e}");
+            false
+        }
+    }
+}
+
+fn attach(a: cli::AttachArgs, target: &Target) -> ExitCode {
+    let client = target.client();
     let stop = Arc::new(AtomicBool::new(false));
     // Raw mode turns Ctrl+C into a byte for the terminal; these arrive from outside (kill, a
     // closing window) and make the session end through its normal path, which restores the mode.
@@ -138,15 +237,13 @@ fn attach(a: cli::AttachArgs) -> ExitCode {
 }
 
 /// The TUI on the local terminal, until detach, a signal or the server going away.
-fn tui() -> ExitCode {
-    let client = Client::new(poimen_protocol::terminal_socket_path());
+fn tui(target: &Target) -> ExitCode {
+    let client = target.client();
     let home = std::env::home_dir().filter(|h| !h.as_os_str().is_empty());
     let opts = tui::Options {
         config: tui::config::load(home.as_deref()),
         home: home.map(|h| h.display().to_string()),
-        own_terminal: std::env::var(poimen_protocol::ENV_TERMINAL_ID)
-            .ok()
-            .filter(|id| !id.is_empty()),
+        own_terminal: target.own_terminal(),
         mirror: None,
         issues: None,
     };
@@ -204,6 +301,34 @@ fn tui() -> ExitCode {
     }
 }
 
+/// `poimen integration`: the hooks call `poimen-server hook ...`, so the hook binary is the server
+/// (`POIMEN_HOOK_EXE`, else next to the console, else on the login-shell `PATH`).
+fn integration(i: &cli::Integration) -> ExitCode {
+    let hook_exe = match std::env::var_os(poimen_protocol::ENV_HOOK_EXE).filter(|v| !v.is_empty()) {
+        Some(given) => poimen_server::claude::hook_exe(Some(given), std::env::current_exe),
+        None => {
+            let bin_dir = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(std::path::Path::to_path_buf));
+            poimen_console::server_start::find_server(
+                bin_dir.as_deref(),
+                &poimen_core::gui_path::child_path(),
+            )
+            .ok_or_else(|| {
+                format!(
+                    "{} was not found next to poimen or on PATH",
+                    poimen_console::server_start::server_name()
+                )
+            })
+        }
+    };
+    let mut args = vec![i.action.clone(), i.kind.clone()];
+    if let Some(path) = &i.settings {
+        args.extend(["--settings".to_owned(), path.clone()]);
+    }
+    poimen_server::integration::run(&args, "poimen", hook_exe)
+}
+
 /// `poimen doctor`: the report on stdout (text or JSON), optionally the bundle file.
 fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
     use poimen_console::doctor::{self, collect};
@@ -216,6 +341,7 @@ fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
         bin_dir: std::env::current_exe()
             .ok()
             .and_then(|e| e.parent().map(std::path::Path::to_path_buf)),
+        console: std::env::current_exe().ok(),
         path: path.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
@@ -246,9 +372,9 @@ fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
 }
 
 /// `poimen session run`: records on stdout, diagnostics on stderr, the exit code of the outcome.
-fn session_run(a: &cli::SessionRunArgs) -> ExitCode {
+fn session_run(a: &cli::SessionRunArgs, target: &Target) -> ExitCode {
     use poimen_console::session_run::{self as run, Env, Signals};
-    let client = Client::new(poimen_protocol::terminal_socket_path());
+    let client = target.client();
     let signals = Signals::default();
     // The wait ends and the terminal keeps running (unless `--close-on-end`).
     #[cfg(unix)]
@@ -258,9 +384,7 @@ fn session_run(a: &cli::SessionRunArgs) -> ExitCode {
             signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&signals.term));
     }
     let env = Env {
-        caller: std::env::var(poimen_protocol::ENV_TERMINAL_ID)
-            .ok()
-            .filter(|id| !id.is_empty()),
+        caller: target.own_terminal(),
         home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
         confirm_wait: poimen_client::agent::CONFIRM_WAIT,
     };

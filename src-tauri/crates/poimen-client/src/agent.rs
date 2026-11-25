@@ -55,7 +55,7 @@ impl fmt::Display for AgentError {
             AgentError::Timeout(limit) => write!(
                 f,
                 "the agent did not report within {} s; are the poimen hooks installed \
-                 (`poimen-server integration install claude|copilot`)?",
+                 (`poimen integration install claude|copilot`)?",
                 limit.as_secs()
             ),
         }

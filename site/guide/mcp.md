@@ -8,7 +8,7 @@ It is part of the [console binary](/guide/console) and talks to the same `poimen
 
 ### Registered with the hooks
 
-When poimen installs an agent's hooks (the offer on the first start, **Settings > Backend > Server**, or `poimen-server integration install claude|copilot`), it also registers the MCP server:
+When poimen installs an agent's hooks (the offer on the first start, **Settings > Backend > Server**, or `poimen integration install claude|copilot`), it also registers the MCP server:
 
 - **Claude Code**: `mcpServers.poimen` in `~/.claude.json` (user scope).
 - **Copilot CLI**: `mcpServers.poimen` in `~/.copilot/mcp-config.json`, with all tools allowed.

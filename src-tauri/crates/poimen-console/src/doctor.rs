@@ -107,7 +107,7 @@ pub struct StateProbe {
     pub damaged: usize,
 }
 
-/// A state of the hooks or the MCP entry of `poimen-server integration status`.
+/// A state of the hooks or the MCP entry of `poimen integration status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hook {
     Installed,

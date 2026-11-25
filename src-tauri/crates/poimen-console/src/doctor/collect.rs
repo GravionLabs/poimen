@@ -41,6 +41,8 @@ pub struct Env<'a> {
     pub state_file: PathBuf,
     /// The directory of the console binary: `poimen-server` ships next to it.
     pub bin_dir: Option<PathBuf>,
+    /// This console binary, which runs `integration status` (#1173).
+    pub console: Option<PathBuf>,
     /// The login-shell `PATH`.
     pub path: String,
     pub version: String,
@@ -77,7 +79,7 @@ pub fn collect(env: &Env<'_>, runner: &dyn Runner) -> Inputs {
             .map(|kind| AgentProbe {
                 kind: (*kind).to_string(),
                 cli: gui_path::resolve_program(kind, &env.path).is_some(),
-                integration: integration(server_bin.as_deref(), kind, runner),
+                integration: integration(env.console.as_deref(), kind, runner),
             })
             .collect(),
         tools: ["gh", "git"]
@@ -110,12 +112,12 @@ fn host(server_bin: Option<&Path>, runner: &dyn Runner) -> HostProbe {
 }
 
 fn integration(
-    server_bin: Option<&Path>,
+    console: Option<&Path>,
     kind: &str,
     runner: &dyn Runner,
 ) -> Result<Integration, String> {
-    let server = server_bin.ok_or("poimen-server was not found")?;
-    let out = runner.run(server, &["integration", "status", kind])?;
+    let console = console.ok_or("the poimen binary was not found")?;
+    let out = runner.run(console, &["integration", "status", kind])?;
     Ok(parse_integration(&out))
 }
 

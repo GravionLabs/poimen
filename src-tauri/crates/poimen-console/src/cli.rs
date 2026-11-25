@@ -1,6 +1,11 @@
 //! Arguments of `poimen`: none for the TUI, else a command.
 
-use poimen_protocol::{AttachMode, Placement};
+use poimen_protocol::{AttachMode, Placement, SplitDirection};
+
+mod integration;
+mod layout;
+pub use integration::Integration;
+pub use layout::TrustFlag;
 
 /// A raw string: a `\` line continuation would drop the indentation of the next line.
 pub const USAGE: &str = r#"usage: poimen [<command>]
@@ -12,6 +17,19 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
   ls [--json]                         spaces, terminals and agent status
   status <terminal> [--json]          one terminal: state and agent status
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id
+  space new <dir> [--name <n>] [--trust|--without-commands]
+                                      a new space (layout of the project); prints its id. A project
+                                      file with untrusted commands: exit 1 listing them and the
+                                      hash, unless --trust runs them or --without-commands skips
+  space rename <space> <name>         renames a space (id or name)
+  space close <space> [--yes]         closes a space and its terminals; --yes when an agent runs
+  tab new <space> [--name <n>] [-- cmd..]
+                                      a new tab (id or name of the space); prints the tab id
+  tab rename <tab> <name>             renames a tab (id or name)
+  tab close <tab> [--yes]             closes a tab and its terminals; --yes when an agent runs
+  tab split <terminal> right|down [--ratio <r>] [-- cmd..]
+                                      splits the terminal's pane; prints the new terminal id
+  tab focus <tab> [<terminal>]        focuses a tab (and a terminal in it) for every client
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked
   session run --harness <id> --prompt <text> [--model <m>] [--cwd <dir>] [--space <id>]
@@ -28,8 +46,11 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
                                       terminal instead. Exit: 0 done, 2 usage, 3 start failed,
                                       4 error or gone, 5 connection lost, 6 permission refused,
                                       130 SIGINT, 143 SIGTERM
+  machines [--json]                   the machines of config.json and whether their server answers
   mcp                                 a stdio MCP server for agents: read tools, start_agent,
                                       prompt_agent, wait_agent, report_done
+  integration install|uninstall|status claude|copilot|gemini [--settings <path>]
+                                      the agent's status hooks and its `poimen mcp` entry
   doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;
                                       --bundle writes a local diagnostics file (never uploaded)
   -V, --version                       prints the version
@@ -38,6 +59,8 @@ pub const USAGE: &str = r#"usage: poimen [<command>]
                                       input and sets the size, --takeover replaces a controller.
                                       Detach with Ctrl+B d (Ctrl+B Ctrl+B sends Ctrl+B)
 
+--machine <name> before any command (or alone, for the TUI) uses the poimen-server of a machine
+of config.json (`machines`) over ssh instead of the local one. mcp and doctor stay local.
 Inside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.
 Guide: https://gravionlabs.github.io/poimen/guide/console"#;
 
@@ -65,7 +88,7 @@ pub struct SessionRunArgs {
 }
 
 /// The commands that talk to the server in single requests (everything but `attach`).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     Ls {
         json: bool,
@@ -88,9 +111,46 @@ pub enum Request {
         terminal: String,
         text: String,
     },
+    /// `space new <dir> [--name n] [--trust|--without-commands]` (#1172).
+    SpaceNew {
+        dir: String,
+        name: Option<String>,
+        trust: Option<TrustFlag>,
+    },
+    SpaceRename {
+        space: String,
+        name: String,
+    },
+    SpaceClose {
+        space: String,
+        yes: bool,
+    },
+    TabNew {
+        space: String,
+        name: Option<String>,
+        command: Option<Vec<String>>,
+    },
+    TabRename {
+        tab: String,
+        name: String,
+    },
+    TabClose {
+        tab: String,
+        yes: bool,
+    },
+    TabSplit {
+        terminal: String,
+        direction: SplitDirection,
+        ratio: Option<f64>,
+        command: Option<Vec<String>>,
+    },
+    TabFocus {
+        tab: String,
+        terminal: Option<String>,
+    },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     Attach(AttachArgs),
     Request(Request),
@@ -98,15 +158,63 @@ pub enum Command {
     Mcp,
     /// `poimen session run` (#1257, ADR 0016).
     SessionRun(SessionRunArgs),
+    /// `poimen machines [--json]` (#1176).
+    Machines {
+        json: bool,
+    },
     /// `poimen doctor` (#972).
     Doctor {
         json: bool,
         bundle: Option<String>,
     },
+    /// `poimen integration install|uninstall|status <kind> [--settings <path>]` (#1173).
+    Integration(Integration),
     /// No arguments: the TUI.
     Tui,
     Help,
     Version,
+}
+
+/// The arguments with the global `--machine <name>` (#1176) taken off the front.
+#[derive(Debug, PartialEq)]
+pub struct Invocation {
+    pub machine: Option<String>,
+    pub command: Command,
+}
+
+/// [`parse`] after a leading `--machine <name>` or `--machine=<name>`. `mcp` and `doctor` are
+/// local only: with a machine they are a usage error.
+pub fn parse_invocation(args: &[String]) -> Result<Invocation, String> {
+    let (machine, rest) = match args.split_first() {
+        Some((first, rest)) if first == "--machine" => match rest.split_first() {
+            Some((name, rest)) if !name.is_empty() && !name.starts_with('-') => {
+                (Some(name.clone()), rest)
+            }
+            _ => return Err("--machine needs a machine name".into()),
+        },
+        Some((first, rest)) if first.starts_with("--machine=") => {
+            let name = &first["--machine=".len()..];
+            if name.is_empty() {
+                return Err("--machine needs a machine name".into());
+            }
+            (Some(name.to_owned()), rest)
+        }
+        _ => (None, args),
+    };
+    let command = parse(rest)?;
+    if machine.is_some() {
+        match command {
+            Command::Mcp => return Err("`poimen mcp` always uses the local server".into()),
+            Command::Doctor { .. } => {
+                return Err("`poimen doctor` checks this machine only".into());
+            }
+            Command::Machines { .. } => {
+                return Err("`poimen machines` lists the machines; it takes no --machine".into());
+            }
+            _ => {}
+        }
+    }
+    Ok(Invocation { machine, command })
 }
 
 /// Parses the arguments after the program name. `Err` is a usage message (exit code 2).
@@ -122,8 +230,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
         "session" => parse_session(rest),
+        "space" => layout::parse_space(rest),
+        "tab" => layout::parse_tab(rest),
         "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
         "doctor" => parse_doctor(rest),
+        "machines" => {
+            let (json, pos) = switch(rest, "--json")?;
+            no_more(&pos, 0)?;
+            Ok(Command::Machines { json })
+        }
+        "integration" => integration::parse(rest),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
             no_more(&pos, 0)?;

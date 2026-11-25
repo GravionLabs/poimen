@@ -4,7 +4,7 @@
 
 None. The installers bundle `poimen-server`, the terminal server poimen uses by default. poimen starts it detached when nothing answers on its socket, and never stops it, so your terminals and agents keep running when you close the app.
 
-Optional: Claude Code, GitHub Copilot CLI or Gemini CLI. On the first start poimen offers to install their hooks (`poimen-server integration install`), which report whether an agent works, waits or is done, and an MCP entry so agents can look around in poimen; "Not now" is remembered. The GitHub views need the GitHub CLI (`gh auth login`).
+Optional: Claude Code, GitHub Copilot CLI or Gemini CLI. On the first start poimen offers to install their hooks (`poimen integration install`), which report whether an agent works, waits or is done, and an MCP entry so agents can look around in poimen; "Not now" is remembered. The GitHub views need the GitHub CLI (`gh auth login`).
 
 ### Coming from herdr
 
@@ -56,7 +56,7 @@ How it runs on Windows:
 
 - The terminal server listens on a named pipe that only your user can open. Its state (`server.json`, the pipe's marker `server.sock`, `server.lock`) is in `%LOCALAPPDATA%\poimen-server\`. poimen starts a copy of the server from `%LOCALAPPDATA%\poimen-server\bin\<version>\`, so an update can replace the installed one while your terminals keep running.
 - A new terminal starts PowerShell 7 (`pwsh.exe`) when it is on the `PATH`, else Windows PowerShell, else `%COMSPEC%` (`cmd.exe`).
-- The agent hooks (`poimen-server integration install claude|copilot`, or the offer on the first start) run through PowerShell: Claude Code entries carry `"shell": "powershell"`, the Copilot file a `powershell` command. Claude Code versions without that field run hooks in Git Bash, where the hook fails harmlessly and no status is reported.
+- The agent hooks (`poimen integration install claude|copilot`, or the offer on the first start) run through PowerShell: Claude Code entries carry `"shell": "powershell"`, the Copilot file a `powershell` command. Claude Code versions without that field run hooks in Git Bash, where the hook fails harmlessly and no status is reported.
 - If poimen says access to `poimen-server` was denied, the server was started elevated (for example by a poimen run as administrator). Quit that server in the Task Manager and start poimen normally.
 
 Known limitations (Windows support is new; a hands-on check of a released build follows in [#417](https://github.com/GravionLabs/poimen/issues/417)):

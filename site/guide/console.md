@@ -156,15 +156,17 @@ Terminal and space ids are short strings such as `t42` and `s9`. `poimen ls` sho
 poimen ls [--json]
 ```
 
-All spaces with their terminals: id, name, directory; per terminal id, name, state (`running`, `exited`, `exited(<code>)`) and agent (`<kind>:<status>` or `-`).
+All spaces with their tabs and terminals: id, name, directory; per tab `tab`, its id and name, and under it its terminals (a terminal in no tab, such as an ended one, stands right under the space); per terminal id, name, state (`running`, `exited`, `exited(<code>)`) and agent (`<kind>:<status>` or `-`).
 
 ```text
 s9  poimen  /home/me/src/poimen
-  t36  claude  running  claude-code:working
-  t42  zsh  running  -
+  tab tb3  claude
+    t36  claude  running  claude-code:working
+  tab tb4  zsh
+    t42  zsh  running  -
 ```
 
-`--json` prints one array of spaces, each with its `terminals`, in the server's shapes ([protocol](https://github.com/GravionLabs/poimen/blob/main/docs/protocol.md)).
+`--json` prints one array of spaces, each with its `terminals` and `tabs` (the split trees), in the server's shapes ([protocol](https://github.com/GravionLabs/poimen/blob/main/docs/protocol.md)).
 
 ### `poimen status`
 
@@ -186,6 +188,28 @@ Creates a terminal in a space and prints its id. `<space>` is an id or an exact 
 poimen new poimen --name build -- cargo build --release
 id=$(poimen new s9) && poimen send "$id" --enter "git status"
 ```
+
+### `poimen space`
+
+```sh
+poimen space new <dir> [--name <name>] [--trust | --without-commands]
+poimen space rename <space> <name>
+poimen space close <space> [--yes]
+```
+
+`new` makes a space for a directory, with the layout the app would build, and prints its id (the name defaults to the directory's name). When the project file has commands you have not trusted, nothing is made: the command exits with 1 and prints the commands and their hash. Run it again with `--trust` to run them (stored for that content, as in the app) or `--without-commands` to build the panes without them. `close` ends the space's terminals; it asks nothing but is refused while one of them runs an agent, unless you pass `--yes`. `<space>` is an id or an exact name.
+
+### `poimen tab`
+
+```sh
+poimen tab new <space> [--name <name>] [-- <command> [args..]]
+poimen tab rename <tab> <name>
+poimen tab close <tab> [--yes]
+poimen tab split <terminal> right|down [--ratio <r>] [-- <command> [args..]]
+poimen tab focus <tab> [<terminal>]
+```
+
+`new` opens a tab in a space and prints the tab id; without a command it runs your shell. `split` splits the pane of a terminal (the new one is right of or below it; `--ratio` is the share the old pane keeps, above 0 and below 1) and prints the new terminal's id. `close` ends the tab's terminals, refused while one runs an agent unless `--yes`. `focus` makes the tab (and the terminal in it) the focused one for every client. `<tab>` is an id or an exact name; when several tabs share the name, use the id.
 
 ### `poimen send`
 
@@ -216,6 +240,17 @@ Shows one terminal in your terminal, without the TUI around it.
 - `--takeover` (only with `--control`) takes the control from that client.
 
 `Ctrl+B d` detaches (the configured `console.prefix` when it is a Ctrl+letter key); `Ctrl+B Ctrl+B` sends one `Ctrl+B`. When it ends it says why: detached, the terminal exited (with its code), the server detached you (for example another client took over), or the connection ended.
+
+### Remote machines: `--machine` and `poimen machines`
+
+```sh
+poimen --machine <name> [<command>]
+poimen machines [--json]
+```
+
+`--machine <name>` before any command (or alone, for the TUI) talks to the `poimen-server` of a machine from `machines` in `config.json` instead of the local one. It connects the way the app does, with `ssh -T -o BatchMode=yes <target> poimen-server stdio`, so the key must work without a prompt and the machine needs `poimen-server` (see [Remote machines](/guide/remote-machines)). The local server is not started. `poimen mcp` and `poimen doctor` stay local and refuse `--machine`.
+
+`poimen machines` lists the configured machines and whether their server answers (`connected`, `offline` with ssh's error, or `incompatible` with both protocol versions). When a command cannot run, it says why in the app's words (a missing server, an older or newer server, a key or host key problem) and prints the command to try; poimen runs nothing itself.
 
 ### `poimen doctor`
 
@@ -257,14 +292,15 @@ For agents that lead other agents, the [MCP server](/guide/mcp) is the better to
 
 ## Agent hooks from a shell
 
-Hooks are installed by the server binary, not by `poimen`:
+`poimen integration` installs the hooks (they keep calling `poimen-server hook ...`):
 
 ```sh
-poimen-server integration install claude    # or copilot, gemini
-poimen-server integration status claude
+poimen integration install claude    # or copilot, gemini
+poimen integration status claude
+poimen integration uninstall claude
 ```
 
-The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot CLI. `poimen doctor` shows what is installed.
+`poimen-server integration` still works for one release and prints a deprecation note on stderr. `--settings <path>` names the agent's file instead of its default. The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot CLI. `poimen doctor` shows what is installed.
 
 ## What the console does not do (yet)
 
@@ -272,5 +308,4 @@ The same step registers the [MCP server](/guide/mcp) for Claude Code and Copilot
 - The sidebar has no git tokens (`branch`, `dirty`, `sync`, `pr`) yet.
 - No settings dialog: the TUI reads `config.json` and nothing else, and only at start.
 - No machine switching: the console talks to the server of the machine it runs on.
-- Hook installation is in `poimen-server integration`, not in `poimen`.
 - The CLI has no commands for spaces and tabs (create, rename, close, split); use the TUI or the app, or the `start_agent` tool of the [MCP server](/guide/mcp).

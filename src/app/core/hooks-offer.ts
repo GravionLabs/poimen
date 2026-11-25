@@ -61,7 +61,7 @@ export function installAction(status: HookStatus): string | null {
 }
 
 /**
- * Offers to install the agent hooks and the `poimen mcp` server (`poimen-server integration
+ * Offers to install the agent hooks and the `poimen mcp` server (`poimen integration
  * install`, one consent for both) once the poimen backend runs and an agent lacks them. "Not now" is remembered in the UI state; nothing
  * is installed without the click.
  */
