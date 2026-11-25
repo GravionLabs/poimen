@@ -2251,7 +2251,7 @@ fn close_entry(shared: &Shared, entry: TerminalEntry) {
     });
 }
 
-/// The running terminal `terminal_id`: `not_found`, or `exited` (an exited terminal has no leaf).
+/// The running terminal `terminal_id`: `not_found`, or `exited` (an exited terminal cannot move or split).
 fn running_terminal<'a>(
     inner: &'a Inner,
     terminal_id: &str,

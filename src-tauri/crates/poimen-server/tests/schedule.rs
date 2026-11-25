@@ -13,7 +13,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poimen_client::Client;
-use poimen_client::protocol::{ScheduleInfo, ScheduleList, ScheduleOutcome, SpaceList};
+use poimen_client::protocol::{
+    AttachMode, ScheduleInfo, ScheduleList, ScheduleOutcome, SpaceList, Terminal, TerminalStatus,
+    decode_bytes,
+};
 use poimen_server::{Config, PtyHost, Server, StartError};
 use serde_json::{Value, json};
 
@@ -47,6 +50,7 @@ impl Dirs {
             root.join("job.sh"),
             "d=$(dirname \"$0\")\necho \"run in $(pwd)\" >> \"$d/runs.log\"\n\
              while [ -e \"$d/hold\" ]; do sleep 0.05; done\n\
+             echo job done\n\
              exit $(cat \"$d/code\" 2>/dev/null || echo 0)\n",
         )
         .unwrap();
@@ -186,6 +190,27 @@ impl Env<'_> {
 
     fn spaces(&self) -> SpaceList {
         serde_json::from_value(self.client.request("space.list", json!({})).unwrap()).unwrap()
+    }
+
+    fn terminal(&self, id: &str) -> Option<Terminal> {
+        let all = self.client.list_terminals(None).unwrap();
+        all.into_iter().find(|t| t.id == id)
+    }
+
+    fn has_tab(&self, terminal_id: &str) -> bool {
+        let tabs = self.spaces().tabs;
+        tabs.iter()
+            .any(|t| t.root.terminal_ids().contains(&terminal_id))
+    }
+
+    /// The screen an observer of the terminal gets.
+    fn screen(&self, terminal_id: &str) -> String {
+        let attachment = self
+            .client
+            .attach(terminal_id, AttachMode::Observe, false)
+            .unwrap();
+        let bytes = decode_bytes(&attachment.info.snapshot).unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 
     fn last_reason(&self) -> (ScheduleOutcome, Option<String>) {
@@ -378,6 +403,49 @@ fn the_exit_code_is_the_result_and_closing_the_terminal_ends_the_run() {
     assert_eq!(info.runs[1].exit_code, None);
     assert_eq!(info.runs[1].outcome, ScheduleOutcome::Failed);
     std::fs::remove_file(d.root.join("hold")).unwrap();
+}
+
+#[test]
+fn the_tab_of_an_ended_run_stays_until_it_is_closed() {
+    for code in [0, 3] {
+        let d = Dirs::new();
+        std::fs::write(d.root.join("code"), code.to_string()).unwrap();
+        d.config(json!([d.schedule("0 * * * *")]), json!({}));
+        let env = d.start();
+        env.tick(BEFORE);
+        env.tick(NINE);
+        let first = env.finished(1).runs.remove(0);
+        assert_eq!(first.exit_code, Some(code));
+
+        // The next run is not blocked, and neither it nor the sweep removes the first tab.
+        env.tick(NINE + HOUR);
+        let second = env.finished(2).runs.remove(1);
+        for id in [&first.terminal_id, &second.terminal_id] {
+            assert!(env.has_tab(id), "no tab of {id}: {:?}", env.spaces().tabs);
+            let terminal = env.terminal(id).expect("the ended terminal is listed");
+            assert_eq!(terminal.status, TerminalStatus::Exited);
+            assert_eq!(terminal.exit_code, Some(code));
+        }
+        let output = env.screen(&first.terminal_id);
+        assert!(output.contains("job done"), "{output:?}");
+
+        env.client
+            .request("terminal.close", json!({"terminal_id": first.terminal_id}))
+            .unwrap();
+        assert!(!env.has_tab(&first.terminal_id));
+        assert!(env.terminal(&first.terminal_id).is_none());
+        assert!(env.has_tab(&second.terminal_id));
+
+        // As every exited terminal, it is not kept for the next server.
+        env.client
+            .request("server.shutdown", json!({"keep_terminals": true}))
+            .unwrap();
+        env.stopped.recv_timeout(LONG).unwrap();
+        drop(env);
+        let env = d.start();
+        assert!(!env.has_tab(&second.terminal_id));
+        assert!(env.terminal(&second.terminal_id).is_none());
+    }
 }
 
 #[test]

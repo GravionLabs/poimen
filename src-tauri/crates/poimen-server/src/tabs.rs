@@ -140,7 +140,7 @@ impl Layout {
         Ok(events)
     }
 
-    /// Removes the leaf of the terminal (closed or exited): its sibling takes the parent's place,
+    /// Removes the leaf of the terminal (closed, or exited unless it is a scheduled run's): its sibling takes the parent's place,
     /// and the last leaf of a tab closes the tab. Nothing when the terminal has no leaf.
     pub(crate) fn remove_terminal(&mut self, terminal_id: &str) -> Vec<Event> {
         let Some(index) = self
