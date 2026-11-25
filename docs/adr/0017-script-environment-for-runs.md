@@ -1,6 +1,6 @@
 # ADR 0017: Script environment for runs
 
-- Status: Proposed
+- Status: Proposed; "No triggers, no schedules, no autostart" to be superseded in part, for schedules, by the Proposed [ADR 0020](0020-triggered-runs-of-agent-scripts.md)
 - Date: 2026-11-23
 - Issues: #748, Feature #742
 - Builds on: [ADR 0007](0007-plugin-system-with-sandboxed-worker-and-view-contexts.md), [ADR 0008](0008-remote-machines-over-ssh.md), [ADR 0012](0012-mcp-server-for-agent-sessions.md), [ADR 0016](0016-poimen-hosts-the-sessions-of-scripted-runs.md)

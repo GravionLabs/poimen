@@ -95,3 +95,7 @@ New pane dialog (#1185): each type is a `label.type` row (icon, name, muted seco
 ## Ended terminal history (#1233)
 
 An ended terminal (host gone, #1195) arrives as a snapshot and a `closed` record with `code: "exited"`; `TerminalView` sets `ended`, keeps the xterm grid and its scrollback, and takes the focus so Ctrl+Shift+C / the Edit menu `copy` event reach it. Only then does a right click open the one-entry Copy menu (`copy-menu.ts`, disabled without a selection). A running terminal keeps the webview's own menu. Spec: `terminal-view-ended.spec.ts` (a separate file because `terminal-view.spec.ts` is at its line baseline).
+
+## Context menus (#851, moved from AGENTS.md)
+
+- Context menus (#851): `app-context-menu` (`src/app/ui/context-menu/`). The component owns the backdrop, the focus (taken on open, returned to the opener), Arrow/Home/End/first-letter/Enter/Escape, group separators and headings, the clamping inside the window (`clampMenu`, `alignRight`) and disabled entries (`disabled: "reason"` is the tooltip, dimmed, focusable, picks nothing).
