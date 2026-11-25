@@ -1,5 +1,7 @@
 import { DestroyRef, Injectable, computed, inject, signal } from "@angular/core";
-import { scheduledRuns, type ScheduleList } from "./schedules-model";
+import { NotificationCenter } from "./notification-center";
+import { scheduledRuns, type ScheduleAlert, type ScheduleList } from "./schedules-model";
+import type { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 
 /** How often the list is read again while a view shows it. */
@@ -13,6 +15,8 @@ export const SCHEDULES_POLL_MS = 5000;
 @Injectable({ providedIn: "root" })
 export class Schedules {
   private readonly bridge = inject(TauriBridge);
+  private readonly center = inject(NotificationCenter);
+  private reading: Promise<void> | undefined;
   private readonly _list = signal<ScheduleList>({ paused: false, schedules: [] });
   private readonly _error = signal<string | null>(null);
   private watchers = 0;
@@ -34,7 +38,38 @@ export class Schedules {
     void this.refresh();
   }
 
+  /** Reads the alerts at the start of every server session: also what happened while closed. */
+  followSessions(store: Pick<SpacesStore, "onSessionStart">, owner: DestroyRef): void {
+    owner.onDestroy(store.onSessionStart(() => void this.readAlerts()));
+  }
+
+  /**
+   * Adds the alerts of failed and skipped runs (#1308) to the notification center and
+   * acknowledges them.
+   */
+  readAlerts(): Promise<void> {
+    this.reading ??= this.takeAlerts().finally(() => (this.reading = undefined));
+    return this.reading;
+  }
+
+  private async takeAlerts(): Promise<void> {
+    try {
+      const result = await this.bridge.invoke<{ alerts?: ScheduleAlert[] } | undefined>(
+        "schedules_alerts",
+      );
+      const alerts = result?.alerts;
+      if (!Array.isArray(alerts) || alerts.length === 0) return;
+      this.center.recordSchedules(alerts);
+      const upTo = Math.max(...alerts.map((a) => a.seq));
+      await this.bridge.invoke("schedules_ack_alerts", { upTo });
+    } catch {
+      // The next read tries again; the center adds no alert twice. A server that cannot be
+      // reached shows as disconnected, and `refresh` reports its own error.
+    }
+  }
+
   async refresh(): Promise<void> {
+    void this.readAlerts();
     try {
       const list = await this.bridge.invoke<ScheduleList | undefined>("schedules_list");
       if (!Array.isArray(list?.schedules)) return;

@@ -13,7 +13,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poimen_client::Client;
-use poimen_client::protocol::{ScheduleInfo, ScheduleList, ScheduleOutcome, SpaceList};
+use poimen_client::protocol::{
+    ScheduleAlert, ScheduleAlerts, ScheduleInfo, ScheduleList, ScheduleOutcome, SpaceList,
+};
 use poimen_server::{Config, PtyHost, Server, StartError};
 use serde_json::{Value, json};
 
@@ -182,6 +184,19 @@ impl Env<'_> {
     /// Waits for the end of the run number `n` (from 1).
     fn finished(&self, n: usize) -> ScheduleInfo {
         self.until(|s| s.runs.len() == n && s.runs[n - 1].outcome != ScheduleOutcome::Running)
+    }
+
+    fn alerts(&self) -> Vec<ScheduleAlert> {
+        let result = self.client.request("schedule.alerts", json!({})).unwrap();
+        serde_json::from_value::<ScheduleAlerts>(result)
+            .unwrap()
+            .alerts
+    }
+
+    fn ack(&self, up_to: u64) {
+        self.client
+            .request("schedule.ack_alerts", json!({"up_to": up_to}))
+            .unwrap();
     }
 
     fn spaces(&self) -> SpaceList {
@@ -485,4 +500,121 @@ fn runs_of_one_repository_that_are_due_at_once_share_one_new_space() {
     }
     assert_eq!(d.runs_log().len(), 4);
     assert_eq!(env.spaces().spaces.len(), 1);
+}
+
+/// An alert as `(outcome, reason, count, at_ms)`.
+fn brief(alerts: &[ScheduleAlert]) -> Vec<(ScheduleOutcome, &str, u32, u64)> {
+    alerts
+        .iter()
+        .map(|a| {
+            let reason = a.reason.as_deref().unwrap_or_default();
+            (a.outcome, reason, a.count, a.at_ms)
+        })
+        .collect()
+}
+
+#[test]
+fn failed_runs_and_collapsed_skips_give_alerts_that_survive_a_restart_until_acknowledged() {
+    use ScheduleOutcome::{Failed, Skipped};
+    const BUSY: &str = "the last run is still running";
+    let d = Dirs::new();
+    std::fs::write(d.root.join("code"), "3").unwrap();
+    d.config(json!([d.schedule("0 * * * *")]), json!({}));
+    let env = d.start();
+    env.tick(BEFORE);
+    env.tick(NINE);
+    env.finished(1);
+    let first = env.alerts();
+    assert_eq!(brief(&first), [(Failed, "exit code 3", 1, NINE)]);
+    assert_eq!(first[0].dir, d.repo());
+    assert_eq!(first[0].mode, "job");
+    assert_eq!(first[0].key, env.only().key);
+
+    // A running run: two skips make one alert.
+    std::fs::write(d.root.join("hold"), "").unwrap();
+    env.tick(NINE + HOUR);
+    env.until(|s| s.runs.len() == 2);
+    env.tick(NINE + 2 * HOUR);
+    env.tick(NINE + 3 * HOUR);
+    let alerts = env.alerts();
+    assert_eq!(
+        brief(&alerts),
+        [
+            (Failed, "exit code 3", 1, NINE),
+            (Skipped, BUSY, 2, NINE + 3 * HOUR),
+        ]
+    );
+    drop(env);
+
+    d.at(NINE + 3 * HOUR);
+    let env = d.start();
+    // Stopping the server ended the terminal of the second run: its failure is the third alert.
+    env.tick(NINE + 3 * HOUR);
+    env.finished(2);
+    let kept = env.alerts();
+    assert_eq!(kept[..2], alerts[..]);
+    assert_eq!(kept.len(), 3);
+    assert_eq!(kept[2].outcome, Failed);
+
+    // Only what was read is removed, also after another restart.
+    env.ack(alerts[1].seq);
+    assert_eq!(env.alerts(), kept[2..]);
+    drop(env);
+    let env = d.start();
+    assert_eq!(env.alerts(), kept[2..]);
+    env.ack(kept[2].seq);
+    assert!(env.alerts().is_empty());
+    drop(env);
+    assert!(d.start().alerts().is_empty());
+    std::fs::remove_file(d.root.join("hold")).unwrap();
+}
+
+#[test]
+fn a_run_that_succeeds_gives_no_alert_and_every_kind_of_skip_gives_one() {
+    use ScheduleOutcome::Skipped;
+    let d = Dirs::new();
+    d.config(
+        json!([d.schedule("0 * * * *")]),
+        json!({"triggers": {"maxRunsPerDay": 1}}),
+    );
+    let env = d.start();
+    env.tick(BEFORE);
+    env.tick(NINE);
+    env.finished(1);
+    assert!(env.alerts().is_empty());
+
+    env.tick(NINE + HOUR);
+    d.config(
+        json!([d.schedule("0 * * * *")]),
+        json!({"triggers": {"paused": true}}),
+    );
+    env.tick(NINE + 2 * HOUR);
+    // Missed by more than the grace time, while paused and not.
+    d.config(json!([d.schedule("0 9 * * *")]), json!({}));
+    env.tick(NINE + 2 * HOUR);
+    env.tick(NINE + DAY + 13 * HOUR);
+    let mut precheck = d.schedule("0 * * * *");
+    precheck["precheck"] = json!(["false"]);
+    d.config(json!([precheck]), json!({}));
+    env.tick(NINE + 2 * DAY);
+    env.tick(NINE + 2 * DAY + HOUR);
+    env.until(|s| {
+        s.last
+            .as_ref()
+            .is_some_and(|l| l.at_ms == NINE + 2 * DAY + HOUR)
+    });
+    let alerts = env.alerts();
+    let got: Vec<(ScheduleOutcome, &str, u32)> = brief(&alerts)
+        .into_iter()
+        .map(|(o, r, c, _)| (o, r.split(" (").next().unwrap(), c))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (Skipped, "the limit of runs per day is reached", 1),
+            (Skipped, "paused", 1),
+            (Skipped, "missed by more than 12 hours", 1),
+            (Skipped, "precheck failed", 1),
+        ]
+    );
 }

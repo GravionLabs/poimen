@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NOTIFICATIONS, NotificationCenter } from "./notification-center";
+import type { ScheduleAlert } from "./schedules-model";
 
 const label = (id: string) => `tab ${id}`;
 const center = () => new NotificationCenter();
@@ -106,5 +107,100 @@ describe("NotificationCenter", () => {
       c.observeSilent(silent(["p1", undefined], ["p2", 7000]), label, 2);
       expect(c.entries()).toEqual([]);
     });
+  });
+});
+
+describe("NotificationCenter.recordSchedules", () => {
+  const alert = (over: Partial<ScheduleAlert> = {}): ScheduleAlert => ({
+    id: 1,
+    seq: 1,
+    key: "k",
+    dir: "/repo",
+    mode: "loop",
+    outcome: "skipped",
+    reason: "paused",
+    at_ms: 1000,
+    count: 1,
+    ...over,
+  });
+  const failed = (seq: number) =>
+    alert({ id: seq, seq, outcome: "failed", reason: "exit code 3", at_ms: seq * 1000 });
+
+  it("names the mode, directory and reason of a failed run, one entry each", () => {
+    const c = center();
+    c.recordSchedules([failed(2), failed(3)]);
+    expect(c.entries().map((e) => e.time)).toEqual([3000, 2000]);
+    expect(c.entries()[0]).toMatchObject({
+      label: "loop · /repo",
+      message: "Scheduled run loop in /repo failed: exit code 3",
+      status: "error",
+      paneId: "",
+      read: false,
+    });
+    expect(c.unread()).toBe(2);
+  });
+
+  it("shows the count of a collapsed skip", () => {
+    const c = center();
+    c.recordSchedules([alert({ count: 4, at_ms: 9000 })]);
+    expect(c.entries()).toHaveLength(1);
+    expect(c.entries()[0]).toMatchObject({
+      message: "Scheduled run loop in /repo skipped 4 times: paused",
+      status: "silent",
+      time: 9000,
+    });
+  });
+
+  it("leaves the count out for a single skip", () => {
+    const c = center();
+    c.recordSchedules([alert()]);
+    expect(c.entries()[0].message).toBe("Scheduled run loop in /repo skipped: paused");
+  });
+
+  it("keeps one entry per schedule and reason and adds up the acknowledged alerts", () => {
+    const c = center();
+    c.recordSchedules([alert({ count: 2 })]);
+    c.markAllRead();
+    c.recordSchedules([alert({ id: 5, seq: 5, at_ms: 5000 })]);
+    expect(c.entries()).toHaveLength(1);
+    expect(c.entries()[0]).toMatchObject({
+      message: "Scheduled run loop in /repo skipped 3 times: paused",
+      time: 5000,
+      read: false,
+    });
+  });
+
+  it("does not count an alert twice that changed before it was acknowledged", () => {
+    const c = center();
+    c.recordSchedules([alert({ count: 2 })]);
+    c.recordSchedules([alert({ id: 4, seq: 4, count: 1 })]);
+    c.recordSchedules([alert({ id: 4, seq: 6, count: 3, at_ms: 6000 })]);
+    expect(c.entries().map((e) => e.message)).toEqual([
+      "Scheduled run loop in /repo skipped 5 times: paused",
+    ]);
+  });
+
+  it("adds an alert once when it is read again", () => {
+    const c = center();
+    c.recordSchedules([alert(), failed(2)]);
+    const before = c.entries();
+    c.recordSchedules([alert(), failed(2)]);
+    expect(c.entries()).toEqual(before);
+  });
+
+  it("keeps skips of another reason or schedule apart", () => {
+    const c = center();
+    c.recordSchedules([
+      alert(),
+      alert({ id: 2, seq: 2, reason: "the limit of runs per day is reached" }),
+      alert({ id: 3, seq: 3, key: "other" }),
+    ]);
+    expect(c.entries()).toHaveLength(3);
+  });
+
+  it("ignores an empty list", () => {
+    const c = center();
+    c.recordSchedules([]);
+    expect(c.entries()).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 //! `schedule.list` (#1000, ADR 0020): the schedules of the user config with their next run, last
-//! result and the runs the server started for them.
+//! result and the runs the server started for them. `schedule.alerts` and `schedule.ack_alerts`
+//! (#1308): the failed runs and skips no app has acknowledged.
 
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +73,42 @@ pub struct ScheduleList {
     pub schedules: Vec<ScheduleInfo>,
 }
 
+/// A failed run or collapsed skips that no app has acknowledged yet (#1308).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleAlert {
+    /// Stays the same while skips are added to the alert.
+    pub id: u64,
+    /// Grows with every change of any alert; `schedule.ack_alerts` removes up to one.
+    pub seq: u64,
+    /// The key of the schedule.
+    pub key: String,
+    pub dir: String,
+    pub mode: String,
+    /// `failed` or `skipped`.
+    pub outcome: ScheduleOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The last time, milliseconds since the epoch.
+    pub at_ms: u64,
+    /// How often it happened; always 1 for a failed run.
+    pub count: u32,
+}
+
+/// Result of `schedule.alerts`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleAlerts {
+    /// In the order of `seq`, newest last.
+    #[serde(default)]
+    pub alerts: Vec<ScheduleAlert>,
+}
+
+/// Params of `schedule.ack_alerts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleAckAlerts {
+    /// Every alert with a `seq` up to this one is removed.
+    pub up_to: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +142,24 @@ mod tests {
         assert!(!bare.paused);
         assert_eq!(bare.schedules[0].next_ms, None);
         assert!(bare.schedules[0].runs.is_empty());
+    }
+
+    #[test]
+    fn schedule_alerts_and_their_acknowledgement_parse() {
+        let text = r#"{"alerts":[{"id":1,"seq":4,"key":"k","dir":"/r","mode":"loop",
+            "outcome":"skipped","reason":"paused","at_ms":1000,"count":3},
+            {"id":5,"seq":5,"key":"k","dir":"/r","mode":"loop","outcome":"failed",
+            "at_ms":2000,"count":1}]}"#;
+        let alerts: ScheduleAlerts = serde_json::from_str(text).unwrap();
+        assert_eq!(alerts.alerts[0].count, 3);
+        assert_eq!(alerts.alerts[0].seq, 4);
+        assert_eq!(alerts.alerts[0].reason.as_deref(), Some("paused"));
+        assert_eq!(alerts.alerts[1].outcome, ScheduleOutcome::Failed);
+        assert_eq!(alerts.alerts[1].reason, None);
+        let back: ScheduleAlerts =
+            serde_json::from_str(&serde_json::to_string(&alerts).unwrap()).unwrap();
+        assert_eq!(back, alerts);
+        let ack: ScheduleAckAlerts = serde_json::from_str(r#"{"up_to":5}"#).unwrap();
+        assert_eq!(ack, ScheduleAckAlerts { up_to: 5 });
     }
 }
