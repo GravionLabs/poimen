@@ -240,7 +240,7 @@ Everything below stays; agent scripts are an addition.
 - A new repository with its own release pipeline; poimen and Nixe pin a tag and follow its releases. poimen's workspace gets its first git dependency. poimen ships one more binary (`agent-scripts`) next to the server, on every machine.
 - A script cannot ask and cannot be answered. Scripts that need a dialog stay task modes or interactive sessions.
 - A script's tools are a list of harness tool names, so a script written for `claude` does not run under `copilot` unchanged. Translating tool names is left out on purpose until two harnesses share a script in practice.
-- A harness without a way to limit tools cannot run scripts. Today that is no harness; a new one needs `toolsArgs` first.
+- A harness without a way to limit tools (`toolsArgs`) or to keep the repository's harness settings out (`isolateArgs`) cannot run scripts. claude has both; copilot runs scripts once #1092 has verified its isolation flag.
 - Trust grows a second store (`trustedScripts`) and a dialog per script; a repository with many scripts asks per file, once.
 - `changedFiles` depends on git and only reports.
 - Follow-ups: the repository and the runner (#1092), the Scripts view (#1093), the palette and button (#1094), triggers (#1095, #1096), remote runs (#1097), Nixe's ADR (GravionLabs/nixe#296).
