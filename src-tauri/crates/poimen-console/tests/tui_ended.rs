@@ -28,7 +28,7 @@ fn wait_until(what: &str, mut pred: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !pred() {
         assert!(Instant::now() < deadline, "timed out: {what}");
-        thread::sleep(Duration::from_millis(20));
+        thread::yield_now();
     }
 }
 
@@ -89,7 +89,7 @@ impl Running {
                 "`{needle}` did not show:\n{}",
                 self.text()
             );
-            thread::sleep(Duration::from_millis(20));
+            thread::yield_now();
         }
     }
 
