@@ -1,4 +1,5 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
+import { Schedules } from "./schedules";
 import { SpacesStore, type BackendStatus } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 
@@ -34,6 +35,7 @@ function errorText(error: unknown): string {
 export class ServerRestart {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(SpacesStore);
+  private readonly schedules = inject(Schedules);
 
   private readonly _later = signal(false);
   private readonly _action = signal<ServerAction | null>(null);
@@ -62,6 +64,14 @@ export class ServerRestart {
       ? this.store.snapshot().terminals.filter((t) => t.survives_restart).length
       : 0,
   );
+
+  /** What a quit means for the active schedules (#1309); `null` on a restart or without one. */
+  readonly schedulesNote = computed(() => {
+    const count = this._action() === "quit" ? this.schedules.active().length : 0;
+    if (count === 0) return null;
+    const stop = count === 1 ? "schedule stops" : "schedules stop";
+    return `${count} ${stop} until the server runs again; runs missed for more than 12 hours are not caught up.`;
+  });
 
   /** "Later": the old server stays and the notice is gone for this session. */
   later(): void {
