@@ -45,6 +45,18 @@ fn script(path: &Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// `spawn_detached`, retried while the script is "Text file busy" (ETXTBSY): a parallel test
+/// that forks while `script` still holds the file open for writing makes `exec` fail briefly.
+fn spawn_script(program: &Path) -> std::io::Result<()> {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        match spawn_detached(program) {
+            Err(e) if e.raw_os_error() == Some(26) && Instant::now() < end => thread::yield_now(),
+            result => return result,
+        }
+    }
+}
+
 fn wait_for(path: &Path) {
     let end = Instant::now() + Duration::from_secs(10);
     while !path.exists() {
@@ -93,7 +105,7 @@ fn an_absent_server_is_started_and_waited_for() {
     ensure_with(
         &client,
         || Some(fake.clone()),
-        spawn_detached,
+        spawn_script,
         Duration::from_secs(10),
     )
     .unwrap();
@@ -114,7 +126,7 @@ fn a_started_server_has_its_own_process_group() {
             out.display()
         ),
     );
-    spawn_detached(&fake).unwrap();
+    spawn_script(&fake).unwrap();
     wait_for(&out);
     let pgid: u32 = std::fs::read_to_string(&out)
         .unwrap()
