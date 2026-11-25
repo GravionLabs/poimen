@@ -1165,7 +1165,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
         "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
-        "schedule.list" => scheduler::list(shared),
+        m if m.starts_with("schedule.") => scheduler::dispatch(shared, request),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {

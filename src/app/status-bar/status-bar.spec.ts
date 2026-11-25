@@ -3,13 +3,14 @@ import { readFileSync } from "node:fs";
 import { Component, signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { HxStatusBar, HxStatusItem, HxStatusPopover } from "@gravionlabs/helix-desktop";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxTooltip } from "@gravionlabs/helix-ui";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { Icon } from "../ui/icon/icon";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
 import type { LimitsItem } from "../core/claude-limits";
+import { scheduleHint, type ScheduleHint, type ScheduleList } from "../core/schedules-model";
 import type { ConnectionState } from "../core/spaces-store";
 import { densityFlags, shortRuns, type DensityLevel } from "./status-density";
 import { CHANNEL_TITLE, connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
@@ -76,15 +77,17 @@ describe("mode button", () => {
     limits: LimitsItem | null = null,
     waiting = 0,
     connection: ConnectionState = { state: "connected" },
+    schedules: ScheduleHint | null = null,
   ) => {
     const emitted: boolean[] = [];
     const serverClicks: string[] = [];
     let deliverClicks = 0;
     let shown = 0;
     let opened = 0;
+    let scheduleClicks = 0;
     @Component({
       selector: "app-host",
-      imports: [HxStatusBar, HxStatusItem, HxStatusPopover, HxButton, Icon],
+      imports: [HxStatusBar, HxStatusItem, HxStatusPopover, HxButton, HxTooltip, Icon],
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
     })
     class Host {
@@ -128,6 +131,8 @@ describe("mode button", () => {
       deliver = () => deliver;
       limits = () => limits;
       showDeliver = { emit: () => deliverClicks++ };
+      schedules = () => schedules;
+      showSchedules = { emit: () => scheduleClicks++ };
     }
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(Host);
@@ -143,6 +148,7 @@ describe("mode button", () => {
       shown: () => shown,
       opened: () => opened,
       deliverClicks: () => deliverClicks,
+      scheduleClicks: () => scheduleClicks,
     };
   };
 
@@ -177,6 +183,74 @@ describe("mode button", () => {
     expect(install.root.querySelector(".update-details")?.textContent).toContain(
       "Install and restart",
     );
+  });
+
+  describe("schedule hint", () => {
+    // Local times, so the text does not depend on the time zone of the test run.
+    const now = new Date(2026, 0, 10, 8, 0).getTime();
+    const schedule = (next: Date | undefined, mode = "nightly", enabled = true) => ({
+      key: mode,
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      dir: "/repo",
+      mode,
+      enabled,
+      next_ms: next?.getTime(),
+    });
+    const bar = (list: ScheduleList) =>
+      render(
+        "control",
+        null,
+        true,
+        null,
+        null,
+        { kind: "idle" },
+        "stable",
+        false,
+        0,
+        null,
+        0,
+        { state: "connected" },
+        scheduleHint(list, now),
+      );
+    const button = (root: HTMLElement) =>
+      root.querySelector<HTMLButtonElement>("[data-testid=schedules] button");
+
+    it("shows the earliest next run as a text button that opens the schedules", () => {
+      const view = bar({
+        paused: false,
+        schedules: [
+          schedule(new Date(2026, 0, 10, 17, 30), "later"),
+          schedule(new Date(2026, 0, 10, 9, 5)),
+          schedule(new Date(2026, 0, 10, 8, 30), "off", false),
+        ],
+      });
+      const hint = button(view.root)!;
+      expect(hint.textContent?.trim()).toBe("Schedules · next 09:05");
+      expect(hint.getAttribute("variant")).toBe("text");
+      hint.click();
+      expect(view.scheduleClicks()).toBe(1);
+    });
+
+    it("names the day of a run that is not today, and the next schedule in the tooltip", () => {
+      const list = { paused: false, schedules: [schedule(new Date(2026, 0, 11, 9, 0))] };
+      expect(button(bar(list).root)?.textContent?.trim()).toBe("Schedules · next Jan 11 09:00");
+      expect(scheduleHint(list, now)?.tooltip).toBe("Next: nightly in /repo");
+    });
+
+    it("says that schedules are paused", () => {
+      const view = bar({ paused: true, schedules: [schedule(undefined)] });
+      expect(button(view.root)?.textContent?.trim()).toBe("Schedules paused");
+    });
+
+    it("is absent without a schedule that would run", () => {
+      for (const paused of [false, true]) {
+        const off = schedule(undefined, "off", false);
+        expect(button(bar({ paused, schedules: [off] }).root)).toBeNull();
+        expect(button(bar({ paused, schedules: [] }).root)).toBeNull();
+      }
+      expect(button(bar({ paused: false, schedules: [schedule(undefined)] }).root)).toBeNull();
+    });
   });
 
   it("shows the running deliver loops and opens the panel on a click", () => {

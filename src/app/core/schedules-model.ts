@@ -33,11 +33,74 @@ export interface ScheduleList {
   schedules: Schedule[];
 }
 
+/** A failed run, or the collapsed skips of one reason, of `schedule.alerts` (#1308). */
+export interface ScheduleAlert {
+  /** Stays the same while skips are added to the alert. */
+  id: number;
+  /** Grows with every change; the acknowledgement removes up to one. */
+  seq: number;
+  key: string;
+  dir: string;
+  mode: string;
+  outcome: ScheduleOutcome;
+  reason?: string;
+  /** The last time. */
+  at_ms: number;
+  count: number;
+}
+
+/** What a notification says about an alert; `count` is how often the skip happened. */
+export function alertMessage(alert: ScheduleAlert, count: number): string {
+  const what = alert.outcome === "failed" ? "failed" : "skipped";
+  const times = count > 1 ? ` ${count} times` : "";
+  const reason = alert.reason ? `: ${alert.reason}` : "";
+  return `Scheduled run ${alert.mode} in ${alert.dir} ${what}${times}${reason}`;
+}
+
 /** A run with the schedule it belongs to. */
 export interface ScheduledRun extends ScheduleRun {
   key: string;
   mode: string;
   dir: string;
+}
+
+/** The schedules that run next: enabled with a next run, none while all are paused. */
+export function activeSchedules(list: ScheduleList): (Schedule & { next_ms: number })[] {
+  if (list.paused) return [];
+  return list.schedules.filter(
+    (s): s is Schedule & { next_ms: number } => s.enabled && s.next_ms !== undefined,
+  );
+}
+
+/** What the status bar says about the schedules. */
+export interface ScheduleHint {
+  text: string;
+  tooltip: string;
+}
+
+/**
+ * The status bar hint (#1309): the next run of the active schedules, or that they are paused;
+ * `null` without a schedule that would run.
+ */
+export function scheduleHint(list: ScheduleList, now: number): ScheduleHint | null {
+  // While paused the server sends no `next_ms`, so any enabled schedule counts.
+  if (list.paused && list.schedules.some((s) => s.enabled)) {
+    return { text: "Schedules paused", tooltip: "No schedule runs while they are paused" };
+  }
+  const [next] = activeSchedules(list).sort((a, b) => a.next_ms - b.next_ms);
+  if (!next) return null;
+  return {
+    text: `Schedules · next ${shortTime(next.next_ms, now)}`,
+    tooltip: `Next: ${next.mode} in ${next.dir}`,
+  };
+}
+
+/** A local time as `09:00`, with the day (`Jan 10 09:00`) when it is not the day of `now`. */
+export function shortTime(ms: number, now: number): string {
+  const d = new Date(ms);
+  const time = scheduleTime(ms).slice(-5);
+  if (d.toDateString() === new Date(now).toDateString()) return time;
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${time}`;
 }
 
 /** The runs of all schedules, newest first. */

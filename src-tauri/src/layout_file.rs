@@ -34,6 +34,22 @@ pub fn import(path: &Path) -> Result<Value, String> {
     Ok(layout)
 }
 
+/// Writes one layout (`tabs[]` or `panes[]`) to `path`, a file chosen in the save dialog.
+#[tauri::command]
+pub async fn layout_export(path: String, layout: serde_json::Value) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || export(std::path::Path::new(&path), &layout))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Reads and validates the layout file `path`; writes nothing.
+#[tauri::command]
+pub async fn layout_import(path: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || import(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

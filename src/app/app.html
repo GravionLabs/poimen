@@ -81,6 +81,8 @@
     [deliver]="deliver.summary()"
     [limits]="claudeLimits.item()"
     (showDeliver)="editor.openDeliver()"
+    [schedules]="schedules.hint()"
+    (showSchedules)="editor.openSettings('schedules')"
     [update]="updater.state()"
     (checkUpdate)="updater.check()"
     (installUpdate)="updater.install()"

@@ -23,6 +23,20 @@
       {{ density().runsShort ? shortRuns(run.text) : run.text }}
     </hx-status-item>
   }
+  @if (schedules(); as hint) {
+    <hx-status-item slot="start" [announce]="true" class="schedules" data-testid="schedules">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        size="small"
+        [hx-tooltip]="hint.tooltip"
+        (click)="showSchedules.emit()"
+      >
+        {{ hint.text }}
+      </button>
+    </hx-status-item>
+  }
   @if (limits(); as l) {
     <hx-status-item
       slot="start"
