@@ -195,6 +195,8 @@ impl Shared {
         // An exited terminal is no longer in the tree, nor in the terminal list.
         let events = inner.layout.remove_terminal(terminal_id);
         publish_all(self, events);
+        let now = self.clock_ms();
+        inner.schedules.ended(terminal_id, exit_code, now);
         self.persist(&inner);
     }
 }

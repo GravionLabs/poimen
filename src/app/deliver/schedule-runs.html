@@ -1,0 +1,28 @@
+<section class="section" data-testid="schedule-runs" aria-labelledby="runs-scheduled">
+  <h2 id="runs-scheduled" class="section-title">Scheduled runs</h2>
+  <ul aria-labelledby="runs-scheduled">
+    @for (r of rows(); track r.key + r.terminal_id) {
+      <li>
+        <hx-tag severity="secondary">schedule</hx-tag>
+        <strong>{{ r.mode }}</strong>
+        <span class="hint">{{ r.dir }}</span>
+        <hx-tag [severity]="r.severity">{{ r.outcome }}</hx-tag>
+        <span>{{ r.time }}</span>
+        @if (r.exit_code) {
+          <span class="hint">exit code {{ r.exit_code }}</span>
+        }
+        @if (r.open) {
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            size="small"
+            (click)="paneChosen.emit(r.terminal_id)"
+          >
+            Show terminal
+          </button>
+        }
+      </li>
+    }
+  </ul>
+</section>

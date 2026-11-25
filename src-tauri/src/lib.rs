@@ -34,6 +34,7 @@ mod project_edit;
 mod pull_request;
 mod remote_runs;
 mod remote_transcripts;
+mod schedules;
 mod schemes;
 mod server_install;
 mod server_paths;
@@ -1060,18 +1061,6 @@ async fn layout_import(path: String) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || layout_file::import(std::path::Path::new(&path)))
         .await
         .map_err(|e| e.to_string())?
-}
-
-/// Exports the user settings (without `trustedProjects`) to `path`, a file chosen in the save
-/// dialog; `template` exports only that space template.
-#[tauri::command]
-async fn settings_export(path: String, template: Option<String>) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        settings_transfer::export(&home, std::path::Path::new(&path), template.as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// What importing the settings file `path` would add, change and remove, and what it leaves out;
@@ -2761,7 +2750,7 @@ pub fn run() {
             settings_write::set_space_templates,
             resolve_space_template,
             settings_write::revoke_project,
-            settings_export,
+            settings_write::settings_export,
             layout_export,
             layout_import,
             settings_import_plan,
@@ -2777,6 +2766,9 @@ pub fn run() {
             project::detected_entries,
             project::repo_root,
             settings_write::set_palette,
+            schedules::schedules_list,
+            schedules::set_schedule_enabled,
+            schedules::set_schedules_paused,
             project::detected_run,
             repo_info,
             subagents_watch,

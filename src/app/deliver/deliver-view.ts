@@ -65,6 +65,8 @@ import {
 import { delayedBusy } from "../ui/loading/delayed";
 import { LoadingRows } from "../ui/loading/loading-rows";
 import { LeadRuns } from "./lead-runs";
+import { ScheduleRuns } from "./schedule-runs";
+import { Schedules } from "../core/schedules";
 
 /** "PR #343" for a pull request URL, the URL itself when it has no number at the end. */
 export function prLabel(url: string): string {
@@ -108,7 +110,7 @@ export function lineCounts(line: TimelineLine): string[] {
  */
 @Component({
   selector: "app-deliver-view",
-  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu, LeadRuns],
+  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu, LeadRuns, ScheduleRuns],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -119,6 +121,7 @@ export class DeliverView {
   private readonly launcher = inject(DeliverLauncher);
   protected readonly ui = inject(UiState);
   protected readonly overview = inject(Overview);
+  protected readonly schedules = inject(Schedules);
   protected readonly slowRefresh = delayedBusy(() => this.overview.loading());
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly supported = SUPPORTED_SCHEMA;
@@ -146,6 +149,7 @@ export class DeliverView {
   } | null>(null);
 
   constructor() {
+    this.schedules.watch(inject(DestroyRef));
     // The overview follows every run event of the open repositories and is read again at least
     // every five minutes while the view is open.
     effect(() => {

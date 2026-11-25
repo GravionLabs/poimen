@@ -334,6 +334,14 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
             .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
     }
 
+    if !data["schedules"].is_null() {
+        warn(
+            &mut out,
+            "schedules",
+            "ignored; schedules are read from your user config only".into(),
+        );
+    }
+
     let mut names: HashSet<String> = HashSet::new();
     match &data["commands"] {
         Value::Null => {}

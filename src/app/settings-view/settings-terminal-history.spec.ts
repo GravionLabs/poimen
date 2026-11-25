@@ -14,6 +14,7 @@ import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsView } from "./settings-view";
 import { ShortcutsEditor } from "./shortcuts-editor";
 import { PaletteEditor } from "./palette-editor";
+import { SchedulesEditor } from "./schedules-editor";
 import { NotificationsPage } from "./notifications-page";
 import { SnippetsEditor } from "./snippets-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
@@ -50,6 +51,7 @@ function serverPage() {
     [SnippetsEditor, "snippets-editor"],
     [NotificationsPage, "notifications-page"],
     [PaletteEditor, "palette-editor"],
+    [SchedulesEditor, "schedules-editor"],
     [ShortcutsEditor, "shortcuts-editor"],
   ];
   for (const [component, name] of templates) {
