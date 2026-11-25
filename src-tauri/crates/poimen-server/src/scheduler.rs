@@ -436,6 +436,8 @@ impl Shared {
         let space_id = self.space_for(&s.dir)?;
         let command = argv_of(s);
         let now = self.clock_ms();
+        // Read before the lock: the first read asks the login shell.
+        let path = gui_path::child_path();
         // Held until the run is recorded, so its exit cannot come first.
         let mut inner = lock(&self.inner);
         if inner.schedules.halted {
@@ -449,7 +451,7 @@ impl Shared {
                 name: Some(format!("schedule {}", s.mode)),
                 cwd: Some(s.dir.clone()),
                 command: Some(command),
-                env: [("PATH".to_owned(), gui_path::child_path())].into(),
+                env: [("PATH".to_owned(), path)].into(),
                 ..TerminalCreate::default()
             },
         )
