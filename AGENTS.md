@@ -59,7 +59,7 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - poimen hosts the sessions of scripted runs: one `poimen-client` operation, interactive sessions, JSON-line records, permissions as ADR 0012 (accepted, [ADR 0016](docs/adr/0016-poimen-hosts-the-sessions-of-scripted-runs.md)).
 - Scoped write grant, lead runs and `wait_any`; amends ADR 0012 (proposed, [ADR 0018](docs/adr/0018-scoped-write-grant-and-lead-runs-for-orchestration.md)).
 - Agent scripts: Markdown with frontmatter, print mode, listed tools only, trust per file, runner GravionLabs/agent-scripts (proposed, [ADR 0019](docs/adr/0019-agent-scripts-format-and-runner.md)).
-- Triggered runs of agent scripts: `poimen-server` schedules them, limited tools (proposed, [ADR 0020](docs/adr/0020-triggered-runs-of-agent-scripts.md)).
+- Triggered runs of agent scripts: `poimen-server` schedules them, limited tools (accepted, [ADR 0020](docs/adr/0020-triggered-runs-of-agent-scripts.md)).
 
 ## Verification
 
