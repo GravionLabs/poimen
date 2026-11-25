@@ -5,6 +5,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.37.0] — 2026-11-25
+
+### Bug Fixes
+- **tui**: Wait for gh on a channel, not a sleep loop (#1174)
+- Three test files still leave temp directories behind (#1282) (#1290)
+- **test**: Retry a fake server script that is briefly Text file busy (#1291)
+
+
+### Features
+- **console**: Start poimen-server when none runs (#1171) (#1283)
+- **console**: Poimen space and poimen tab commands (#1172) (#1285)
+- **tui**: Branch, dirty, sync and pr tokens in the sidebar (#1174) (#1287)
+- **tui**: Branch, dirty, sync and pr tokens in the sidebar (#1174)
+- **tui**: Reload config.json while the TUI runs (#1175) (#1288)
+- **tui**: Reload config.json while the TUI runs (#1175)
+- **console**: Reach a remote machine's server with --machine (#1176) (#1289)
+
+
 ## [0.36.1] — 2026-11-24
 
 ### Bug Fixes
@@ -15,6 +33,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **agents**: Point to the test directory rule in AGENTS.md (#1280)
 - **agents**: Shorten the tests.md pointer to fit the AGENTS.md limit (#1280)
+- Update CHANGELOG.md for v0.36.1 [skip ci]
 
 
 ## [0.36.0] — 2026-11-24
