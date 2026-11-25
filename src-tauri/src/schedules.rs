@@ -2,7 +2,8 @@
 //! `schedule.list` of the local server for the settings and the Runs view, and the switches of the
 //! settings page.
 
-use poimen_client::protocol::ScheduleList;
+use poimen_client::ClientError;
+use poimen_client::protocol::{ErrorCode, ScheduleAckAlerts, ScheduleAlerts, ScheduleList};
 use poimen_core::settings::parse_tasks;
 use serde_json::Value;
 
@@ -38,6 +39,44 @@ pub async fn schedules_list() -> Result<ScheduleList, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// The failed and skipped runs no app has acknowledged yet (#1308); none from an older server.
+#[tauri::command]
+pub async fn schedules_alerts() -> Result<ScheduleAlerts, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let client = poimen_client::Client::default();
+        alerts_of(client.request("schedule.alerts", serde_json::json!({})))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn alerts_of(answer: Result<Value, ClientError>) -> Result<ScheduleAlerts, String> {
+    match answer {
+        Ok(result) => serde_json::from_value(result).map_err(|e| format!("schedule.alerts: {e}")),
+        Err(ClientError::Server {
+            code: ErrorCode::UnknownMethod,
+            ..
+        }) => Ok(ScheduleAlerts::default()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Removes the alerts up to the `seq` the app has added to its notifications.
+#[tauri::command]
+pub async fn schedules_ack_alerts(up_to: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        poimen_client::Client::default()
+            .request(
+                "schedule.ack_alerts",
+                serde_json::json!(ScheduleAckAlerts { up_to }),
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Switches the schedule `key` on or off in the user config.
 #[tauri::command]
 pub fn set_schedule_enabled(key: String, enabled: bool) -> Result<(), String> {
@@ -58,6 +97,25 @@ pub fn set_schedules_paused(paused: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn an_older_server_has_no_alerts_and_other_errors_are_reported() {
+        let error = |code| ClientError::Server {
+            code,
+            message: "no".into(),
+        };
+        let none = alerts_of(Err(error(ErrorCode::UnknownMethod)));
+        assert_eq!(none, Ok(ScheduleAlerts::default()));
+        assert!(alerts_of(Err(error(ErrorCode::Internal))).is_err());
+        assert!(alerts_of(Ok(serde_json::json!({"alerts": 1}))).is_err());
+        let one = alerts_of(Ok(
+            serde_json::json!({"alerts": [{"id": 1, "seq": 2, "key": "k",
+            "dir": "/r", "mode": "job", "outcome": "failed", "at_ms": 3, "count": 1}]}),
+        ));
+        assert_eq!(one.unwrap().alerts[0].seq, 2);
+    }
+
     #[test]
     fn the_settings_warn_about_a_schedule_whose_mode_cannot_be_scheduled() {
         let config = r#"{"tasks":{"modes":[{"name":"work"}]},

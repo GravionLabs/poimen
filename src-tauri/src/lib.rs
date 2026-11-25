@@ -1045,24 +1045,6 @@ async fn rebuild_space(
     .await
 }
 
-/// Writes one layout (`tabs[]` or `panes[]`) to `path`, a file chosen in the save dialog.
-#[tauri::command]
-async fn layout_export(path: String, layout: serde_json::Value) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        layout_file::export(std::path::Path::new(&path), &layout)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Reads and validates the layout file `path`; writes nothing.
-#[tauri::command]
-async fn layout_import(path: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || layout_file::import(std::path::Path::new(&path)))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// What importing the settings file `path` would add, change and remove, and what it leaves out;
 /// writes nothing.
 #[tauri::command]
@@ -2751,8 +2733,8 @@ pub fn run() {
             resolve_space_template,
             settings_write::revoke_project,
             settings_write::settings_export,
-            layout_export,
-            layout_import,
+            layout_file::layout_export,
+            layout_file::layout_import,
             settings_import_plan,
             settings_import_apply,
             remove_spaces_layout,
@@ -2767,6 +2749,8 @@ pub fn run() {
             project::repo_root,
             settings_write::set_palette,
             schedules::schedules_list,
+            schedules::schedules_alerts,
+            schedules::schedules_ack_alerts,
             schedules::set_schedule_enabled,
             schedules::set_schedules_paused,
             project::detected_run,

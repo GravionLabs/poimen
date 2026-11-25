@@ -33,6 +33,30 @@ export interface ScheduleList {
   schedules: Schedule[];
 }
 
+/** A failed run, or the collapsed skips of one reason, of `schedule.alerts` (#1308). */
+export interface ScheduleAlert {
+  /** Stays the same while skips are added to the alert. */
+  id: number;
+  /** Grows with every change; the acknowledgement removes up to one. */
+  seq: number;
+  key: string;
+  dir: string;
+  mode: string;
+  outcome: ScheduleOutcome;
+  reason?: string;
+  /** The last time. */
+  at_ms: number;
+  count: number;
+}
+
+/** What a notification says about an alert; `count` is how often the skip happened. */
+export function alertMessage(alert: ScheduleAlert, count: number): string {
+  const what = alert.outcome === "failed" ? "failed" : "skipped";
+  const times = count > 1 ? ` ${count} times` : "";
+  const reason = alert.reason ? `: ${alert.reason}` : "";
+  return `Scheduled run ${alert.mode} in ${alert.dir} ${what}${times}${reason}`;
+}
+
 /** A run with the schedule it belongs to. */
 export interface ScheduledRun extends ScheduleRun {
   key: string;
