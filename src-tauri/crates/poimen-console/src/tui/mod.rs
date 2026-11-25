@@ -495,6 +495,14 @@ fn sync_panes(app: &mut App, client: &Client, tx: &Sender<Msg>) {
         (None, _) => Vec::new(),
     };
     app.panes.retain(|p| desired.contains(&p.terminal_id));
+    // An ended terminal that runs again (resumed, #1232) is attached anew.
+    let model = &app.model;
+    app.panes.retain(|p| {
+        p.exited.is_none()
+            || model
+                .terminal(&p.terminal_id)
+                .is_none_or(|t| t.status != TerminalStatus::Running)
+    });
     if app.take_over != app.selected {
         app.take_over = None;
     }

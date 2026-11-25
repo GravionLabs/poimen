@@ -1,6 +1,6 @@
-//! The TUI and the terminal of a scheduled run (#1305): it stays in its tab after the command
-//! ends, with its output and exit code. Against an in-process server with a fake clock.
-//! Unix-only: the command is a POSIX shell script.
+//! The TUI and ended terminals in a tab (#1305): a scheduled run keeps its output and exit code
+//! in its pane, and an ended terminal that is resumed shows its new shell. Against an in-process
+//! server. Unix-only: the commands are POSIX shell scripts.
 #![cfg(unix)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEvent, KeyModifiers};
 use poimen_client::Client;
+use poimen_client::protocol::{AttachMode, TerminalCreate, decode_bytes};
 use poimen_console::session::Error;
 use poimen_console::tui::config::Config;
 use poimen_console::tui::{self, Options, Outcome};
@@ -22,6 +23,20 @@ use serde_json::json;
 
 /// 2026-01-10 08:59 UTC, a minute before the due time of `0 9 * * *`.
 const BEFORE: u64 = 1_768_003_200_000 + (9 * 60 - 1) * 60_000;
+
+fn wait_until(what: &str, mut pred: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !pred() {
+        assert!(Instant::now() < deadline, "timed out: {what}");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn screen_of(client: &Client, id: &str) -> String {
+    let attachment = client.attach(id, AttachMode::Observe, false).unwrap();
+    let bytes = decode_bytes(&attachment.info.snapshot).unwrap();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 
 struct Running {
     input: Sender<InputEvent>,
@@ -136,11 +151,9 @@ fn an_ended_scheduled_run_keeps_its_output_and_exit_code_in_the_pane() {
     sweep();
     clock.store(BEFORE + 60_000, Ordering::SeqCst);
     sweep();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while client.list_terminals(None).unwrap().is_empty() {
-        assert!(Instant::now() < deadline, "the run did not start");
-        thread::sleep(Duration::from_millis(20));
-    }
+    wait_until("the run starts", || {
+        !client.list_terminals(None).unwrap().is_empty()
+    });
 
     // Watched while it ends.
     let t = start(&client);
@@ -150,7 +163,7 @@ fn an_ended_scheduled_run_keeps_its_output_and_exit_code_in_the_pane() {
     // Another server event makes the TUI read the model again; the pane stays.
     let space = client.list_terminals(None).unwrap()[0].space_id.clone();
     client
-        .create_terminal(&poimen_client::protocol::TerminalCreate {
+        .create_terminal(&TerminalCreate {
             space_id: space,
             name: Some("later".into()),
             command: Some(vec!["cat".into()]),
@@ -164,5 +177,91 @@ fn an_ended_scheduled_run_keeps_its_output_and_exit_code_in_the_pane() {
     // Opened after it ended.
     let t = start(&client);
     t.shows_the_ended_run();
+    t.detach();
+}
+
+#[test]
+fn a_resumed_terminal_in_an_observed_pane_shows_its_new_shell() {
+    let guard = tempfile::tempdir().unwrap();
+    let dir = guard.path().canonicalize().unwrap();
+    let state_file = dir.join("state").join("server.json");
+    let config = |run: &str| ServerConfig {
+        socket: dir.join(run).join("server.sock"),
+        history_dir: dir.join("state").join("history"),
+        state_file: state_file.clone(),
+        scrollback: 1000,
+        home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
+    };
+    let cat = || {
+        ["sh", "-c", "echo earlier-work; exec cat"]
+            .map(String::from)
+            .to_vec()
+    };
+
+    // A split tab; the second terminal reports an agent session.
+    let first = config("run1");
+    let server = Server::bind(first.clone()).unwrap();
+    let (down, stopped) = mpsc::channel();
+    server.on_shutdown(move || {
+        let _ = down.send(());
+    });
+    thread::spawn(move || server.serve());
+    let client = Client::new(&first.socket);
+    let space = client
+        .create_space("work", &dir.display().to_string())
+        .unwrap()
+        .id;
+    let running = client
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["cat".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    let split = client
+        .request(
+            "tab.split",
+            json!({"terminal_id": running, "direction": "right", "command": cat()}),
+        )
+        .unwrap();
+    let ended = split["terminal"]["id"].as_str().unwrap().to_owned();
+    wait_until("the output arrives", || {
+        screen_of(&client, &ended).contains("earlier-work")
+    });
+    client
+        .request(
+            "terminal.report_agent",
+            json!({"terminal_id": ended, "seq": 1, "status": "idle", "agent": "claude",
+                   "session_id": "session-1"}),
+        )
+        .unwrap();
+    client
+        .request("server.shutdown", json!({"keep_terminals": true}))
+        .unwrap();
+    stopped.recv_timeout(Duration::from_secs(10)).unwrap();
+
+    // Its host is gone for the next server: it adopts the terminal from the history.
+    let text = std::fs::read_to_string(&state_file).unwrap();
+    let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let endpoint = state["terminals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == ended.as_str())
+        .and_then(|t| t["endpoint"].as_str())
+        .unwrap();
+    std::fs::remove_file(endpoint).unwrap();
+    let second = config("run2");
+    let server = Server::bind(second.clone()).unwrap();
+    thread::spawn(move || server.serve());
+    let client = Client::new(&second.socket);
+
+    let t = start(&client);
+    t.wait_for("earlier-work");
+    // Another client takes the control, which resumes the session in a new shell.
+    let _controller = client.attach(&ended, AttachMode::Control, false).unwrap();
+    t.wait_for("session-1");
     t.detach();
 }
