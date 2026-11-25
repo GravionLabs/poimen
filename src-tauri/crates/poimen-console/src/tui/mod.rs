@@ -688,6 +688,9 @@ fn record(
             }
         }
         Ok(_) => {}
+        // The server ends the stream of an exited terminal; its leaf may stay (#1305), and then
+        // so does the last screen. A leaf that went is dropped by `follow_server`.
+        Err(_) if app.panes[at].exited.is_some() => {}
         Err(e) => {
             app.notice = Some(format!("attachment ended: {e}"));
             app.panes.remove(at);

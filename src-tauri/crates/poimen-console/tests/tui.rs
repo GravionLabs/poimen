@@ -3,7 +3,7 @@
 #![cfg(unix)]
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -42,6 +42,15 @@ impl Drop for Fixture {
 }
 
 fn fixture(name: &str) -> Fixture {
+    fixture_with(name, |_, _| None, |_| {})
+}
+
+/// A server whose home `home` makes in the fixture's directory, prepared before it serves.
+fn fixture_with(
+    name: &str,
+    home: impl FnOnce(&std::path::Path, &str) -> Option<PathBuf>,
+    prepare: impl FnOnce(&Server),
+) -> Fixture {
     let dir = std::env::temp_dir().join(format!("poimen-tui-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("work")).unwrap();
@@ -50,10 +59,18 @@ fn fixture(name: &str) -> Fixture {
         state_file: dir.join("state").join("server.json"),
         history_dir: dir.join("state").join("history"),
         scrollback: 1000,
-        home: None,
+        home: home(
+            &dir,
+            &dir.join("work")
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string(),
+        ),
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
+    prepare(&server);
     thread::spawn(move || server.serve());
     let client = Client::new(&config.socket);
     let work = dir.join("work").canonicalize().unwrap();
@@ -359,6 +376,63 @@ fn moving_the_selection_attaches_to_that_terminal() {
     assert_eq!(t.detach(), Outcome::Detached);
     assert_eq!(f.status(&a), TerminalStatus::Running);
     assert_eq!(f.status(&b), TerminalStatus::Running);
+}
+
+#[test]
+fn an_ended_scheduled_run_keeps_its_output_and_exit_code_in_the_pane() {
+    /// 2026-01-10 08:59 UTC, a minute before the due time of `0 9 * * *`.
+    const BEFORE: u64 = 1_768_003_200_000 + (9 * 60 - 1) * 60_000;
+    let clock = Arc::new(AtomicU64::new(BEFORE));
+    let sweeper: Arc<Mutex<Option<Box<dyn Fn()>>>> = Arc::default();
+    let f = fixture_with(
+        "scheduled",
+        |dir, work| {
+            std::fs::write(dir.join("work").join("hold"), "").unwrap();
+            let config = poimen_core::settings::config_path(&dir.join("home"));
+            std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+            let job = "while [ -e hold ]; do sleep 0.05; done; echo job-done; exit 3";
+            let text = json!({
+                "tasks": {"modes": [{"name": "job", "command": ["sh", "-c", job], "worktree": false}]},
+                "schedules": [{"cron": "0 9 * * *", "timezone": "UTC", "dir": work, "mode": "job"}],
+            });
+            std::fs::write(config, text.to_string()).unwrap();
+            Some(dir.join("home"))
+        },
+        |server| {
+            let clock = Arc::clone(&clock);
+            server.set_clock(move || clock.load(Ordering::SeqCst));
+            *sweeper.lock().unwrap() = Some(Box::new(server.schedule_sweeper()));
+        },
+    );
+    let sweep = sweeper.lock().unwrap().take().unwrap();
+    sweep();
+    clock.store(BEFORE + 60_000, Ordering::SeqCst);
+    sweep();
+    wait_until("the run starts", || {
+        !f.client.list_terminals(None).unwrap().is_empty()
+    });
+
+    let ended = |t: &Running| {
+        t.wait_for("exited with 3");
+        wait_until("the output stays", || t.pane_text().contains("job-done"));
+    };
+    // Watched while it ends.
+    let t = start(&f, None);
+    t.wait_for("schedule job · control");
+    std::fs::remove_file(f.dir.join("work").join("hold")).unwrap();
+    ended(&t);
+    // Another server event makes the TUI read the model again; the pane stays.
+    f.cat_terminal("later");
+    t.wait_for("later");
+    ended(&t);
+    assert!(!t.text().contains("attachment ended"), "{}", t.text());
+    t.detach();
+
+    // Opened after it ended.
+    let t = start(&f, None);
+    ended(&t);
+    assert!(!t.text().contains("attachment ended"), "{}", t.text());
+    t.detach();
 }
 
 #[test]
