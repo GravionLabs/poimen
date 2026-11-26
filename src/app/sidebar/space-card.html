@@ -21,26 +21,26 @@
       }
       @case ("name") {
         @if (edit && isEditing(edit)) {
-          <input
-            #input
-            appSpaceEditFocus
-            class="edit"
-            type="text"
-            [attr.aria-label]="edit.kind === 'space' ? 'Space name' : 'Terminal name'"
-            autocomplete="off"
-            [value]="label"
-            (click)="$event.stopPropagation()"
-            (dblclick)="$event.stopPropagation()"
-            (keydown)="$event.stopPropagation()"
-            [disabled]="renameBusy(edit)"
-            (keydown.enter)="enter(edit, input, $event)"
-            (keydown.escape)="finishEdit(edit, input, false)"
-            (input)="clearError(edit)"
-            (blur)="finishEdit(edit, input, input.value !== label)"
-          />
-          @if (renameError(); as message) {
-            <span class="edit-error" role="alert">{{ message }}</span>
-          }
+          <hx-field class="edit-field" [error]="renameError()"
+            ><input
+              hx-input
+              size="small"
+              #input
+              appSpaceEditFocus
+              class="edit"
+              type="text"
+              [attr.aria-label]="edit.kind === 'space' ? 'Space name' : 'Terminal name'"
+              autocomplete="off"
+              [value]="label"
+              (click)="$event.stopPropagation()"
+              (dblclick)="$event.stopPropagation()"
+              (keydown)="$event.stopPropagation()"
+              [disabled]="renameBusy(edit)"
+              (keydown.enter)="enter(edit, input, $event)"
+              (keydown.escape)="finishEdit(edit, input, false)"
+              (input)="clearError(edit)"
+              (blur)="finishEdit(edit, input, input.value !== label)"
+          /></hx-field>
         } @else {
           <span
             class="name"

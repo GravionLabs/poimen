@@ -7,7 +7,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { DeliverLauncher } from "./deliver-launcher";
 import { Deliver } from "./deliver";
@@ -31,7 +31,7 @@ import { selectOptions } from "../ui/select/select-options";
  */
 @Component({
   selector: "app-deliver-dialog",
-  imports: [DialogShell, HxButton, HxField, HxSelect],
+  imports: [DialogShell, HxButton, HxField, HxSelect, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./deliver-dialog.html",
   styleUrl: "./deliver-dialog.css",

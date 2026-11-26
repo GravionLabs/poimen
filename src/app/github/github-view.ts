@@ -30,7 +30,15 @@ import {
   reviewBadge,
   type PullRow,
 } from "./pulls";
-import { HxButton, HxSelectButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import {
+  HxButton,
+  HxSelectButton,
+  HxField,
+  HxSelect,
+  HxCheckbox,
+  HxInput,
+  HxMessage,
+} from "@gravionlabs/helix-ui";
 import { delayedBusy } from "../ui/loading/delayed";
 import { LoadingRows } from "../ui/loading/loading-rows";
 import { selectOptions } from "../ui/select/select-options";
@@ -50,6 +58,9 @@ import { selectOptions } from "../ui/select/select-options";
     IssueDetailPane,
     HxField,
     HxSelect,
+    HxCheckbox,
+    HxInput,
+    HxMessage,
   ],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",

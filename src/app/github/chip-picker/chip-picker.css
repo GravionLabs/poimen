@@ -41,5 +41,5 @@
   width: 100%;
 }
 input {
-  font: inherit;
+  min-width: 8rem;
 }

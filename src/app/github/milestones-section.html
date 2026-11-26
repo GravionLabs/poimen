@@ -3,12 +3,14 @@
     <h2>Milestones</h2>
   </header>
   @if (milestones.error(); as err) {
-    <p class="problem" role="alert">Could not read the milestones: {{ err }}</p>
+    <hx-message class="problem" severity="error" size="small"
+      >Could not read the milestones: {{ err }}</hx-message
+    >
   }
   @for (e of milestones.errors(); track e.repo) {
-    <p class="problem" role="alert" data-testid="milestone-error">
+    <hx-message class="problem" data-testid="milestone-error" severity="error" size="small">
       {{ e.repo }}: {{ errorText(e.error) }}
-    </p>
+    </hx-message>
   }
   @if (milestones.loading() && !milestones.repos().length) {
     <app-loading-rows
@@ -148,27 +150,34 @@
         </p>
       } @else {
         <h3>{{ c.kind === "create" ? "New milestone in " + c.repo : "Edit " + c.title }}</h3>
-        <label>
-          Title
-          <input name="title" [value]="c.title" (input)="c.title = $any($event.target).value" />
-        </label>
-        <label>
-          Description
+        <hx-field label="Title">
+          <input
+            hx-input
+            size="small"
+            name="title"
+            [value]="c.title"
+            (input)="c.title = $any($event.target).value"
+          />
+        </hx-field>
+        <hx-field label="Description">
           <textarea
+            hx-input
+            size="small"
             name="description"
             [value]="c.description"
             (input)="c.description = $any($event.target).value"
           ></textarea>
-        </label>
-        <label>
-          Due date
+        </hx-field>
+        <hx-field label="Due date">
           <input
+            hx-input
+            size="small"
             name="dueOn"
             type="date"
             [value]="c.dueOn"
             (input)="c.dueOn = $any($event.target).value"
           />
-        </label>
+        </hx-field>
       }
       <div class="actions">
         <button

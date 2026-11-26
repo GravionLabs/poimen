@@ -205,6 +205,8 @@ describe("Sidebar cards: inline terminal rename (#1035)", () => {
     const after = s.root.querySelector<HTMLInputElement>("input.edit")!;
     expect(after.disabled).toBe(false);
     expect(after.value).toBe("kept");
-    expect(s.root.querySelector(".edit-error")?.textContent).toContain("no luck");
+    expect(s.root.querySelector(".edit-field .hx-field-error-shown")?.textContent).toContain(
+      "no luck",
+    );
   });
 });

@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from "@angular/core";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { rowName } from "../core/snapshot";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
@@ -19,7 +19,7 @@ import { LineComments } from "./line-comments";
  */
 @Component({
   selector: "app-comments-panel",
-  imports: [HxButton, HxField, HxSelect],
+  imports: [HxButton, HxField, HxSelect, HxInput, HxMessage],
   templateUrl: "./comments-panel.html",
   styles: `
     :host {
@@ -61,11 +61,8 @@ import { LineComments } from "./line-comments";
     .where {
       font-family: var(--font-mono);
     }
-    textarea {
+    hx-field {
       flex: 1;
-      font: inherit;
-      color: inherit;
-      background: transparent;
     }
     button.where {
       font-family: var(--font-mono);

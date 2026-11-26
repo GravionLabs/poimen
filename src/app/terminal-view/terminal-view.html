@@ -47,17 +47,20 @@
 }
 @if (searchOpen()) {
   <div class="search-bar" role="search" (keydown)="searchKey($event)">
-    <input
-      #searchInput
-      class="search-input"
-      type="text"
-      placeholder="Find"
-      aria-label="Find in terminal"
-      spellcheck="false"
-      autocomplete="off"
-      [value]="searchQuery()"
-      (input)="setQuery($any($event.target).value)"
-    />
+    <hx-field
+      ><input
+        hx-input
+        size="small"
+        #searchInput
+        class="search-input"
+        type="text"
+        placeholder="Find"
+        aria-label="Find in terminal"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="searchQuery()"
+        (input)="setQuery($any($event.target).value)"
+    /></hx-field>
     <span class="search-count" aria-live="polite">{{ searchCounter() }}</span>
     <button
       type="button"

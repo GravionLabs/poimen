@@ -4,29 +4,31 @@
   (cancelled)="machines.closeForm()"
 >
   <form (submit)="submit($event)" novalidate>
-    <label>
-      Name
+    <hx-field label="Name" [error]="fieldError('name')">
       <input
+        hx-input
+        size="small"
         name="name"
         autocomplete="off"
         [value]="name()"
         (input)="name.set($any($event.target).value)"
       />
-    </label>
-    @if (fieldError("name"); as e) {
-      <p class="error" role="alert">{{ e }}</p>
-    }
-    <label>
-      SSH target
+    </hx-field>
+    <hx-field
+      label="SSH target"
+      hint="One host as in ~/.ssh/config; no options. No password is stored."
+      [error]="fieldError('ssh')"
+    >
       <input
+        hx-input
+        size="small"
         name="ssh"
         autocomplete="off"
         placeholder="me@host or a Host alias"
         [value]="ssh()"
         (input)="ssh.set($any($event.target).value)"
       />
-    </label>
-    <p class="hint">One host as in ~/.ssh/config; no options. No password is stored.</p>
+    </hx-field>
     @if (suggestions().length) {
       <div class="suggestions" role="group" aria-label="Hosts of your SSH config">
         @for (h of suggestions(); track h.host) {
@@ -46,24 +48,19 @@
         }
       </div>
     }
-    @if (fieldError("ssh"); as e) {
-      <p class="error" role="alert">{{ e }}</p>
-    }
-    <label>
-      Repositories directory
+    <hx-field label="Repositories directory" [error]="fieldError('reposDir')">
       <input
+        hx-input
+        size="small"
         name="reposDir"
         autocomplete="off"
         [placeholder]="defaultReposDir"
         [value]="reposDir()"
         (input)="reposDir.set($any($event.target).value)"
       />
-    </label>
-    @if (fieldError("reposDir"); as e) {
-      <p class="error" role="alert">{{ e }}</p>
-    }
+    </hx-field>
     @if (fieldError(null); as e) {
-      <p class="error" role="alert">{{ e }}</p>
+      <hx-message class="error" severity="error" size="small">{{ e }}</hx-message>
     }
     <div class="dialog-buttons">
       <button

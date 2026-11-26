@@ -12,7 +12,7 @@ import {
   output,
 } from "@angular/core";
 import { NgTemplateOutlet } from "@angular/common";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 import { UiState } from "../core/ui-state";
 import { eventTime, toneStyle } from "../bottom-panel/run-events";
 import { errorText, type GhError } from "../github/pulls";
@@ -110,7 +110,15 @@ export function lineCounts(line: TimelineLine): string[] {
  */
 @Component({
   selector: "app-deliver-view",
-  imports: [LoadingRows, NgTemplateOutlet, HxButton, ContextMenu, LeadRuns, ScheduleRuns],
+  imports: [
+    LoadingRows,
+    NgTemplateOutlet,
+    HxButton,
+    ContextMenu,
+    LeadRuns,
+    ScheduleRuns,
+    HxMessage,
+  ],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

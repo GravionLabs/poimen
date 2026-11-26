@@ -84,19 +84,24 @@
             (valueChange)="chosenKind.set($event)"
           />
         </hx-field>
-        <label>
-          Name
-          <input class="field" name="name" type="text" placeholder="Defaults to the agent" />
-        </label>
-        <label>
-          Arguments
+        <hx-field label="Name">
           <input
-            class="field"
+            hx-input
+            size="small"
+            name="name"
+            type="text"
+            placeholder="Defaults to the agent"
+          />
+        </hx-field>
+        <hx-field label="Arguments">
+          <input
+            hx-input
+            size="small"
             name="args"
             type="text"
             placeholder="Optional, separated by spaces"
           />
-        </label>
+        </hx-field>
         <p class="hint">The pane has to be at its shell prompt.</p>
         <div class="dialog-buttons">
           <button
@@ -120,10 +125,9 @@
       (cancelled)="cancel()"
     >
       <form (submit)="$event.preventDefault(); saveLayout($any($event.target))">
-        <label>
-          Name
-          <input class="field" name="name" type="text" [value]="d.current" />
-        </label>
+        <hx-field label="Name">
+          <input hx-input size="small" name="name" type="text" [value]="d.current" />
+        </hx-field>
         <div class="dialog-buttons">
           <button
             type="button"
@@ -170,19 +174,13 @@
   }
 }
 @if (actions.error(); as message) {
-  <div class="error" role="alert">
-    <span>{{ message }}</span>
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      aria-label="Dismiss"
-      title="Dismiss"
-      (click)="actions.dismissError()"
-    >
-      <app-icon name="close" />
-    </button>
-  </div>
+  <hx-message
+    class="error"
+    severity="error"
+    size="small"
+    closable
+    closeLabel="Dismiss"
+    (close)="actions.dismissError()"
+    >{{ message }}</hx-message
+  >
 }

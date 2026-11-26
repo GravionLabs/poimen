@@ -14,12 +14,12 @@ import { parseHarnesses, type HarnessInfo } from "../core/settings";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { Icon } from "../ui/icon/icon";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 
 /** The question for a new pane (its type) or a pane close (confirmation), and action errors. */
 @Component({
   selector: "app-pane-dialog",
-  imports: [DialogShell, HxButton, Icon, HxField, HxSelect],
+  imports: [DialogShell, HxButton, Icon, HxField, HxSelect, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./pane-dialog.html",
   styleUrl: "./pane-dialog.css",

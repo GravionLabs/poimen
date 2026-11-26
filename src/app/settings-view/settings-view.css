@@ -234,8 +234,6 @@ h3 {
 /* Lists and buttons of the Explorer and layout sections: tints of the text color, readable in light and dark. */
 .error {
   margin: 0 0 12px;
-  color: var(--status-blocked);
-  font-size: 12px;
 }
 
 .rows {
@@ -370,18 +368,6 @@ h3 {
   color: var(--h-text-muted-color);
 }
 
-.field input {
-  box-sizing: border-box;
-  height: var(--control-height);
-  padding: 2px 6px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--h-text-color);
-  font: inherit;
-  font-size: 12px;
-}
-
 .field input[type="text"] {
   width: 110px;
 }
@@ -399,11 +385,6 @@ h3 {
   width: 64px;
 }
 
-.field input:focus-visible {
-  outline: 1px solid var(--h-primary-color);
-  outline-offset: -1px;
-}
-
 .root-note {
   align-self: center;
   font-size: 12px;
@@ -416,8 +397,6 @@ h3 {
 
 .field-error {
   margin: 4px 0 0;
-  font-size: 11px;
-  color: var(--status-blocked);
 }
 
 .spacer {

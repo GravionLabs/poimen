@@ -14,7 +14,7 @@ import {
 } from "./issues";
 import { IssueFormPane } from "./issue-form/issue-form";
 import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxCheckbox, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { LoadingRows } from "../ui/loading/loading-rows";
 import { selectOptions } from "../ui/select/select-options";
 
@@ -22,7 +22,16 @@ import { selectOptions } from "../ui/select/select-options";
 @Component({
   selector: "app-github-issues",
   templateUrl: "./issues-section.html",
-  imports: [LoadingRows, HxButton, IssueFormPane, HxField, HxSelect],
+  imports: [
+    LoadingRows,
+    HxButton,
+    IssueFormPane,
+    HxField,
+    HxSelect,
+    HxCheckbox,
+    HxInput,
+    HxMessage,
+  ],
   styleUrl: "./issues-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

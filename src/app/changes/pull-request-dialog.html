@@ -4,38 +4,42 @@
     label="Create pull request"
     (cancelled)="pr.close()"
   >
-    <label>
-      Base
+    <hx-field label="Base">
       <input
+        hx-input
+        size="small"
         type="text"
         class="base"
         [value]="d.base"
         [disabled]="d.creating"
         (input)="pr.patch({ base: $any($event.target).value })"
       />
-    </label>
-    <label>
-      Title
+    </hx-field>
+    <hx-field label="Title">
       <input
+        hx-input
+        size="small"
         type="text"
         class="title"
         [value]="d.title"
         [disabled]="d.creating"
         (input)="pr.patch({ title: $any($event.target).value })"
       />
-    </label>
-    <label>
-      Description
+    </hx-field>
+    <hx-field label="Description">
       <textarea
-        class="body field"
+        hx-input
+        size="small"
+        class="body"
         rows="10"
         [value]="d.body"
         [disabled]="d.creating"
         (input)="pr.patch({ body: $any($event.target).value })"
       ></textarea>
-    </label>
+    </hx-field>
     <label>
       <input
+        hx-checkbox
         type="checkbox"
         class="draft"
         [checked]="d.draft"
@@ -45,7 +49,7 @@
       Draft
     </label>
     @if (d.error) {
-      <p class="error" role="alert">{{ d.error }}</p>
+      <hx-message class="error" severity="error" size="small">{{ d.error }}</hx-message>
     }
     <div class="dialog-buttons">
       @if (pr.harness()) {

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from "@angular/core";
 import { AgentGrantDialog } from "../agent-grant-dialog/agent-grant-dialog";
 import { AgentConfirm } from "../core/agent-confirm";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 
 /**
  * An agent asks to write into another space (ADR 0012, #615): who asks, what and where. Allowing
@@ -10,7 +10,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
  */
 @Component({
   selector: "app-agent-confirm-dialog",
-  imports: [AgentGrantDialog, DialogShell, HxButton],
+  imports: [AgentGrantDialog, DialogShell, HxButton, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./agent-confirm-dialog.html",
   styleUrl: "./agent-confirm-dialog.css",

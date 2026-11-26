@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
 import { AgentActions, hasReviewExtras } from "../agent-actions";
 import { DialogShell } from "../../ui/dialog-shell/dialog-shell";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxCheckbox } from "@gravionlabs/helix-ui";
 import { selectOptions } from "../../ui/select/select-options";
 
 /**
@@ -10,7 +10,7 @@ import { selectOptions } from "../../ui/select/select-options";
  */
 @Component({
   selector: "app-agent-action-dialog",
-  imports: [DialogShell, HxButton, HxField, HxSelect],
+  imports: [DialogShell, HxButton, HxField, HxSelect, HxCheckbox],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./agent-action-dialog.html",
 })

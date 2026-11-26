@@ -1,4 +1,4 @@
-import { HxButton, HxCheckbox, HxInput, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage } from "@gravionlabs/helix-ui";
 import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
@@ -56,7 +56,7 @@ function ratioOf(event: Event): number {
  */
 @Component({
   selector: "app-layout-tabs-editor",
-  imports: [NgTemplateOutlet, HxButton, HxCheckbox, HxInput, HxField, HxSelect],
+  imports: [NgTemplateOutlet, HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage],
   templateUrl: "./layout-tabs-editor.html",
   styleUrls: ["./settings-view.css", "./layouts-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -48,7 +48,7 @@
       <p class="hint">{{ confirm.waiting() - 1 }} more waiting.</p>
     }
     @if (confirm.error(); as error) {
-      <p class="error" role="alert">{{ error }}</p>
+      <hx-message class="error" severity="error" size="small">{{ error }}</hx-message>
     }
     <div class="dialog-buttons">
       <button

@@ -8,7 +8,7 @@ import {
 } from "@angular/core";
 import { LEVEL_FILTERS, TaskPicker, errorText, markers } from "./task-picker";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { LoadingRows } from "../ui/loading/loading-rows";
 import { selectOptions } from "../ui/select/select-options";
 
@@ -18,7 +18,7 @@ import { selectOptions } from "../ui/select/select-options";
  */
 @Component({
   selector: "app-task-dialog",
-  imports: [LoadingRows, DialogShell, HxButton, HxField, HxSelect],
+  imports: [LoadingRows, DialogShell, HxButton, HxField, HxSelect, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./task-dialog.html",
   styleUrl: "./task-dialog.css",

@@ -4,10 +4,10 @@
     <p class="hint">Every new space that no other template matches uses the default.</p>
   }
   @for (w of warnings(); track $index) {
-    <p class="error" role="alert">{{ w }}</p>
+    <hx-message class="error" severity="error" size="small">{{ w }}</hx-message>
   }
   @if (writeError(); as message) {
-    <p class="error" role="alert">{{ message }}</p>
+    <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
   }
   @if (templates().length === 0) {
     <p class="hint">No templates yet: new spaces use no template.</p>
@@ -142,7 +142,7 @@
     </button>
   </div>
   @if (transfer.error(); as message) {
-    <p class="error" role="alert">{{ message }}</p>
+    <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
   }
   @if (transfer.message(); as message) {
     <p class="hint" role="status">{{ message }}</p>
@@ -155,8 +155,7 @@
       (submit)="$event.preventDefault(); save()"
     >
       <div class="fields">
-        <label class="field grow">
-          <span>Name</span>
+        <hx-field class="field grow" label="Name" [error]="errors().name">
           <input
             hx-input
             size="small"
@@ -164,48 +163,40 @@
             name="name"
             autocomplete="off"
             [value]="e.draft.name"
-            [attr.aria-invalid]="errors().name ? true : null"
             (input)="setName($event)"
           />
-        </label>
+        </hx-field>
       </div>
-      @if (errors().name; as m) {
-        <p class="field-error">{{ m }}</p>
-      }
       @if (errors().default; as m) {
-        <p class="field-error">{{ m }}</p>
+        <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
       }
       @if (!e.asDefault) {
         <div class="fields">
-          <label class="field grow">
-            <span>Directory</span>
-            <input
-              hx-input
-              size="small"
-              type="text"
-              name="dir"
-              placeholder="~/src/app"
-              autocomplete="off"
-              [value]="e.draft.dir ?? ''"
-              [attr.aria-invalid]="errors().dir ? true : null"
-              (input)="setDir($event)"
-            />
-          </label>
-          <button
-            hx-button
-            size="small"
-            variant="outlined"
-            severity="secondary"
-            type="button"
-            class="browse"
-            (click)="browse()"
+          <hx-field class="field grow" label="Directory" [error]="errors().dir"
+            ><hx-input-group
+              ><input
+                hx-input
+                size="small"
+                type="text"
+                name="dir"
+                placeholder="~/src/app"
+                autocomplete="off"
+                [value]="e.draft.dir ?? ''"
+                (input)="setDir($event)"
+              /><button
+                hx-button
+                size="small"
+                variant="outlined"
+                severity="secondary"
+                type="button"
+                class="browse"
+                (click)="browse()"
+              >
+                Browse…
+              </button></hx-input-group
+            ></hx-field
           >
-            Browse…
-          </button>
         </div>
-        @if (errors().dir; as m) {
-          <p class="field-error">{{ m }}</p>
-        }
         <div class="fields">
           <hx-field class="field" label="Remote">
             <hx-select
@@ -219,8 +210,7 @@
           </hx-field>
           @if (e.draft.remote; as r) {
             @if (r.provider === "github") {
-              <label class="field">
-                <span>Owner</span>
+              <hx-field class="field" label="Owner">
                 <input
                   hx-input
                   size="small"
@@ -230,10 +220,9 @@
                   [value]="r.owner"
                   (input)="setRemoteField('owner', $event)"
                 />
-              </label>
+              </hx-field>
             } @else {
-              <label class="field">
-                <span>Organization</span>
+              <hx-field class="field" label="Organization">
                 <input
                   hx-input
                   size="small"
@@ -243,9 +232,8 @@
                   [value]="r.organization"
                   (input)="setRemoteField('organization', $event)"
                 />
-              </label>
-              <label class="field">
-                <span>Project</span>
+              </hx-field>
+              <hx-field class="field" label="Project">
                 <input
                   hx-input
                   size="small"
@@ -255,16 +243,16 @@
                   [value]="r.project"
                   (input)="setRemoteField('project', $event)"
                 />
-              </label>
+              </hx-field>
             }
           }
         </div>
         @if (errors().remote; as m) {
-          <p class="field-error">{{ m }}</p>
+          <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
         }
       }
       <div class="fields">
-        <hx-field class="field" label="Agent">
+        <hx-field class="field" label="Agent" [error]="errors().agent">
           <hx-select
             size="small"
             ariaLabel="Agent"
@@ -285,9 +273,6 @@
           />
         </hx-field>
       </div>
-      @if (errors().agent; as m) {
-        <p class="field-error">{{ m }}</p>
-      }
       <div class="fields">
         <hx-field class="field" label="Layout">
           <hx-select
@@ -311,8 +296,7 @@
             @for (pane of layout.panes; track $index; let i = $index) {
               <li class="pane-row">
                 <div class="pane-fields">
-                  <label class="field">
-                    <span>Pane name</span>
+                  <hx-field class="field" label="Pane name">
                     <input
                       hx-input
                       size="small"
@@ -321,9 +305,8 @@
                       [value]="pane.name"
                       (input)="setPaneName(i, $event)"
                     />
-                  </label>
-                  <label class="field grow">
-                    <span>Pane command</span>
+                  </hx-field>
+                  <hx-field class="field grow" label="Pane command">
                     <input
                       hx-input
                       size="small"
@@ -333,7 +316,7 @@
                       [value]="pane.command ?? ''"
                       (input)="setPaneCommand(i, $event)"
                     />
-                  </label>
+                  </hx-field>
                   <span class="actions">
                     <button
                       hx-button
@@ -367,7 +350,7 @@
           </button>
         </div>
         @if (errors().layout; as m) {
-          <p class="field-error">{{ m }}</p>
+          <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
         }
       }
       <div class="toolbar-row">

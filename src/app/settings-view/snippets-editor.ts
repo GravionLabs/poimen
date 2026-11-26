@@ -1,4 +1,4 @@
-import { HxButton, HxCheckbox, HxInput, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { SettingsStore } from "../core/settings";
 import type { Snippet } from "../core/snippets-model";
@@ -17,7 +17,7 @@ const EMPTY: Snippet = { label: "", text: "", enter: true, target: "terminal" };
  */
 @Component({
   selector: "app-snippets-editor",
-  imports: [HxButton, HxCheckbox, HxInput, HxField, HxSelect],
+  imports: [HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage],
   templateUrl: "./snippets-editor.html",
   styleUrls: ["./settings-view.css", "./snippets-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,

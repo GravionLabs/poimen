@@ -31,7 +31,7 @@
   }
 }
 @if (comments.error(); as error) {
-  <p class="problem" role="alert">{{ error }}</p>
+  <hx-message class="problem" severity="error" size="small">{{ error }}</hx-message>
 }
 <ul class="pending" aria-label="Pending comments">
   @for (c of comments.pending(); track c.id) {
@@ -48,13 +48,17 @@
         {{ where(c) }}
       </button>
       @if (editing() === c.id) {
-        <textarea
-          rows="3"
-          [value]="c.text"
-          aria-label="Edit comment"
-          #field
-          (keydown.escape)="editing.set(null)"
-        ></textarea>
+        <hx-field>
+          <textarea
+            hx-input
+            size="small"
+            rows="3"
+            [value]="c.text"
+            aria-label="Edit comment"
+            #field
+            (keydown.escape)="editing.set(null)"
+          ></textarea>
+        </hx-field>
         <span class="actions">
           <button type="button" hx-button size="small" class="save" (click)="save(c, field.value)">
             Save

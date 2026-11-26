@@ -86,7 +86,7 @@
       <p class="hint" role="status">Installed. {{ s.machine }} connects again and is checked.</p>
     }
     @if (s.error; as e) {
-      <p class="error" role="alert">{{ e }}</p>
+      <hx-message class="error" severity="error" size="small">{{ e }}</hx-message>
     }
     <div class="dialog-buttons">
       <button

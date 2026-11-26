@@ -98,13 +98,17 @@
             @if (c === "close") {
               <p>Close #{{ row.number }} without merging?</p>
             } @else {
-              <textarea
-                rows="3"
-                [attr.aria-label]="labels[c] + ' text'"
-                data-testid="pr-body"
-                [value]="text()"
-                (input)="text.set($any($event.target).value)"
-              ></textarea>
+              <hx-field>
+                <textarea
+                  hx-input
+                  size="small"
+                  rows="3"
+                  [attr.aria-label]="labels[c] + ' text'"
+                  data-testid="pr-body"
+                  [value]="text()"
+                  (input)="text.set($any($event.target).value)"
+                ></textarea>
+              </hx-field>
             }
             <button
               type="submit"
@@ -189,6 +193,7 @@
               </hx-field>
               <label>
                 <input
+                  hx-checkbox
                   type="checkbox"
                   data-testid="merge-delete"
                   [checked]="m.deleteBranch"
@@ -251,9 +256,9 @@
       }
     </header>
     @if (errorMessage(); as message) {
-      <p class="problem" role="alert" data-testid="detail-error">
+      <hx-message class="problem" data-testid="detail-error" severity="error" size="small">
         Could not read the pull request: {{ message }}
-      </p>
+      </hx-message>
     } @else if (pulls.detail(); as d) {
       <section aria-labelledby="pd-desc">
         <h3 id="pd-desc">Description</h3>

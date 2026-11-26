@@ -7,7 +7,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { HxButton, HxTag } from "@gravionlabs/helix-ui";
+import { HxButton, HxTag, HxField, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { plainGroups } from "../ui/context-menu/menu-model";
 import {
@@ -34,7 +34,7 @@ import { ServerInstallDialog } from "./server-install-dialog";
 /** The form to add a machine or edit `original`; the errors are the validation of `machines.rs`. */
 @Component({
   selector: "app-machine-form",
-  imports: [DialogShell, HxButton],
+  imports: [DialogShell, HxButton, HxField, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./machine-form.html",
 })
@@ -100,7 +100,7 @@ export function checkLabel(id: string): string {
  */
 @Component({
   selector: "app-machines-page",
-  imports: [ContextMenu, DialogShell, HxButton, HxTag, MachineForm, ServerInstallDialog],
+  imports: [ContextMenu, DialogShell, HxButton, HxTag, HxMessage, MachineForm, ServerInstallDialog],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./machines-page.html",
   styles: `

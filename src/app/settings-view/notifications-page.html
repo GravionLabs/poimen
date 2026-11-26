@@ -5,7 +5,7 @@
     config.json (ntfy, Pushover and Telegram examples are in the installation guide).
   </p>
   @for (w of warnings(); track w) {
-    <p class="error" role="alert">{{ w }}</p>
+    <hx-message class="error" severity="error" size="small">{{ w }}</hx-message>
   }
   <div class="rows">
     @for (status of statuses; track status) {
@@ -28,7 +28,7 @@
           @if (result(); as r) {
             @if (r.status === status) {
               @if (r.error; as error) {
-                <p class="error" role="alert">{{ error }}</p>
+                <hx-message class="error" severity="error" size="small">{{ error }}</hx-message>
               } @else {
                 <p class="hint" role="status">Sent.</p>
               }

@@ -13,15 +13,16 @@
         New issue in {{ f.repo }}
       }
     </h3>
-    <label>
-      Title
+    <hx-field label="Title">
       <input
+        hx-input
+        size="small"
         type="text"
         data-testid="form-title"
         [value]="f.title"
         (input)="issues.patchForm({ title: value($event) })"
       />
-    </label>
+    </hx-field>
     <hx-select-button
       class="tabs"
       aria-label="Description view"
@@ -36,13 +37,17 @@
     @if (f.previewing) {
       <div class="markdown" data-testid="form-preview-body" [innerHTML]="preview()"></div>
     } @else {
-      <textarea
-        rows="8"
-        aria-label="Description (Markdown)"
-        data-testid="form-body"
-        [value]="f.body"
-        (input)="issues.patchForm({ body: value($event) })"
-      ></textarea>
+      <hx-field>
+        <textarea
+          hx-input
+          size="small"
+          rows="8"
+          aria-label="Description (Markdown)"
+          data-testid="form-body"
+          [value]="f.body"
+          (input)="issues.patchForm({ body: value($event) })"
+        ></textarea>
+      </hx-field>
     }
     <app-chip-picker
       label="Labels"

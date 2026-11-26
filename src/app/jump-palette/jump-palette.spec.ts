@@ -122,7 +122,7 @@ describe("JumpPaletteView", () => {
     );
     expect(rows[1].querySelector(".age")).toBeNull();
     expect(rows[1].querySelector(".context")).toBeNull();
-    const live = el.querySelector("[aria-live]");
+    const live = el.querySelector("p[aria-live]");
     expect(live?.getAttribute("role")).toBe("status");
     expect(live?.textContent?.trim()).toBe("2 results");
   });

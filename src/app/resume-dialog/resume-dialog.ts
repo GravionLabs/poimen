@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 import { agentName } from "../core/backend";
 import { SessionResume, type AgentSessionInfo } from "../core/session-resume";
 import type { Terminal } from "../core/snapshot";
@@ -8,7 +8,7 @@ import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 /** The sessions of a directory to resume (#986): start, last activity, first prompt and agent. */
 @Component({
   selector: "app-resume-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [DialogShell, HxButton, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./resume-dialog.html",
   styleUrl: "./resume-dialog.css",

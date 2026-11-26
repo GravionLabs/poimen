@@ -317,10 +317,12 @@ describe("SpaceTemplatesEditor", () => {
       const { host, button, input, type, press } = await setup([WORK, AZ]);
       press("Edit Work");
       type(input("name"), "Azure");
-      expect(host.querySelector(".field-error")?.textContent).toContain('"Azure"');
+      expect(host.querySelector(".hx-field-error-shown")?.textContent).toContain('"Azure"');
       expect(button("Save").disabled).toBe(true);
       type(input("name"), "  ");
-      expect(host.querySelector(".field-error")?.textContent).toContain("name is required");
+      expect(host.querySelector(".hx-field-error-shown")?.textContent).toContain(
+        "name is required",
+      );
       type(input("name"), "Work");
       expect(button("Save").disabled).toBe(false);
     });

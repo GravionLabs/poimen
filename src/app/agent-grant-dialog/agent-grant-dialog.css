@@ -40,6 +40,5 @@
 }
 
 .limit input {
-  width: 4em;
-  height: var(--control-height);
+  width: 5em;
 }
