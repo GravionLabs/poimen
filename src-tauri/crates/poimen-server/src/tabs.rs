@@ -2,8 +2,8 @@
 //! to publish; the server applies a change and publishes its events under the one lock it also
 //! changes the terminals under, so the trees and the terminal set never disagree.
 //!
-//! Invariant (kept by the server): every leaf is a running terminal and every running terminal is
-//! in exactly one leaf. A `split_id` is never given to another node (the id counter is persisted).
+//! Invariant (kept by the server): every running terminal is in exactly one leaf, and every leaf
+//! is a running terminal, an ended scheduled run (#1305) or an ended terminal from the history. A `split_id` is never given to another node (the id counter is persisted).
 
 use poimen_protocol::{ErrorCode, Event, Node, Space, SplitDirection, Tab, TabPlace, valid_ratio};
 
@@ -140,7 +140,7 @@ impl Layout {
         Ok(events)
     }
 
-    /// Removes the leaf of the terminal (closed or exited): its sibling takes the parent's place,
+    /// Removes the leaf of the terminal (closed, or exited unless it is a scheduled run's): its sibling takes the parent's place,
     /// and the last leaf of a tab closes the tab. Nothing when the terminal has no leaf.
     pub(crate) fn remove_terminal(&mut self, terminal_id: &str) -> Vec<Event> {
         let Some(index) = self

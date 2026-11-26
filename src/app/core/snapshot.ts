@@ -87,7 +87,7 @@ export interface Tab {
   agent_status: AgentStatus;
   /**
    * The split tree of the tab as the server keeps it (poimen backend); absent for a terminal
-   * without a leaf (an exited one), which is a tab of its own.
+   * without a leaf (most exited ones), which is a tab of its own.
    */
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */

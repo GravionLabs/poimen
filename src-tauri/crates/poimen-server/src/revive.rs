@@ -192,11 +192,13 @@ impl Shared {
             terminal_id: terminal_id.to_string(),
             exit_code,
         });
-        // An exited terminal is no longer in the tree, nor in the terminal list.
-        let events = inner.layout.remove_terminal(terminal_id);
-        publish_all(self, events);
+        // An exited terminal leaves the tree and is not kept for a restart. The one of a
+        // scheduled run (#1305) stays in its tab until it is closed, so its output can be read.
         let now = self.clock_ms();
-        inner.schedules.ended(terminal_id, exit_code, now);
+        if !inner.schedules.ended(terminal_id, exit_code, now) {
+            let events = inner.layout.remove_terminal(terminal_id);
+            publish_all(self, events);
+        }
         self.persist(&inner);
     }
 }
