@@ -1,17 +1,18 @@
 <div class="shell">
   <nav class="nav" aria-label="Settings categories">
-    <input
-      hx-input
-      size="small"
-      #search
-      type="search"
-      class="search"
-      placeholder="Search settings"
-      aria-label="Search settings"
-      [value]="query()"
-      (input)="setQuery($event)"
-      (keydown)="searchKey($event)"
-    />
+    <hx-field
+      ><input
+        hx-input
+        size="small"
+        #search
+        type="search"
+        class="search"
+        placeholder="Search settings"
+        aria-label="Search settings"
+        [value]="query()"
+        (input)="setQuery($event)"
+        (keydown)="searchKey($event)"
+    /></hx-field>
     <ul class="tree" role="tree" aria-label="Settings">
       @for (group of visibleGroups(); track group.id) {
         <li role="none">
@@ -66,7 +67,7 @@
     <div class="scroll">
       <div class="page" [class.wide]="isWide()">
         @if (writeError(); as reason) {
-          <p class="error" role="alert">{{ reason }}</p>
+          <hx-message class="error" severity="error" size="small">{{ reason }}</hx-message>
         }
         @switch (current().page.id) {
           @case ("appearance") {
@@ -152,8 +153,11 @@
               <section aria-label="Fonts">
                 <h2>Fonts</h2>
                 <div class="fields aligned">
-                  <label class="field grow" [class.hit]="hit('Terminal font family')">
-                    Terminal font family
+                  <hx-field
+                    class="field grow"
+                    [class.hit]="hit('Terminal font family')"
+                    label="Terminal font family"
+                  >
                     <input
                       hx-input
                       size="small"
@@ -163,9 +167,12 @@
                       [value]="settings().fontFamily ?? ''"
                       (change)="setFont('terminal', $event)"
                     />
-                  </label>
-                  <label class="field ratio" [class.hit]="hit('Terminal font size')">
-                    Terminal font size
+                  </hx-field>
+                  <hx-field
+                    class="field ratio"
+                    [class.hit]="hit('Terminal font size')"
+                    label="Terminal font size"
+                  >
                     <input
                       hx-input
                       size="small"
@@ -176,11 +183,14 @@
                       [value]="settings().fontSize"
                       (change)="setFontSize('terminal', $event)"
                     />
-                  </label>
+                  </hx-field>
                 </div>
                 <div class="fields aligned">
-                  <label class="field grow" [class.hit]="hit('UI font family')">
-                    UI font family
+                  <hx-field
+                    class="field grow"
+                    [class.hit]="hit('UI font family')"
+                    label="UI font family"
+                  >
                     <input
                       hx-input
                       size="small"
@@ -190,9 +200,12 @@
                       [value]="settings().uiFontFamily ?? ''"
                       (change)="setFont('ui', $event)"
                     />
-                  </label>
-                  <label class="field ratio" [class.hit]="hit('UI font size')">
-                    UI font size
+                  </hx-field>
+                  <hx-field
+                    class="field ratio"
+                    [class.hit]="hit('UI font size')"
+                    label="UI font size"
+                  >
                     <input
                       hx-input
                       size="small"
@@ -202,7 +215,7 @@
                       [value]="settings().uiFontSize"
                       (change)="setFontSize('ui', $event)"
                     />
-                  </label>
+                  </hx-field>
                 </div>
                 <datalist id="mono-fonts">
                   @for (font of monoFonts; track font) {
@@ -225,16 +238,18 @@
                   <div class="fields sound-row">
                     <label class="check" [class.hit]="hit(kind.label)">
                       <input
-                        hx-checkbox
+                        hx-switch
                         type="checkbox"
-                        role="switch"
                         [checked]="soundOn(kind.id)"
                         (change)="setSoundOn(kind.id, $event)"
                       />
                       {{ kind.label }}
                     </label>
-                    <label class="field grow" [class.hit]="hit(kind.label)">
-                      {{ kind.label }} file
+                    <hx-field
+                      class="field grow"
+                      [class.hit]="hit(kind.label)"
+                      [label]="kind.label + ' file'"
+                    >
                       <input
                         hx-input
                         size="small"
@@ -243,7 +258,7 @@
                         [value]="soundFile(kind.id)"
                         (change)="setSoundFile(kind.id, $event)"
                       />
-                    </label>
+                    </hx-field>
                     <button
                       type="button"
                       hx-button
@@ -257,7 +272,7 @@
                   </div>
                 }
                 @if (soundProblem(); as problem) {
-                  <p class="error" role="alert">{{ problem }}</p>
+                  <hx-message class="error" severity="error" size="small">{{ problem }}</hx-message>
                 }
               </section>
             </section>
@@ -406,9 +421,8 @@
               <h3 [class.hit]="hit('Terminal history')">Terminal history</h3>
               <label class="check" [class.hit]="hit('Keep terminal history')">
                 <input
-                  hx-checkbox
+                  hx-switch
                   type="checkbox"
-                  role="switch"
                   [checked]="settings().terminalHistory.enabled"
                   (change)="setHistory('enabled', $event)"
                 />
@@ -422,8 +436,11 @@
                 removes its log.
               </p>
               <div class="fields aligned">
-                <label class="field ratio" [class.hit]="hit('Limit per terminal')">
-                  Limit per terminal (MiB)
+                <hx-field
+                  class="field ratio"
+                  [class.hit]="hit('Limit per terminal')"
+                  label="Limit per terminal (MiB)"
+                >
                   <input
                     hx-input
                     size="small"
@@ -434,9 +451,12 @@
                     [value]="settings().terminalHistory.perTerminalMib"
                     (change)="setHistory('perTerminalMib', $event)"
                   />
-                </label>
-                <label class="field ratio" [class.hit]="hit('Limit in total')">
-                  Limit in total (MiB)
+                </hx-field>
+                <hx-field
+                  class="field ratio"
+                  [class.hit]="hit('Limit in total')"
+                  label="Limit in total (MiB)"
+                >
                   <input
                     hx-input
                     size="small"
@@ -447,7 +467,7 @@
                     [value]="settings().terminalHistory.totalMib"
                     (change)="setHistory('totalMib', $event)"
                   />
-                </label>
+                </hx-field>
               </div>
               <h3 [class.hit]="hit('Agent hooks')">Agent hooks and MCP</h3>
               <table class="integrations" aria-label="Agent hooks and MCP">
@@ -502,7 +522,9 @@
                             </button>
                           }
                           @if (hooks.errors()[h.agent]; as err) {
-                            <p class="error" role="alert">{{ err }}</p>
+                            <hx-message class="error" severity="error" size="small">{{
+                              err
+                            }}</hx-message>
                           }
                         </td>
                       } @else {
@@ -573,9 +595,8 @@
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
               <label class="check" [class.hit]="hit('Claude Code: classic renderer')">
                 <input
-                  hx-checkbox
+                  hx-switch
                   type="checkbox"
-                  role="switch"
                   [checked]="settings().claudeClassicRenderer"
                   (change)="setClassicRenderer($event)"
                 />
@@ -588,9 +609,8 @@
               </p>
               <label class="check" [class.hit]="hit('Keep the machine awake')">
                 <input
-                  hx-checkbox
+                  hx-switch
                   type="checkbox"
-                  role="switch"
                   [checked]="settings().keepAwake"
                   (change)="setKeepAwake($event)"
                 />
@@ -722,7 +742,7 @@
                 </button>
               </div>
               @if (transfer.error(); as message) {
-                <p class="error" role="alert">{{ message }}</p>
+                <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
               }
               @if (transfer.message(); as message) {
                 <p class="hint" role="status">{{ message }}</p>

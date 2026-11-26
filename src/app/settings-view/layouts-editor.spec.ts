@@ -243,7 +243,7 @@ describe("LayoutsEditor", () => {
     button("Edit review").click();
     fixture.detectChanges();
     type(host.querySelector<HTMLInputElement>('input[name="layout-name"]')!, "other");
-    expect(host.querySelector(".field-error")?.textContent).toContain(
+    expect(host.querySelector(".hx-field-error-shown")?.textContent).toContain(
       'Another layout is called "other"',
     );
     expect(button("Save layout").disabled).toBe(true);

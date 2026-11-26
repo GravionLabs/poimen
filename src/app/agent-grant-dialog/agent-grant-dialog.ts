@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxField, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { AgentGrants, durationText, type GrantRequest } from "../core/agent-grants";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 
@@ -17,7 +17,7 @@ interface Edit {
  */
 @Component({
   selector: "app-agent-grant-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [DialogShell, HxButton, HxCheckbox, HxField, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./agent-grant-dialog.html",
   styleUrl: "./agent-grant-dialog.css",

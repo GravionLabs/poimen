@@ -10,7 +10,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxSelectButton, HxMessage } from "@gravionlabs/helix-ui";
 import { ExternalEditor } from "../core/external-editor";
 import { TauriBridge } from "../core/tauri";
 import { renderMarkdown } from "../github/markdown";
@@ -33,7 +33,7 @@ type ViewMode = "rendered" | "source";
  */
 @Component({
   selector: "app-file-preview",
-  imports: [HxButton, HxSelectButton, SourceView],
+  imports: [HxButton, HxSelectButton, SourceView, HxMessage],
   templateUrl: "./file-preview.html",
   styles: `
     :host {
@@ -109,9 +109,6 @@ type ViewMode = "rendered" | "source";
       max-width: 420px;
       text-align: center;
       color: var(--h-text-muted-color);
-    }
-    .note.problem {
-      color: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

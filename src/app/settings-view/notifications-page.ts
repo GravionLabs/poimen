@@ -1,4 +1,4 @@
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import type { NotifyHook } from "../core/notify-settings";
 import { SettingsStore } from "../core/settings";
@@ -13,7 +13,7 @@ type Status = "blocked" | "done";
  */
 @Component({
   selector: "app-notifications-page",
-  imports: [HxButton],
+  imports: [HxButton, HxMessage],
   templateUrl: "./notifications-page.html",
   styleUrls: ["./settings-view.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,

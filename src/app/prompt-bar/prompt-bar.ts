@@ -7,14 +7,14 @@ import {
   input,
   signal,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxInput } from "@gravionlabs/helix-ui";
 import { AgentPrompts, promptMessage, promptSucceeded } from "../core/agent-prompt";
 import type { Terminal } from "../core/snapshot";
 
 /** A one-line input that sends a prompt to the agent of a pane; works in a read-only tab. */
 @Component({
   selector: "app-prompt-bar",
-  imports: [HxButton],
+  imports: [HxButton, HxField, HxInput],
   templateUrl: "./prompt-bar.html",
   styleUrl: "./prompt-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

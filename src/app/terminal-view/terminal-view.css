@@ -88,6 +88,7 @@ app-prompt-bar[hidden] {
 
 .search-input {
   width: 180px;
+  box-shadow: none;
   padding: 2px 4px;
   font: inherit;
   color: inherit;

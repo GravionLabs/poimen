@@ -1,14 +1,17 @@
 <form class="prompt" (submit)="$event.preventDefault(); send()">
-  <input
-    type="text"
-    name="prompt"
-    placeholder="Send a prompt to this agent"
-    aria-label="Prompt for this agent"
-    autocomplete="off"
-    [value]="text()"
-    [disabled]="sending()"
-    (input)="type($event)"
-  />
+  <hx-field
+    ><input
+      hx-input
+      size="small"
+      type="text"
+      name="prompt"
+      placeholder="Send a prompt to this agent"
+      aria-label="Prompt for this agent"
+      autocomplete="off"
+      [value]="text()"
+      [disabled]="sending()"
+      (input)="type($event)"
+  /></hx-field>
   <button
     hx-button
     size="small"

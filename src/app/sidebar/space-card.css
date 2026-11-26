@@ -329,20 +329,20 @@
   color: var(--status-error-on-active);
 }
 
-.edit {
-  min-width: 0;
+.edit-field {
   flex: 1 1 4rem;
+  min-width: 0;
+}
+
+.edit {
+  height: auto;
+  min-width: 0;
   font: inherit;
   color: inherit;
   background: transparent;
   border: 1px solid currentcolor;
   border-radius: 3px;
   padding: 0 4px;
-}
-
-.edit-error {
-  color: var(--status-error);
-  font-size: 11px;
 }
 
 .pin-mark {

@@ -15,7 +15,7 @@ import {
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl } from "../pulls";
 import { IssueTasks } from "../issue-task";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxSelectButton, HxField, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { Icon } from "../../ui/icon/icon";
 import { LoadingRows } from "../../ui/loading/loading-rows";
 
@@ -28,7 +28,7 @@ import { LoadingRows } from "../../ui/loading/loading-rows";
   selector: "app-issue-detail",
   templateUrl: "./issue-detail.html",
   styleUrl: "./issue-detail.css",
-  imports: [LoadingRows, HxButton, HxSelectButton, ChipPicker, Icon],
+  imports: [LoadingRows, HxButton, HxSelectButton, ChipPicker, Icon, HxField, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IssueDetailPane {

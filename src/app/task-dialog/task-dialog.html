@@ -3,14 +3,16 @@
     <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -->
     <div class="picker" (keydown)="onKey($event)">
       <div class="head">
-        <input
-          class="field"
-          type="text"
-          placeholder="Filter by text or number"
-          aria-label="Filter issues"
-          [value]="picker.query()"
-          (input)="input($event)"
-        />
+        <hx-field class="filter"
+          ><input
+            hx-input
+            size="small"
+            type="text"
+            placeholder="Filter by text or number"
+            aria-label="Filter issues"
+            [value]="picker.query()"
+            (input)="input($event)"
+        /></hx-field>
         @if (picker.machines().length > 0) {
           <hx-field class="mode" title="Where the task runs">
             <hx-select
@@ -55,7 +57,9 @@
         }
       </div>
       @if (picker.error(); as error) {
-        <p class="error" role="alert">{{ errorText(error) }} You can still type an issue number.</p>
+        <hx-message class="error" severity="error" size="small"
+          >{{ errorText(error) }} You can still type an issue number.</hx-message
+        >
       }
       @if (picker.loading()) {
         <app-loading-rows [active]="true" label="Loading issues" testId="task-loading" [rows]="5" />

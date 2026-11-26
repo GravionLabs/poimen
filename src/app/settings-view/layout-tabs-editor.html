@@ -14,8 +14,7 @@
           [style.margin-left.rem]="item.depth * 1.5"
         >
           <div class="pane-fields">
-            <label class="field">
-              <span>Tab name</span>
+            <hx-field class="field" label="Tab name">
               <input
                 hx-input
                 size="small"
@@ -25,7 +24,7 @@
                 [value]="item.tab.name"
                 (input)="setTabName(item.path, $event)"
               />
-            </label>
+            </hx-field>
             <div class="field">
               <span>Shape</span>
               <hx-field>
@@ -153,8 +152,7 @@
                   (valueChange)="setPlace(item.path, { of: $any($event) || null })"
                 />
               </hx-field>
-              <label class="field ratio">
-                <span>Ratio</span>
+              <hx-field class="field ratio" label="Ratio">
                 <input
                   hx-input
                   size="small"
@@ -166,18 +164,18 @@
                   [value]="p.ratio"
                   (input)="setPlace(item.path, { ratio: ratioOf($event) })"
                 />
-              </label>
+              </hx-field>
             }
           </div>
           @if (errs()?.tab?.[ti]; as m) {
-            <p class="field-error">{{ m }}</p>
+            <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
           }
         </li>
       }
     </ol>
   </div>
   @if (errs()?.tabs; as m) {
-    <p class="field-error">{{ m }}</p>
+    <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
   }
   <div class="toolbar-row">
     <button
@@ -214,8 +212,7 @@
   @if (node.kind === "terminal") {
     <div class="pane-fields leaf">
       @if (at.length > 0) {
-        <label class="field">
-          <span>Terminal name</span>
+        <hx-field class="field" label="Terminal name">
           <input
             hx-input
             size="small"
@@ -224,10 +221,9 @@
             [value]="node.name ?? ''"
             (input)="setLeaf(tab, at, 'name', $event)"
           />
-        </label>
+        </hx-field>
       }
-      <label class="field grow">
-        <span>Command</span>
+      <hx-field class="field grow" label="Command">
         <input
           hx-input
           size="small"
@@ -237,9 +233,8 @@
           [value]="node.command ?? ''"
           (input)="setLeaf(tab, at, 'command', $event)"
         />
-      </label>
-      <label class="field">
-        <span>Directory</span>
+      </hx-field>
+      <hx-field class="field" label="Directory">
         <input
           hx-input
           size="small"
@@ -248,7 +243,7 @@
           [value]="node.cwd ?? ''"
           (input)="setLeaf(tab, at, 'cwd', $event)"
         />
-      </label>
+      </hx-field>
       @if (flat()[ti].tab.root.kind === "split") {
         <span class="actions">
           <button
@@ -302,8 +297,7 @@
             (valueChange)="setSplit(tab, at, { direction: $any($event) })"
           />
         </hx-field>
-        <label class="field ratio">
-          <span>Ratio</span>
+        <hx-field class="field ratio" label="Ratio">
           <input
             hx-input
             size="small"
@@ -315,7 +309,7 @@
             [value]="node.ratio"
             (input)="setSplit(tab, at, { ratio: ratioOf($event) })"
           />
-        </label>
+        </hx-field>
       </div>
       <div class="split-children">
         <ng-container

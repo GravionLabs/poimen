@@ -9,7 +9,9 @@
     <h2>Issues</h2>
   </header>
   @if (issues.error(); as err) {
-    <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
+    <hx-message class="problem" severity="error" size="small"
+      >Could not read the issues: {{ err }}</hx-message
+    >
   }
   @if (issues.loading() && !issues.result()) {
     <app-loading-rows [active]="true" label="Loading issues" testId="issues-loading" [rows]="6" />
@@ -52,13 +54,16 @@
           (valueChange)="issues.assignee.set($event || null)"
         />
       </hx-field>
-      <input
-        type="search"
-        aria-label="Filter issues by title or number"
-        placeholder="Title or number"
-        [value]="issues.text()"
-        (input)="issues.text.set(value($event))"
-      />
+      <hx-field
+        ><input
+          hx-input
+          size="small"
+          type="search"
+          aria-label="Filter issues by title or number"
+          placeholder="Title or number"
+          [value]="issues.text()"
+          (input)="issues.text.set(value($event))"
+      /></hx-field>
       @if (issues.markedIssues().length) {
         <span class="hint" data-testid="marked-count"
           >{{ issues.markedIssues().length }} selected</span
@@ -129,9 +134,9 @@
       </div>
     }
     @for (e of issues.errors(); track e.repo) {
-      <p class="problem" role="alert" data-testid="issue-error">
+      <hx-message class="problem" data-testid="issue-error" severity="error" size="small">
         {{ e.repo }}: {{ errorText(e.error) }}
-      </p>
+      </hx-message>
     }
     @for (tree of issues.trees(); track tree.root) {
       <h3 class="mono">
@@ -175,6 +180,7 @@
             (contextmenu)="openRowMenu($event, tree.repo, tree.root, i)"
           >
             <input
+              hx-checkbox
               type="checkbox"
               data-testid="mark"
               [checked]="issues.marked().has(tree.repo + '#' + i.number)"

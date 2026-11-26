@@ -2,7 +2,7 @@
   <app-dialog-shell heading="Resume session" label="Resume session" (cancelled)="resume.cancel()">
     <p class="hint dir">{{ d.dir }}</p>
     @if (d.error) {
-      <p class="error" role="alert">{{ d.error }}</p>
+      <hx-message class="error" severity="error" size="small">{{ d.error }}</hx-message>
     }
     @if (d.loading) {
       <p class="hint">Reading the sessions...</p>

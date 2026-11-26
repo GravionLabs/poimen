@@ -15,7 +15,16 @@ import {
   type Appearance,
   type ColorScheme,
 } from "../core/color-scheme";
-import { HxButton, HxCheckbox, HxInput, HxSelectButton, HxTag } from "@gravionlabs/helix-ui";
+import {
+  HxButton,
+  HxCheckbox,
+  HxInput,
+  HxSelectButton,
+  HxTag,
+  HxField,
+  HxMessage,
+  HxSwitch,
+} from "@gravionlabs/helix-ui";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
   defaultTerminalFontFamily,
@@ -176,6 +185,9 @@ export function withRoot(
     SettingsImportPanel,
     HxInput,
     HxCheckbox,
+    HxField,
+    HxMessage,
+    HxSwitch,
   ],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",

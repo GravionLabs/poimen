@@ -1,3 +1,4 @@
+import { HxField, HxInput } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -16,7 +17,7 @@ import { titleParts } from "../command-palette/title-parts";
 @Component({
   selector: "app-jump-palette",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Icon],
+  imports: [Icon, HxField, HxInput],
   templateUrl: "./jump-palette.html",
   styleUrl: "./jump-palette.css",
 })

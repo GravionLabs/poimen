@@ -17,14 +17,14 @@ import type { PrAction } from "../github/pulls";
 import { EditorTabs } from "../core/editor-tabs";
 import { SnippetRunner } from "../core/snippets";
 import type { PaletteEntry } from "../core/project-entries";
-import { HxButton, HxTag } from "@gravionlabs/helix-ui";
+import { HxButton, HxTag, HxField, HxInput } from "@gravionlabs/helix-ui";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
 @Component({
   selector: "app-command-palette",
-  imports: [HxButton, HxTag],
+  imports: [HxButton, HxTag, HxField, HxInput],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./command-palette.html",
   styleUrl: "./command-palette.css",

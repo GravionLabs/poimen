@@ -27,7 +27,7 @@ import {
   type LinkedIssue,
   type PrAction,
 } from "../pulls";
-import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxCheckbox, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { Icon } from "../../ui/icon/icon";
 import { LoadingRows } from "../../ui/loading/loading-rows";
 
@@ -40,7 +40,17 @@ import { LoadingRows } from "../../ui/loading/loading-rows";
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
-  imports: [LoadingRows, HxButton, ChipPicker, Icon, HxField, HxSelect],
+  imports: [
+    LoadingRows,
+    HxButton,
+    ChipPicker,
+    Icon,
+    HxField,
+    HxSelect,
+    HxCheckbox,
+    HxInput,
+    HxMessage,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {

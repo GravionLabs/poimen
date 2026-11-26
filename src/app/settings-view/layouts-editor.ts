@@ -1,4 +1,4 @@
-import { HxButton, HxInput } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxField, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { SettingsStore } from "../core/settings";
 import {
@@ -38,7 +38,7 @@ function value(event: Event): string {
  */
 @Component({
   selector: "app-layouts-editor",
-  imports: [LayoutTabsEditor, HxButton, HxInput],
+  imports: [LayoutTabsEditor, HxButton, HxInput, HxField, HxMessage],
   templateUrl: "./layouts-editor.html",
   styleUrls: ["./settings-view.css", "./layouts-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,

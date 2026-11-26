@@ -310,6 +310,40 @@ button.hx-button.hx-button-icon-only {
   font-size: var(--h-font-size-xs);
 }
 
+/*
+ * Inputs (#1362): `hx-input size="small"` is as high as the buttons and selects of a row, with their
+ * text size, and fills its hx-field. `:where` keeps the specificity at zero, so a component can still
+ * shape a search field of its own.
+ */
+:where(.hx-input.hx-input-sm) {
+  font-size: var(--h-font-size-xs);
+}
+
+:where(input.hx-input.hx-input-sm) {
+  height: var(--control-height);
+  padding-block: 0;
+}
+
+:where(.hx-field-control > :is(.hx-input, hx-input-group)) {
+  align-self: stretch;
+}
+
+/* The texts below a field are as small as the text of its control. */
+:where(.hx-field > :is(.hx-field-hint, .hx-field-error)) {
+  font-size: var(--h-font-size-xs);
+}
+
+/* The header of a pane grid names the columns, so the labels of its rows are for screen readers. */
+@media (min-width: 721px) {
+  .pane-row > .pane-fields:not(.leaf, .place) > hx-field.field > .hx-field-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
 /* An hx-field in a settings form row or a dialog looks like the labelled inputs beside it. */
 hx-field.field > .hx-field-label,
 dialog.dialog .hx-field-label {
@@ -334,25 +368,14 @@ dialog.dialog :is(label, hx-field) + :is(label, hx-field) {
   margin-top: 8px;
 }
 
-dialog.dialog .field,
-dialog.dialog input[type="text"] {
-  height: var(--control-height);
-  padding: 0 8px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-
 dialog.dialog .hint {
   margin: 8px 0 0;
   opacity: 0.7;
 }
 
-dialog.dialog .error {
-  margin: 8px 0 0;
-  color: var(--app-danger-text);
+dialog.dialog hx-message {
+  display: block;
+  margin-top: 8px;
 }
 
 dialog.dialog .dialog-buttons {

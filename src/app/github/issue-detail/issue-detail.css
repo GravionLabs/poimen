@@ -28,13 +28,11 @@ dl.facts dd {
   flex: 1;
   gap: 6px;
 }
-.title-edit input {
+.title-edit hx-field {
   flex: 1;
   min-width: 0;
 }
 .body-edit textarea {
-  width: 100%;
-  box-sizing: border-box;
   font-family: monospace;
 }
 .body-edit .tabs {

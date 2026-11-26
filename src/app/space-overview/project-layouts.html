@@ -69,7 +69,7 @@
     </button>
   </div>
   @if (layoutError(); as message) {
-    <p class="error" role="alert">{{ message }}</p>
+    <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
   }
 </section>
 <section class="layout-section" aria-labelledby="cfg-presets-title">
@@ -81,17 +81,17 @@
   @for (preset of presetList() ?? []; track $index; let pi = $index) {
     <div class="preset" [attr.data-preset]="pi">
       <div class="field">
-        <label [attr.for]="'cfg-preset-' + pi">Preset name</label>
-        <input
-          hx-input
-          size="small"
-          type="text"
-          class="cfg-preset-name"
-          autocomplete="off"
-          [id]="'cfg-preset-' + pi"
-          [value]="preset.name"
-          (input)="renamePreset(pi, $event)"
-        />
+        <hx-field class="grow" label="Preset name"
+          ><input
+            hx-input
+            size="small"
+            type="text"
+            class="cfg-preset-name"
+            autocomplete="off"
+            [id]="'cfg-preset-' + pi"
+            [value]="preset.name"
+            (input)="renamePreset(pi, $event)"
+        /></hx-field>
         <button
           type="button"
           hx-button
@@ -155,9 +155,11 @@
     </button>
   </div>
   @if (presetsError(); as message) {
-    <p class="error" role="alert">{{ message }}</p>
+    <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
   }
 </section>
 @if (transferError(); as message) {
-  <p class="error cfg-transfer-error" role="alert">{{ message }}</p>
+  <hx-message class="error cfg-transfer-error" severity="error" size="small">{{
+    message
+  }}</hx-message>
 }

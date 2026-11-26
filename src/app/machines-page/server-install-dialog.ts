@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 import { ServerInstall, planScript, sizeText } from "../core/server-install";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 
@@ -13,7 +13,7 @@ const ICON = { pending: "·", running: "…", ok: "✓", failed: "✕" } as cons
  */
 @Component({
   selector: "app-server-install-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [DialogShell, HxButton, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./server-install-dialog.html",
   styles: `

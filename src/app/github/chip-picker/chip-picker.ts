@@ -6,7 +6,7 @@ import {
   Output,
   signal,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxInput } from "@gravionlabs/helix-ui";
 
 /**
  * Chips for a set of names (reviewers, labels, assignees) with a field that adds one from the
@@ -15,7 +15,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
  */
 @Component({
   selector: "app-chip-picker",
-  imports: [HxButton],
+  imports: [HxButton, HxField, HxInput],
   templateUrl: "./chip-picker.html",
   styleUrl: "./chip-picker.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

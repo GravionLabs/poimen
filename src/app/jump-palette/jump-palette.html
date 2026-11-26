@@ -12,18 +12,21 @@
         <circle cx="6.5" cy="6.5" r="4.5" />
         <path d="M10 10l4.5 4.5" />
       </svg>
-      <input
-        #field
-        class="query"
-        type="text"
-        role="combobox"
-        aria-expanded="true"
-        aria-controls="jump-list"
-        placeholder="Jump to an agent or space"
-        [value]="palette.query()"
-        (input)="type($event)"
-        (keydown)="key($event)"
-      />
+      <hx-field
+        ><input
+          hx-input
+          size="small"
+          #field
+          class="query"
+          type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="jump-list"
+          placeholder="Jump to an agent or space"
+          [value]="palette.query()"
+          (input)="type($event)"
+          (keydown)="key($event)"
+      /></hx-field>
     </div>
     <p class="sr-only" role="status" aria-live="polite">
       {{ palette.announcement() }}

@@ -24,16 +24,19 @@
     }
   </ul>
   @if (!disabled && free().length > 0) {
-    <input
-      type="text"
-      [attr.aria-label]="'Add ' + label"
-      placeholder="Add..."
-      data-testid="chip-input"
-      [value]="query()"
-      (input)="query.set($any($event.target).value)"
-      (keydown.enter)="$event.preventDefault(); takeFirst()"
-      (keydown)="move($event, 'field')"
-    />
+    <hx-field
+      ><input
+        hx-input
+        size="small"
+        type="text"
+        [attr.aria-label]="'Add ' + label"
+        placeholder="Add..."
+        data-testid="chip-input"
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+        (keydown.enter)="$event.preventDefault(); takeFirst()"
+        (keydown)="move($event, 'field')"
+    /></hx-field>
     @if (query().trim()) {
       <ul class="options" [attr.aria-label]="label + ' options'">
         @for (o of matches(); track o) {

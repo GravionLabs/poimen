@@ -12,7 +12,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxSelectButton, HxField, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { EditorTabs } from "../core/editor-tabs";
 import { ExternalEditor, joinPath } from "../core/external-editor";
 import { ContextMenu } from "../ui/context-menu/context-menu";
@@ -69,6 +69,9 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     DialogShell,
     PullRequestDialog,
     NgTemplateOutlet,
+    HxField,
+    HxInput,
+    HxMessage,
   ],
   providers: [Changes, LineComments, Findings, CreatePullRequest],
   templateUrl: "./changes-view.html",
@@ -234,14 +237,11 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       padding: 6px 12px;
       border-bottom: 1px solid var(--h-content-border-color);
     }
-    .message {
+    .git hx-field {
       flex: 1;
       min-width: 0;
-      font: inherit;
-      color: inherit;
-      background: transparent;
-      border: 1px solid var(--h-content-border-color);
-      padding: 2px 6px;
+    }
+    .message {
       resize: vertical;
     }
     .result {

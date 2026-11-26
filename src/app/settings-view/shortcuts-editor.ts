@@ -1,4 +1,4 @@
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxMessage } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -28,7 +28,7 @@ interface Recording {
  */
 @Component({
   selector: "app-shortcuts-editor",
-  imports: [HxButton],
+  imports: [HxButton, HxMessage],
   templateUrl: "./shortcuts-editor.html",
   styleUrls: ["./settings-view.css", "./shortcuts-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,

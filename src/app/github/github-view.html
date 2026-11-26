@@ -27,6 +27,7 @@
       </hx-field>
       <label class="show-empty">
         <input
+          hx-checkbox
           type="checkbox"
           data-testid="show-empty"
           [checked]="ui.githubShowEmpty()"
@@ -68,7 +69,9 @@
         @case ("pulls") {
           <h2 class="page-title">Pull requests</h2>
           @if (pulls.error(); as err) {
-            <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
+            <hx-message class="problem" severity="error" size="small"
+              >Could not read the pull requests: {{ err }}</hx-message
+            >
           }
           @let result = pulls.result();
           @if (!result) {
@@ -92,13 +95,16 @@
                 [value]="pulls.scope()"
                 (valueChange)="pulls.scope.set($any($event))"
               />
-              <input
-                type="search"
-                aria-label="Filter by title or number"
-                placeholder="Title or number"
-                [value]="pulls.text()"
-                (input)="pulls.text.set($any($event.target).value)"
-              />
+              <hx-field
+                ><input
+                  hx-input
+                  size="small"
+                  type="search"
+                  aria-label="Filter by title or number"
+                  placeholder="Title or number"
+                  [value]="pulls.text()"
+                  (input)="pulls.text.set($any($event.target).value)"
+              /></hx-field>
               <span class="count" data-testid="count">
                 {{ pulls.visible().length }} shown
                 @if (pulls.selected().size) {
@@ -113,9 +119,9 @@
             }
             @for (repo of result.repos; track repo.root) {
               @if (repo.status === "error") {
-                <p class="problem" role="alert" data-testid="repo-error">
+                <hx-message class="problem" data-testid="repo-error" severity="error" size="small">
                   {{ repo.repo }}: {{ errorText(repo.error) }}
-                </p>
+                </hx-message>
               }
             }
             @if (result.repos.length > 0) {
@@ -161,6 +167,7 @@
                         >
                           <td>
                             <input
+                              hx-checkbox
                               type="checkbox"
                               [attr.aria-label]="'Select #' + row.number"
                               [checked]="pulls.selected().has(row.key)"
