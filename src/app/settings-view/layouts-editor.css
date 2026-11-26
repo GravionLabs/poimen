@@ -127,7 +127,7 @@
   flex: 0 0 auto;
 }
 
-.layout-form .pane-grid .split-node .field:has(select) {
+.layout-form .pane-grid .split-node .field:has(hx-select) {
   flex: 0 1 12rem;
 }
 
@@ -148,7 +148,6 @@
 }
 
 .layout-form .pane-grid .field input[type="text"],
-.layout-form .pane-grid .field select,
 .layout-form .pane-grid .field.ratio input {
   width: 100%;
   box-sizing: border-box;

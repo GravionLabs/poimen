@@ -33,36 +33,38 @@
     }
   </div>
   @if (ui.panelTab() === "output" && subagents.agents().length) {
-    <select
-      class="picker"
-      aria-label="Subagent"
-      [value]="subagents.selectedId() ?? ''"
-      (change)="pick($event)"
-    >
-      @for (agent of subagents.agents(); track agent.agent_id) {
-        <option [value]="agent.agent_id" [selected]="agent.agent_id === subagents.selectedId()">
-          {{ label(agent, now()) }}
-        </option>
-      }
-    </select>
+    <hx-field class="picker">
+      <hx-select
+        #subagentPicker
+        size="small"
+        fluid
+        ariaLabel="Subagent"
+        [options]="subagentOptions()"
+        [value]="subagents.selectedId() ?? ''"
+        (valueChange)="pick($event)"
+      />
+    </hx-field>
   }
   @if (ui.panelTab() === "events" && spaceRuns().length) {
-    <select class="picker" aria-label="Run" (change)="pickRun($event)">
-      @for (g of groups(); track g.key) {
-        <optgroup [label]="groupTitle(g)">
-          @if (g.runs.length > 1) {
-            <option [value]="allPrefix + g.key" [selected]="allGroup()?.key === g.key">
-              All runs ({{ g.runs.length }})
-            </option>
-          }
-          @for (r of g.runs; track r.key) {
-            <option [value]="r.key" [selected]="!allGroup() && r.key === run()?.key">
-              {{ runLabel(r, now()) }}
-            </option>
-          }
-        </optgroup>
-      }
-    </select>
+    <!-- A native select: hx-select has no option groups (ui/select-usage.spec.ts). -->
+    <hx-field class="picker">
+      <select class="run-picker" aria-label="Run" (change)="pickRun($event)">
+        @for (g of groups(); track g.key) {
+          <optgroup [label]="groupTitle(g)">
+            @if (g.runs.length > 1) {
+              <option [value]="allPrefix + g.key" [selected]="allGroup()?.key === g.key">
+                All runs ({{ g.runs.length }})
+              </option>
+            }
+            @for (r of g.runs; track r.key) {
+              <option [value]="r.key" [selected]="!allGroup() && r.key === run()?.key">
+                {{ runLabel(r, now()) }}
+              </option>
+            }
+          </optgroup>
+        }
+      </select>
+    </hx-field>
   }
   <span class="spacer"></span>
   @if (ui.panelTab() === "flow" && subagents.supported() && subagents.paneId(); as paneId) {

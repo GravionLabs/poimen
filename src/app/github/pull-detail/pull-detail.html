@@ -177,17 +177,16 @@
                 <strong data-testid="merge-method-label">{{ mergeLabels[m.method] }}</strong
                 >?
               </p>
-              <select
-                aria-label="Merge method"
-                data-testid="merge-method"
-                (change)="setMethod($any($event.target).value)"
-              >
-                @for (method of d.mergeMethods; track method) {
-                  <option [value]="method" [selected]="method === m.method">
-                    {{ mergeLabels[method] }}
-                  </option>
-                }
-              </select>
+              <hx-field>
+                <hx-select
+                  size="small"
+                  ariaLabel="Merge method"
+                  data-testid="merge-method"
+                  [options]="mergeOptions()"
+                  [value]="m.method"
+                  (valueChange)="setMethod($any($event))"
+                />
+              </hx-field>
               <label>
                 <input
                   type="checkbox"

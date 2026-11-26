@@ -15,16 +15,16 @@
   </header>
   <div class="layout">
     <aside class="side">
-      <select
-        aria-label="Repository"
-        [value]="filter.repo() ?? ''"
-        (change)="setRepo($any($event.target).value)"
-      >
-        <option value="">All repositories</option>
-        @for (name of repoNames(); track name) {
-          <option [value]="name">{{ name }}</option>
-        }
-      </select>
+      <hx-field class="repo-filter">
+        <hx-select
+          size="small"
+          fluid
+          ariaLabel="Repository"
+          [options]="repoOptions()"
+          [value]="filter.repo() ?? ''"
+          (valueChange)="setRepo($event)"
+        />
+      </hx-field>
       <label class="show-empty">
         <input
           type="checkbox"

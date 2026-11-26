@@ -28,6 +28,7 @@ import { hasCheckLog, stripAnsi, tailLines } from "../check-log";
 import { IssueDetailPane } from "../issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail";
 import { ChipPicker } from "../chip-picker/chip-picker";
+import { choose, optionLabels, shown } from "../../../testing/select";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -451,15 +452,12 @@ describe("merge, re-run and people", () => {
     const text = q(el, "[data-testid=merge-confirm]")!.textContent!;
     expect(text).toContain("main");
     expect(q(el, "[data-testid=merge-method-label]")!.textContent).toBe("Squash and merge");
-    const options = [
-      ...el.querySelectorAll<HTMLOptionElement>("[data-testid=merge-method] option"),
-    ];
-    expect(options.map((o) => o.value)).toEqual(["squash", "rebase"]);
+    const method = q(el, "[data-testid=merge-method]")!;
+    const settle = () => fixture.detectChanges();
+    expect(await optionLabels(method, settle)).toEqual(["Squash and merge", "Rebase and merge"]);
     expect((q(el, "[data-testid=merge-delete]") as HTMLInputElement).checked).toBe(true);
-    const select = q(el, "[data-testid=merge-method]") as HTMLSelectElement;
-    select.value = "rebase";
-    select.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    await choose(method, "Rebase and merge", settle);
+    expect(shown(method)).toBe("Rebase and merge");
     q(el, "[data-testid=merge-submit]")!.click();
     await fixture.whenStable();
     expect(tauri.calls("github_pr_merge")).toEqual([

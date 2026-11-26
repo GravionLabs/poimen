@@ -9,12 +9,13 @@ import {
   Output,
   ViewChild,
 } from "@angular/core";
+import { CDK_CONNECTED_OVERLAY_DEFAULT_CONFIG } from "@angular/cdk/overlay";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { openedByKeyboard, returnFocus } from "../focus-return";
 import { Icon } from "../icon/icon";
 
 const FIELDS =
-  "input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])";
+  "input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), .hx-select-trigger:not([disabled])";
 const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[href], [tabindex]:not([tabindex="-1"])`;
 
 /**
@@ -33,6 +34,11 @@ const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[hre
   selector: "app-dialog-shell",
   host: { "(keydown)": "key($event)", "(click)": "backdrop($event)" },
   imports: [HxButton, Icon],
+  // The page behind a modal dialog is inert, so the list of an `hx-select` in the content has to
+  // stay inside the dialog instead of the overlay container at the end of the body.
+  providers: [
+    { provide: CDK_CONNECTED_OVERLAY_DEFAULT_CONFIG, useValue: { usePopover: "inline" } },
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./dialog-shell.html",
   styles: `
@@ -125,6 +131,8 @@ export class DialogShell implements OnDestroy {
 
   protected key(event: KeyboardEvent): void {
     if (event.defaultPrevented) return;
+    // The keys of an open select list are the list's: Escape closes it, not the dialog.
+    if ((event.target as Element | null)?.closest?.(".hx-select-overlay")) return;
     if (event.key === "Escape") {
       event.preventDefault();
       this.cancelled.emit();

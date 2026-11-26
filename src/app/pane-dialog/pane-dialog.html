@@ -74,14 +74,16 @@
       (cancelled)="cancel()"
     >
       <form (submit)="$event.preventDefault(); startAgent($any($event.target))">
-        <label>
-          Agent
-          <select class="field" name="kind">
-            @for (kind of kinds(); track kind) {
-              <option [value]="kind">{{ kind }}{{ note(kind) }}</option>
-            }
-          </select>
-        </label>
+        <hx-field label="Agent">
+          <hx-select
+            size="small"
+            ariaLabel="Agent"
+            name="kind"
+            [options]="kindOptions()"
+            [value]="kind()"
+            (valueChange)="chosenKind.set($event)"
+          />
+        </hx-field>
         <label>
           Name
           <input class="field" name="name" type="text" placeholder="Defaults to the agent" />

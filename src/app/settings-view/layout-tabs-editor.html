@@ -26,20 +26,18 @@
                 (input)="setTabName(item.path, $event)"
               />
             </label>
-            <label class="field">
+            <div class="field">
               <span>Shape</span>
-              <select
-                aria-labelledby="tabs-col-shape"
-                (change)="setShape(item.path, value($event))"
-              >
-                <option value="terminal" [selected]="item.tab.root.kind === 'terminal'">
-                  Terminal
-                </option>
-                <option value="split" [selected]="item.tab.root.kind === 'split'">
-                  Split tree
-                </option>
-              </select>
-            </label>
+              <hx-field>
+                <hx-select
+                  size="small"
+                  ariaLabelledby="tabs-col-shape"
+                  [options]="shapes"
+                  [value]="item.tab.root.kind"
+                  (valueChange)="setShape(item.path, $any($event))"
+                />
+              </hx-field>
+            </div>
             <span class="actions">
               <span class="group"
                 ><button
@@ -137,28 +135,24 @@
               />
             </label>
             @if (item.tab.place; as p) {
-              <label class="field">
-                <span>Direction</span>
-                <select
-                  [attr.aria-label]="'Place direction of ' + item.tab.name"
-                  (change)="setPlace(item.path, { direction: $any(value($event)) })"
-                >
-                  <option value="right" [selected]="p.direction === 'right'">right</option>
-                  <option value="down" [selected]="p.direction === 'down'">down</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Of</span>
-                <select
-                  [attr.aria-label]="'Place of for ' + item.tab.name"
-                  (change)="setPlace(item.path, { of: value($event) || null })"
-                >
-                  <option value="" [selected]="p.of === null">parent tab</option>
-                  @for (n of placeTargets(ti); track n) {
-                    <option [value]="n" [selected]="p.of === n">{{ n }}</option>
-                  }
-                </select>
-              </label>
+              <hx-field class="field" label="Direction">
+                <hx-select
+                  size="small"
+                  [ariaLabel]="'Place direction of ' + item.tab.name"
+                  [options]="placeDirections"
+                  [value]="p.direction"
+                  (valueChange)="setPlace(item.path, { direction: $any($event) })"
+                />
+              </hx-field>
+              <hx-field class="field" label="Of">
+                <hx-select
+                  size="small"
+                  [ariaLabel]="'Place of for ' + item.tab.name"
+                  [options]="ofOptions()[ti]"
+                  [value]="p.of ?? ''"
+                  (valueChange)="setPlace(item.path, { of: $any($event) || null })"
+                />
+              </hx-field>
               <label class="field ratio">
                 <span>Ratio</span>
                 <input
@@ -299,16 +293,15 @@
   } @else {
     <div class="split-node">
       <div class="pane-fields">
-        <label class="field">
-          <span>Split</span>
-          <select
-            [attr.aria-label]="'Split direction in ' + flat()[ti].tab.name"
-            (change)="setSplit(tab, at, { direction: $any(value($event)) })"
-          >
-            <option value="right" [selected]="node.direction === 'right'">side by side</option>
-            <option value="down" [selected]="node.direction === 'down'">stacked</option>
-          </select>
-        </label>
+        <hx-field class="field" label="Split">
+          <hx-select
+            size="small"
+            [ariaLabel]="'Split direction in ' + flat()[ti].tab.name"
+            [options]="splitDirections"
+            [value]="node.direction"
+            (valueChange)="setSplit(tab, at, { direction: $any($event) })"
+          />
+        </hx-field>
         <label class="field ratio">
           <span>Ratio</span>
           <input

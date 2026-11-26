@@ -293,6 +293,30 @@ button.hx-button.hx-button-icon-only {
   }
 }
 
+/*
+ * Selects (#1361): `size="small"` is as high as the buttons and inputs of a row, with their text
+ * size.
+ */
+.hx-select.hx-select-sm {
+  height: var(--control-height);
+}
+
+.hx-select-sm .hx-select-trigger {
+  padding-block: 0;
+  font-size: var(--h-font-size-xs);
+}
+
+.hx-select-panel {
+  font-size: var(--h-font-size-xs);
+}
+
+/* An hx-field in a settings form row or a dialog looks like the labelled inputs beside it. */
+hx-field.field > .hx-field-label,
+dialog.dialog .hx-field-label {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
 /* Content of the dialogs (app-dialog-shell): the rules the dialogs share. */
 dialog.dialog label {
   display: flex;
@@ -306,12 +330,11 @@ dialog.dialog label:has(> input[type="radio"]) {
   align-items: center;
 }
 
-dialog.dialog label + label {
+dialog.dialog :is(label, hx-field) + :is(label, hx-field) {
   margin-top: 8px;
 }
 
 dialog.dialog .field,
-dialog.dialog select,
 dialog.dialog input[type="text"] {
   height: var(--control-height);
   padding: 0 8px;

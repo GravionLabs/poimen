@@ -39,7 +39,7 @@ src/app/changes/changes-view.spec.ts waits	1
 src/app/changes/findings.spec.ts waits	1
 src/app/core/pane-actions.spec.ts waits	1
 src/app/settings-view/settings-view.spec.ts waits	5
-src/app/settings-view/space-templates-editor.spec.ts waits	6
+src/app/settings-view/space-templates-editor.spec.ts waits	5
 src/app/space-dialog/space-dialog.spec.ts waits	2
 src/app/space-overview/space-overview.spec.ts waits	1
 src/app/terminal-view/links.spec.ts waits	1

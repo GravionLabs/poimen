@@ -9,6 +9,7 @@ import { TauriBridge } from "../core/tauri";
 import { tauri } from "../core/tauri.mock";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
+import { choose as chooseOption, optionLabels, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -115,25 +116,22 @@ async function setup(
     fixture.detectChanges();
   };
   const input = (name: string) => host.querySelector<HTMLInputElement>(`[name=${name}]`)!;
-  const select = (name: string) => host.querySelector<HTMLSelectElement>(`select[name=${name}]`)!;
+  const select = (name: string) => host.querySelector<HTMLElement>(`hx-select[name=${name}]`)!;
   const type = (el: HTMLInputElement, value: string) => {
     el.value = value;
     el.dispatchEvent(new Event("input"));
     fixture.detectChanges();
   };
-  const choose = async (el: HTMLSelectElement, value: string) => {
-    el.value = value;
-    el.dispatchEvent(new Event("change"));
-    await new Promise((resolve) => setTimeout(resolve));
-    fixture.detectChanges();
-  };
+  const settle = () => fixture.detectChanges();
+  const choose = (el: HTMLElement, label: string) => chooseOption(el, label, settle);
+  const labels = (name: string) => optionLabels(select(name), settle);
   const saved = async () => {
     press("Save");
     await fixture.whenStable();
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
   };
-  return { fixture, host, store, button, press, input, select, type, choose, saved };
+  return { fixture, host, store, button, press, input, select, type, choose, labels, saved };
 }
 
 describe("SpaceTemplatesEditor", () => {
@@ -176,7 +174,7 @@ describe("SpaceTemplatesEditor", () => {
     press("Add default");
     expect(input("name").value).toBe("default");
     expect(host.querySelector("[name=dir]")).toBeNull();
-    expect(host.querySelector("select[name=provider]")).toBeNull();
+    expect(host.querySelector("hx-select[name=provider]")).toBeNull();
     await saved();
     expect(tauri.calls("set_space_templates")).toEqual([
       {
@@ -192,7 +190,7 @@ describe("SpaceTemplatesEditor", () => {
     const { host, press } = await setup([WORK, DEFAULT_TEMPLATE]);
     press("Edit default");
     expect(host.querySelector("[name=dir]")).toBeNull();
-    expect(host.querySelector("select[name=provider]")).toBeNull();
+    expect(host.querySelector("hx-select[name=provider]")).toBeNull();
     expect(host.querySelector("[name=name]")).not.toBeNull();
   });
 
@@ -211,7 +209,7 @@ describe("SpaceTemplatesEditor", () => {
     await choose(select("agent"), "claude");
     expect(button("Save").disabled).toBe(true);
     type(input("name"), "Flex");
-    await choose(select("provider"), "github");
+    await choose(select("provider"), "GitHub");
     type(input("owner"), "GravionLabs");
     await choose(select("model"), "sonnet");
     expect(button("Save").disabled).toBe(false);
@@ -247,14 +245,14 @@ describe("SpaceTemplatesEditor", () => {
         ],
       },
     ];
-    const { host, input, select, type, choose, saved, press } = await setup([], { layouts });
+    const { host, input, select, type, choose, labels, saved, press } = await setup([], {
+      layouts,
+    });
     press("Add template");
     await choose(select("agent"), "claude");
     type(input("name"), "Flex");
-    expect([...select("layout").options].map((o) => o.textContent?.trim())).toContain(
-      "Layout: review",
-    );
-    await choose(select("layout"), "named:review");
+    expect(await labels("layout")).toContain("Layout: review");
+    await choose(select("layout"), "Layout: review");
     // A named layout has no panes to edit here.
     expect(host.querySelector(".panes")).toBeNull();
     await saved();
@@ -266,8 +264,7 @@ describe("SpaceTemplatesEditor", () => {
   it("shows a template's missing layout name instead of dropping it", async () => {
     const { select, press } = await setup([{ ...WORK, layout: "gone" }]);
     press("Edit Work");
-    const options = [...select("layout").options];
-    expect(options.find((o) => o.selected)?.textContent?.trim()).toBe("Layout: gone (missing)");
+    expect(shown(select("layout"))).toBe("Layout: gone (missing)");
   });
 
   it("edits a template in place", async () => {
@@ -337,7 +334,7 @@ describe("SpaceTemplatesEditor", () => {
       expect(host.textContent).toContain("absolute directory");
       type(input("dir"), "C:\\src");
       expect(button("Save").disabled).toBe(false);
-      await choose(select("provider"), "azure-devops");
+      await choose(select("provider"), "Azure DevOps");
       expect(host.textContent).toContain("organization and the project are required");
       expect(button("Save").disabled).toBe(true);
       type(input("organization"), "acme");
@@ -357,14 +354,14 @@ describe("SpaceTemplatesEditor", () => {
   });
 
   it("marks unavailable agents and offers the models of the chosen harness", async () => {
-    const { host, select, choose, press } = await setup([WORK]);
+    const { select, choose, labels, press } = await setup([WORK]);
     press("Edit Work");
-    const agents = [...select("agent").options].map((o) => o.textContent?.trim());
+    const agents = await labels("agent");
     expect(agents).toEqual(["claude", "copilot (not found)"]);
-    expect([...select("model").options].map((o) => o.value)).toEqual(["", "opus", "sonnet"]);
-    await choose(select("agent"), "copilot");
-    expect([...select("model").options].map((o) => o.value)).toEqual(["", "auto"]);
-    expect(host.querySelector<HTMLSelectElement>("[name=model]")!.value).toBe("");
+    expect(await labels("model")).toEqual(["Default", "opus", "sonnet"]);
+    await choose(select("agent"), "copilot (not found)");
+    expect(await labels("model")).toEqual(["Default", "auto"]);
+    expect(shown(select("model"))).toBe("Default");
   });
 
   it("exports one template and previews a template import", async () => {
@@ -415,12 +412,12 @@ describe("SpaceTemplatesEditor", () => {
       const { host, select, choose, type, saved, press } = await setup([WORK]);
       press("Edit Work");
       expect(host.querySelector("ol[aria-label='Panes of the template']")).toBeNull();
-      await choose(select("layout"), "default");
+      await choose(select("layout"), "Built-in default");
       const rows = host.querySelectorAll(".pane-row");
       expect(rows).toHaveLength(2);
       type(rows[1].querySelector("input")!, "term");
       type(rows[1].querySelectorAll("input")[1], "htop");
-      expect(select("layout").value).toBe("custom");
+      expect(shown(select("layout"))).toBe("Custom");
       await saved();
       const [call] = tauri.calls("set_space_templates") as {
         templates: { layout: unknown }[];
@@ -438,7 +435,7 @@ describe("SpaceTemplatesEditor", () => {
     });
 
     it("offers spaces.layout and the project presets of the directory", async () => {
-      const { fixture, host, select, choose, press } = await setup([WORK], {
+      const { fixture, host, select, choose, labels, press } = await setup([WORK], {
         spacesLayout: { panes: [{ name: "mine", command: null, split: null }] },
       });
       press("Edit Work");
@@ -446,16 +443,20 @@ describe("SpaceTemplatesEditor", () => {
       expect(tauri.calls("project_config")[0]).toEqual({ dir: "/home/jk/src" });
       await new Promise((resolve) => setTimeout(resolve));
       fixture.detectChanges();
-      const values = [...select("layout").options].map((o) => o.value);
-      expect(values).toEqual(["none", "default", "user", "preset:review"]);
-      await choose(select("layout"), "preset:review");
+      expect(await labels("layout")).toEqual([
+        "None (spaces.layout or the built-in default)",
+        "Built-in default",
+        "New space layout",
+        "Project preset: review",
+      ]);
+      await choose(select("layout"), "Project preset: review");
       expect(host.querySelector<HTMLInputElement>(".pane-row input")!.value).toBe("diff");
     });
 
     it("adds and removes panes, validates them and can go back to none", async () => {
       const { host, button, select, choose, type, press } = await setup([WORK]);
       press("Edit Work");
-      await choose(select("layout"), "default");
+      await choose(select("layout"), "Built-in default");
       press("Add pane");
       expect(host.querySelectorAll(".pane-row")).toHaveLength(3);
       type(host.querySelectorAll(".pane-row")[2].querySelector("input")!, "agent");
@@ -463,7 +464,7 @@ describe("SpaceTemplatesEditor", () => {
       expect(button("Save").disabled).toBe(true);
       press("Remove pane agent");
       expect(button("Save").disabled).toBe(false);
-      await choose(select("layout"), "none");
+      await choose(select("layout"), "None (spaces.layout or the built-in default)");
       expect(host.querySelector(".pane-row")).toBeNull();
     });
   });

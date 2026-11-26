@@ -33,6 +33,7 @@ import {
   type Pull,
   type PullsResult,
 } from "./pulls";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -377,14 +378,13 @@ describe("GithubView", () => {
     const el: HTMLElement = fixture.nativeElement;
     const pulls = TestBed.inject(GithubPulls);
     pulls.scope.set("all");
-    const select = el.querySelector<HTMLSelectElement>("select")!;
+    const repo = el.querySelector("aside hx-select")!;
+    const settle = () => fixture.detectChanges();
     fixture.detectChanges();
-    select.value = "o/k";
-    select.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    await choose(repo, "o/k", settle);
+    expect(shown(repo)).toBe("o/k");
     expect(rows(el)).toHaveLength(1);
-    select.value = "";
-    select.dispatchEvent(new Event("change"));
+    await choose(repo, "All repositories", settle);
     const input = el.querySelector<HTMLInputElement>("input[type=search]")!;
     input.value = "draft";
     input.dispatchEvent(new Event("input"));
@@ -751,12 +751,11 @@ describe("GithubView sub-pages", () => {
   it("applies the shared repository filter to pull requests, issues and milestones", async () => {
     const fixture = await render();
     const el: HTMLElement = fixture.nativeElement;
-    const select = el.querySelector<HTMLSelectElement>("aside select")!;
-    expect([...select.options].map((o) => o.value)).toEqual(["", "o/k", "o/m", "o/n"]);
-    expect(el.querySelectorAll(".toolbar select")).toHaveLength(0);
-    select.value = "o/k";
-    select.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    const repo = el.querySelector("aside hx-select")!;
+    const settle = () => fixture.detectChanges();
+    expect(await optionLabels(repo, settle)).toEqual(["All repositories", "o/k", "o/m", "o/n"]);
+    expect(el.querySelectorAll(".toolbar hx-select")).toHaveLength(0);
+    await choose(repo, "o/k", settle);
     expect(nav(el).map((b) => b.querySelector(".nav-count")!.textContent)).toEqual(["0", "1", "1"]);
     nav(el)[1].click();
     fixture.detectChanges();
