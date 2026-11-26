@@ -5,8 +5,9 @@ import {
   Output,
   inject,
   signal,
+  computed,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
 import { rowName } from "../core/snapshot";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
@@ -18,7 +19,7 @@ import { LineComments } from "./line-comments";
  */
 @Component({
   selector: "app-comments-panel",
-  imports: [HxButton],
+  imports: [HxButton, HxField, HxSelect],
   templateUrl: "./comments-panel.html",
   styles: `
     :host {
@@ -66,14 +67,6 @@ import { LineComments } from "./line-comments";
       color: inherit;
       background: transparent;
     }
-    select {
-      font: inherit;
-      color: inherit;
-      background: transparent;
-      border: 1px solid var(--h-content-border-color);
-      height: var(--control-height);
-      padding: 1px 8px;
-    }
     button.where {
       font-family: var(--font-mono);
       color: var(--h-text-muted-color);
@@ -92,6 +85,12 @@ import { LineComments } from "./line-comments";
 export class CommentsPanel {
   protected readonly comments = inject(LineComments);
   protected readonly editing = signal<string | null>(null);
+  protected readonly agentOptions = computed(() => [
+    { label: "Pick an agent…", value: "" },
+    ...this.comments
+      .agents()
+      .map((agent) => ({ label: this.label(agent), value: agent.terminal_id })),
+  ]);
   /** Asks the tab to show the file of a comment. */
   @Output() readonly open = new EventEmitter<LineComment>();
 

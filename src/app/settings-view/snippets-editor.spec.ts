@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import type { Snippet } from "../core/snippets-model";
 import { tauri } from "../core/tauri.mock";
 import { SnippetsEditor } from "./snippets-editor";
+import { choose, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -88,10 +89,9 @@ describe("SnippetsEditor", () => {
     const { button, field, type, fixture, settle } = setup([TESTS]);
     button("Edit tests").click();
     fixture.detectChanges();
-    const target = field<HTMLSelectElement>("snippet-target");
-    target.value = "agent";
-    target.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    const target = field<HTMLElement>("snippet-target");
+    await choose(target, "An agent (sent as a prompt)", () => fixture.detectChanges());
+    expect(shown(target)).toBe("An agent (sent as a prompt)");
     expect(field<HTMLInputElement>("snippet-enter").disabled).toBe(true);
     type("snippet-text", "run the tests");
     button("Save snippet").click();

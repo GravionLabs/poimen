@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
+import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { AgentRuns } from "./agent-runs";
 import { AgentActions, issueTarget } from "./agent-actions";
 import {
@@ -14,14 +14,15 @@ import {
 } from "./issues";
 import { IssueFormPane } from "./issue-form/issue-form";
 import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
 import { LoadingRows } from "../ui/loading/loading-rows";
+import { selectOptions } from "../ui/select/select-options";
 
 /** The "Issues" section of the GitHub tab: the issue tree per repository with linked pull requests. */
 @Component({
   selector: "app-github-issues",
   templateUrl: "./issues-section.html",
-  imports: [LoadingRows, HxButton, IssueFormPane],
+  imports: [LoadingRows, HxButton, IssueFormPane, HxField, HxSelect],
   styleUrl: "./issues-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -29,7 +30,25 @@ export class IssuesSection {
   protected readonly issues = inject(GithubIssues);
   private readonly agentActions = inject(AgentActions);
   protected readonly runs = inject(AgentRuns);
-  protected readonly levels = LEVELS;
+  protected readonly stateOptions = [
+    { label: "Open", value: "open" },
+    { label: "Closed", value: "closed" },
+  ];
+  protected readonly levelOptions = [{ label: "All levels", value: "" }, ...selectOptions(LEVELS)];
+  protected readonly labelOptions = computed(() => [
+    { label: "All labels", value: "" },
+    ...selectOptions(this.issues.labelNames()),
+  ]);
+  protected readonly assigneeOptions = computed(() => [
+    { label: "Anyone", value: "" },
+    ...selectOptions(this.issues.assigneeNames()),
+  ]);
+  protected readonly milestoneOptions = computed(() => selectOptions(this.issues.bulkMilestones()));
+  protected readonly bulkLabelOptions = computed(() => selectOptions(this.issues.bulkLabels()));
+  protected readonly closeOptions = [
+    { label: "Close as completed", value: "completed" },
+    { label: "Close as not planned", value: "not_planned" },
+  ];
   protected readonly labelChips = labelChips;
   protected readonly levelBadge = levelBadge;
   protected readonly progress = issueProgress;
@@ -55,19 +74,19 @@ export class IssuesSection {
     void this.issues.loadBulkOptions();
   }
 
-  protected async bulkMilestone(title: string): Promise<void> {
+  protected async bulkMilestone(title: string | null): Promise<void> {
     if (title) await this.issues.bulkEdit({ milestone: title });
   }
 
-  protected async bulkAddLabel(name: string): Promise<void> {
+  protected async bulkAddLabel(name: string | null): Promise<void> {
     if (name) await this.issues.bulkEdit({ addLabels: [name] });
   }
 
-  protected async bulkRemoveLabel(name: string): Promise<void> {
+  protected async bulkRemoveLabel(name: string | null): Promise<void> {
     if (name) await this.issues.bulkEdit({ removeLabels: [name] });
   }
 
-  protected async bulkClose(reason: string): Promise<void> {
+  protected async bulkClose(reason: string | null): Promise<void> {
     if (reason === "completed" || reason === "not_planned") await this.issues.bulkClose(reason);
   }
 
@@ -115,14 +134,14 @@ export class IssuesSection {
   }
 
   protected value(event: Event): string {
-    return (event.target as HTMLInputElement | HTMLSelectElement).value;
+    return (event.target as HTMLInputElement).value;
   }
 
-  protected setLevel(value: string): void {
+  protected setLevel(value: string | null): void {
     this.issues.level.set((value || null) as Level | null);
   }
 
-  protected setState(value: string): void {
+  protected setState(value: string | null): void {
     void this.issues.setState(value as StateFilter);
   }
 }

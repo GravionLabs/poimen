@@ -8,6 +8,7 @@ import { tauri } from "../core/tauri.mock";
 import { TaskDialog } from "./task-dialog";
 import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 import { TaskPicker, filterIssues, markers, type PickIssue, type TaskChoice } from "./task-picker";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -233,10 +234,11 @@ describe("TaskDialog machine selector", () => {
 
   it("offers this Mac and the connected machines only, and returns the choice's machine", async () => {
     const { picker, root, settle, opened } = await open();
-    const options = [...root.querySelectorAll("select option")].map((o) => o.textContent!.trim());
-    expect(options).toEqual(["This Mac", "dev"]);
-    picker.setMachine("dev");
-    await settle();
+    const machine = root.querySelector("hx-select")!;
+    expect(await optionLabels(machine, settle)).toEqual(["This Mac", "dev"]);
+    await choose(machine, "dev", settle);
+    expect(picker.machine()).toBe("dev");
+    expect(shown(machine)).toBe("dev");
     picker.confirm();
     expect(await opened).toMatchObject({ number: 12, machine: "dev" });
   });

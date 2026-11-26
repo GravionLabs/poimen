@@ -8,6 +8,7 @@ import { PaneActions } from "../core/pane-actions";
 import { TauriBridge } from "../core/tauri";
 import { PaneDialog } from "./pane-dialog";
 import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 async function setup(
   harnesses: unknown[] = [],
@@ -44,10 +45,7 @@ async function setup(
   await fixture.whenStable();
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
-  const options = [...root.querySelectorAll<HTMLOptionElement>('select[name="kind"] option')].map(
-    (o) => o.value,
-  );
-  return { options, bridge, root, actions, fixture };
+  return { bridge, root, actions, fixture };
 }
 
 describe("PaneDialog start agent (#410)", () => {
@@ -58,16 +56,24 @@ describe("PaneDialog start agent (#410)", () => {
   });
 
   it("offers only the kinds with hooks", async () => {
-    const { options } = await setup();
-    expect(options).toEqual(["claude", "copilot", "gemini"]);
+    const { root, fixture } = await setup();
+    const kind = root.querySelector('hx-select[name="kind"]')!;
+    expect(shown(kind)).toBe("claude");
+    expect(await optionLabels(kind, () => fixture.detectChanges())).toEqual([
+      "claude",
+      "copilot",
+      "gemini",
+    ]);
   });
 
   it("starts a harness without hooks with its own program and arguments, not its id", async () => {
-    const { bridge, root } = await setup([
+    const { bridge, root, fixture } = await setup([
       { id: "aider", command: ["aider-bin", "--no-auto-commits"], available: true },
     ]);
-    const form = root.querySelector<HTMLFormElement>("form:has(select[name='kind'])")!;
-    form.querySelector<HTMLSelectElement>("select[name='kind']")!.value = "aider";
+    const form = root.querySelector<HTMLFormElement>("form:has(hx-select[name='kind'])")!;
+    const kind = form.querySelector("hx-select[name='kind']")!;
+    await choose(kind, "aider (no status)", () => fixture.detectChanges());
+    expect(shown(kind)).toBe("aider (no status)");
     form.querySelector<HTMLInputElement>("[name='args']")!.value = "--yes";
     form.requestSubmit();
     await vi.waitFor(() =>
@@ -84,7 +90,7 @@ describe("PaneDialog start agent (#410)", () => {
     const opener = focusOpener();
     const { root, actions, fixture } = await setup();
     expectFocusInside(root);
-    expect(document.activeElement?.getAttribute("name")).toBe("kind");
+    expect(document.activeElement?.closest("hx-select")?.getAttribute("name")).toBe("kind");
     press("Escape");
     fixture.detectChanges();
     expect(actions.dialog()).toBeNull();

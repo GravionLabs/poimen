@@ -11,7 +11,7 @@ import {
   untracked,
   viewChild,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
 import { Icon } from "../ui/icon/icon";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
@@ -66,7 +66,7 @@ export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
 /** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
 @Component({
   selector: "app-bottom-panel",
-  imports: [FlowView, HxButton, Icon],
+  imports: [FlowView, HxButton, Icon, HxField, HxSelect],
   templateUrl: "./bottom-panel.html",
   styleUrl: "./bottom-panel.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -85,7 +85,14 @@ export class BottomPanel {
   protected readonly colMin = EVENT_COLUMN_MIN;
   protected readonly colMax = EVENT_COLUMN_MAX;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
-  protected readonly label = subagentLabel;
+  private readonly subagentPicker = viewChild<HxSelect<string>>("subagentPicker");
+  /** The labels carry running durations: they stand still while the list is open. */
+  protected readonly subagentOptions = computed(() => {
+    const now = this.subagentPicker()?.open() ? untracked(() => this.now()) : this.now();
+    return this.subagents
+      .agents()
+      .map((agent) => ({ label: subagentLabel(agent, now), value: agent.agent_id }));
+  });
   protected readonly summary = toolSummary;
   protected readonly reportIndex = () => reportIndex(this.subagents.items());
 
@@ -223,8 +230,9 @@ export class BottomPanel {
     void this.deliver.openUrl(url);
   }
 
-  protected pick(event: Event): void {
-    this.subagents.pick((event.target as HTMLSelectElement).value);
+  protected pick(agentId: string | null): void {
+    if (agentId === null) return;
+    this.subagents.pick(agentId);
     this.following.set(true);
   }
 

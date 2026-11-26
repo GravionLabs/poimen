@@ -370,8 +370,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 
-.field input,
-.field select {
+.field input {
   box-sizing: border-box;
   height: var(--control-height);
   padding: 2px 6px;
@@ -400,13 +399,7 @@ h3 {
   width: 64px;
 }
 
-.field select option {
-  background: var(--h-content-background);
-  color: var(--h-text-color);
-}
-
-.field input:focus-visible,
-.field select:focus-visible {
+.field input:focus-visible {
   outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }
@@ -623,8 +616,7 @@ h3 {
 }
 
 .pane-grid .field input[type="text"],
-.pane-grid .field.ratio input,
-.pane-grid .field select {
+.pane-grid .field.ratio input {
   width: 100%;
 }
 
@@ -690,10 +682,6 @@ h3 {
     width: 64px;
   }
 
-  .pane-grid .field select {
-    width: auto;
-  }
-
   .pane-grid .pane-fields .actions {
     margin-left: auto;
   }
@@ -736,9 +724,7 @@ h3 {
   flex: 1;
 }
 
-.pane-grid .pane-fields.leaf .field input[type="text"],
-.pane-grid .pane-fields.place .field select,
-.pane-grid .split-node .pane-fields .field select {
+.pane-grid .pane-fields.leaf .field input[type="text"] {
   width: auto;
 }
 

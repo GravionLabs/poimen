@@ -35,33 +35,32 @@
         its agent sessions itself.
       </p>
       @if (open.target.kind === "milestone") {
-        <label class="field">
-          <span>Milestone</span>
-          <select
+        <hx-field class="choice" label="Milestone">
+          <hx-select
+            size="small"
+            ariaLabel="Milestone"
             data-testid="milestone"
+            [options]="milestoneOptions()"
             [value]="milestone()"
-            (change)="milestone.set(value($event))"
-          >
-            @for (name of open.milestones; track name) {
-              <option [value]="name" [selected]="name === milestone()">{{ name }}</option>
-            }
-          </select>
-        </label>
+            (valueChange)="milestone.set($event)"
+          />
+        </hx-field>
       } @else {
         <label class="field">
           <span>Issues</span>
           <input type="text" readonly data-testid="issues" [value]="targetText(open.target)" />
         </label>
       }
-      <label class="field">
-        <span>Harness</span>
-        <select data-testid="harness" [value]="harness()" (change)="harness.set(value($event))">
-          <option value="">loop default</option>
-          @for (h of harnesses; track h) {
-            <option [value]="h">{{ h }}</option>
-          }
-        </select>
-      </label>
+      <hx-field class="choice" label="Harness">
+        <hx-select
+          size="small"
+          ariaLabel="Harness"
+          data-testid="harness"
+          [options]="harnessOptions"
+          [value]="harness()"
+          (valueChange)="harness.set($event ?? '')"
+        />
+      </hx-field>
       <label class="field">
         <span>Model (optional)</span>
         <input

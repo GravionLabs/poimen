@@ -26,17 +26,16 @@
     @if (errors()?.text; as m) {
       <p class="field-error">{{ m }}</p>
     }
-    <label class="field">
-      <span>Send to</span>
-      <select name="snippet-target" (change)="setTarget($event)">
-        <option value="terminal" [selected]="e.draft.target === 'terminal'">
-          The pane (typed into the terminal)
-        </option>
-        <option value="agent" [selected]="e.draft.target === 'agent'">
-          An agent (sent as a prompt)
-        </option>
-      </select>
-    </label>
+    <hx-field class="field" label="Send to">
+      <hx-select
+        size="small"
+        ariaLabel="Send to"
+        name="snippet-target"
+        [options]="targets"
+        [value]="e.draft.target"
+        (valueChange)="setTarget($event)"
+      />
+    </hx-field>
     <label class="check">
       <input
         hx-checkbox

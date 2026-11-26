@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   inject,
+  linkedSignal,
   output,
   signal,
 } from "@angular/core";
@@ -13,12 +14,12 @@ import { parseHarnesses, type HarnessInfo } from "../core/settings";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { Icon } from "../ui/icon/icon";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
 
 /** The question for a new pane (its type) or a pane close (confirmation), and action errors. */
 @Component({
   selector: "app-pane-dialog",
-  imports: [DialogShell, HxButton, Icon],
+  imports: [DialogShell, HxButton, Icon, HxField, HxSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./pane-dialog.html",
   styleUrl: "./pane-dialog.css",
@@ -34,6 +35,16 @@ export class PaneDialog {
   private readonly harnesses = signal<HarnessInfo[]>([]);
   protected readonly kinds = computed(() => startableKinds(this.harnesses().map((h) => h.id)));
   protected readonly note = (kind: string) => statusNote(kind);
+  protected readonly kindOptions = computed(() =>
+    this.kinds().map((kind) => ({ label: `${kind}${this.note(kind)}`, value: kind })),
+  );
+  /** The kind picked in the agent dialog; every dialog starts without one. */
+  protected readonly chosenKind = linkedSignal<unknown, string | null>({
+    source: () => this.actions.dialog(),
+    computation: () => null,
+  });
+  /** The kind that starts: the picked one, else the first of the list. */
+  protected readonly kind = computed(() => this.chosenKind() ?? this.kinds()[0] ?? "");
   /** The types of a new pane besides Terminal: the installed harnesses (#1049). */
   protected readonly agents = computed(() => this.harnesses().filter((h) => h.available));
 
@@ -82,7 +93,7 @@ export class PaneDialog {
   protected async startAgent(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form);
     const field = (key: string) => String(data.get(key) ?? "");
-    const kind = field("kind").trim();
+    const kind = this.kind();
     const args = field("args");
     // A harness without hooks runs its own program and arguments, not its id as the program.
     const harness = this.harnesses().find((h) => h.id === kind);

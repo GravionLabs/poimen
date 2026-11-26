@@ -207,18 +207,16 @@
           <p class="field-error">{{ m }}</p>
         }
         <div class="fields">
-          <label class="field">
-            <span>Remote</span>
-            <select name="provider" (change)="setProvider($event)">
-              <option value="" [selected]="!e.draft.remote">Any</option>
-              <option value="github" [selected]="e.draft.remote?.provider === 'github'">
-                GitHub
-              </option>
-              <option value="azure-devops" [selected]="e.draft.remote?.provider === 'azure-devops'">
-                Azure DevOps
-              </option>
-            </select>
-          </label>
+          <hx-field class="field" label="Remote">
+            <hx-select
+              size="small"
+              ariaLabel="Remote"
+              name="provider"
+              [options]="providers"
+              [value]="e.draft.remote?.provider ?? ''"
+              (valueChange)="setProvider($event)"
+            />
+          </hx-field>
           @if (e.draft.remote; as r) {
             @if (r.provider === "github") {
               <label class="field">
@@ -266,63 +264,41 @@
         }
       }
       <div class="fields">
-        <label class="field">
-          <span>Agent</span>
-          <select name="agent" (change)="setAgent($event)">
-            @for (h of harnesses(); track h.id) {
-              <option [value]="h.id" [selected]="h.id === e.draft.agent">
-                {{ h.id }}{{ h.available ? "" : " (not found)" }}
-              </option>
-            }
-            @if (!agentKnown()) {
-              <option [value]="e.draft.agent" selected disabled>
-                {{ e.draft.agent || "Choose…" }}
-              </option>
-            }
-          </select>
-        </label>
-        <label class="field">
-          <span>Model</span>
-          <select name="model" (change)="setModel($event)">
-            <option value="" [selected]="!e.draft.model">Default</option>
-            @for (m of models(); track m) {
-              <option [value]="m" [selected]="m === e.draft.model">{{ m }}</option>
-            }
-          </select>
-        </label>
+        <hx-field class="field" label="Agent">
+          <hx-select
+            size="small"
+            ariaLabel="Agent"
+            name="agent"
+            [options]="agentOptions()"
+            [value]="e.draft.agent"
+            (valueChange)="setAgent($event)"
+          />
+        </hx-field>
+        <hx-field class="field" label="Model">
+          <hx-select
+            size="small"
+            ariaLabel="Model"
+            name="model"
+            [options]="modelOptions()"
+            [value]="e.draft.model ?? ''"
+            (valueChange)="setModel($event)"
+          />
+        </hx-field>
       </div>
       @if (errors().agent; as m) {
         <p class="field-error">{{ m }}</p>
       }
       <div class="fields">
-        <label class="field">
-          <span>Layout</span>
-          <select name="layout" (change)="setSource($event)">
-            <option value="none" [selected]="source() === 'none'">
-              None (spaces.layout or the built-in default)
-            </option>
-            <option value="default" [selected]="source() === 'default'">Built-in default</option>
-            @if (settings().spacesLayout) {
-              <option value="user" [selected]="source() === 'user'">New space layout</option>
-            }
-            @for (n of layoutNames(); track n) {
-              <option [value]="'named:' + n" [selected]="source() === 'named:' + n">
-                Layout: {{ n }}
-              </option>
-            }
-            @if (unknownLayout(); as missing) {
-              <option [value]="'named:' + missing" selected>Layout: {{ missing }} (missing)</option>
-            }
-            @for (p of presetNames(); track p) {
-              <option [value]="'preset:' + p" [selected]="source() === 'preset:' + p">
-                Project preset: {{ p }}
-              </option>
-            }
-            @if (source() === "custom") {
-              <option value="custom" selected disabled>Custom</option>
-            }
-          </select>
-        </label>
+        <hx-field class="field" label="Layout">
+          <hx-select
+            size="small"
+            ariaLabel="Layout"
+            name="layout"
+            [options]="layoutOptions()"
+            [value]="source()"
+            (valueChange)="setSource($event)"
+          />
+        </hx-field>
       </div>
       @if (inlineLayout(e.draft.layout); as layout) {
         <div class="pane-grid simple">

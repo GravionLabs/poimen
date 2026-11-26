@@ -5,9 +5,12 @@
   margin-bottom: 10px;
 }
 
-.field input,
-.field select {
+.field input {
   height: var(--control-height);
+}
+
+.choice {
+  margin-bottom: 10px;
 }
 
 .command {

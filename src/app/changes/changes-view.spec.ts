@@ -23,6 +23,7 @@ import {
 } from "./changes";
 import { ChangesView } from "./changes-view";
 import { DiffEditor, diffThemeRules } from "./diff-editor";
+import { choose, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -522,10 +523,9 @@ describe("line comments", () => {
     await comment(f, "text");
     const send = labeled(f, "Send to agent") as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    const select = panel(f)!.querySelector("select")!;
-    select.value = "p2";
-    select.dispatchEvent(new Event("change"));
-    f.detectChanges();
+    const agent = panel(f)!.querySelector("hx-select")!;
+    await choose(agent, "copilot · copilot", () => f.detectChanges());
+    expect(shown(agent)).toBe("copilot · copilot");
     expect((labeled(f, "Send to agent") as HTMLButtonElement).disabled).toBe(false);
     click(labeled(f, "Send to agent"));
     await settle(f);

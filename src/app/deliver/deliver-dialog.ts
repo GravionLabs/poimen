@@ -7,7 +7,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect } from "@gravionlabs/helix-ui";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 import { DeliverLauncher } from "./deliver-launcher";
 import { Deliver } from "./deliver";
@@ -22,6 +22,7 @@ import {
   type DeliverPlan,
   type DeliverTarget,
 } from "./deliver-start";
+import { selectOptions } from "../ui/select/select-options";
 
 /**
  * The dialog that shows before a deliver loop starts (#746): the target, the harness, the model,
@@ -30,7 +31,7 @@ import {
  */
 @Component({
   selector: "app-deliver-dialog",
-  imports: [DialogShell, HxButton],
+  imports: [DialogShell, HxButton, HxField, HxSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./deliver-dialog.html",
   styleUrl: "./deliver-dialog.css",
@@ -38,7 +39,13 @@ import {
 export class DeliverDialog {
   protected readonly launcher = inject(DeliverLauncher);
   private readonly deliver = inject(Deliver);
-  protected readonly harnesses = HARNESSES;
+  protected readonly harnessOptions = [
+    { label: "loop default", value: "" },
+    ...selectOptions(HARNESSES),
+  ];
+  protected readonly milestoneOptions = computed(() =>
+    selectOptions(this.launcher.opened()?.milestones ?? []),
+  );
   protected readonly missing = MISSING_TEXT;
   protected readonly targetText = targetText;
 
@@ -123,7 +130,7 @@ export class DeliverDialog {
   }
 
   protected value(event: Event): string {
-    return (event.target as HTMLInputElement | HTMLSelectElement).value;
+    return (event.target as HTMLInputElement).value;
   }
 
   protected start(): void {

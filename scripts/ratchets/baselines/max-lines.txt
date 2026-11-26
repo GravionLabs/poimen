@@ -25,7 +25,7 @@ src/app/core/snapshot.spec.ts	1040
 src/app/core/snapshot.ts	1010
 src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879
-src/app/github/github-view.spec.ts	853
+src/app/github/github-view.spec.ts	852
 src/app/github/issues.ts	1019
 src/app/settings-view/settings-view.spec.ts	1023
 src/app/terminal-view/terminal-view.spec.ts	1262

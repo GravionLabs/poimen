@@ -1,4 +1,4 @@
-import { HxButton, HxCheckbox, HxInput } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxInput, HxField, HxSelect } from "@gravionlabs/helix-ui";
 import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
@@ -38,8 +38,9 @@ import {
 import type { SplitDirection } from "../core/space-layout";
 
 function value(event: Event): string {
-  return (event.target as HTMLInputElement | HTMLSelectElement).value;
+  return (event.target as HTMLInputElement).value;
 }
+import { selectOptions } from "../ui/select/select-options";
 
 /** The ratio of a number input, clamped to what a split can show. */
 function ratioOf(event: Event): number {
@@ -55,7 +56,7 @@ function ratioOf(event: Event): number {
  */
 @Component({
   selector: "app-layout-tabs-editor",
-  imports: [NgTemplateOutlet, HxButton, HxCheckbox, HxInput],
+  imports: [NgTemplateOutlet, HxButton, HxCheckbox, HxInput, HxField, HxSelect],
   templateUrl: "./layout-tabs-editor.html",
   styleUrls: ["./settings-view.css", "./layouts-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -81,15 +82,27 @@ export class LayoutTabsEditor {
   protected canIndent = canIndent;
   protected canOutdent = canOutdent;
   protected readonly ratioOf = ratioOf;
-  protected readonly value = value;
-
-  /** Where `of` of a tab can point: every other tab of the layout. */
-  protected placeTargets(index: number): string[] {
-    return this.flat()
-      .filter((_, i) => i !== index)
-      .map((t) => t.tab.name.trim())
-      .filter(Boolean);
-  }
+  protected readonly shapes = [
+    { label: "Terminal", value: "terminal" },
+    { label: "Split tree", value: "split" },
+  ];
+  protected readonly placeDirections = selectOptions(["right", "down"]);
+  protected readonly splitDirections = [
+    { label: "side by side", value: "right" },
+    { label: "stacked", value: "down" },
+  ];
+  /** Per tab, where its `of` can point: the parent tab or every other tab of the layout. */
+  protected readonly ofOptions = computed(() =>
+    this.flat().map((_, index) => [
+      { label: "parent tab", value: "" },
+      ...selectOptions(
+        this.flat()
+          .filter((_, i) => i !== index)
+          .map((t) => t.tab.name.trim())
+          .filter(Boolean),
+      ),
+    ]),
+  );
 
   protected leafCount(n: LayoutNode): number {
     return leaves(n).length;

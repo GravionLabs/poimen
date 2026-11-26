@@ -177,7 +177,7 @@ td.c-title {
   .side {
     width: 56px;
   }
-  .side select,
+  .side .repo-filter,
   .show-empty {
     display: none;
   }
