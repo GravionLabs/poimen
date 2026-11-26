@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Buttons are `button[hx-button]` (AGENTS.md "Buttons, tags and fields"); a `button[hx-list-row]` is a
+ * Buttons are `button[hx-button]` (docs/STYLEGUIDE.md and its Helix base); a `button[hx-list-row]` is a
  * row, not an action. Any other `<button>` (in a template or built with `createElement`) fails here
  * unless `ALLOWED` has it, with the number per file and the reason. The numbers only go down: when you
  * convert one, lower it (delete the entry at 0).
@@ -64,10 +64,9 @@ describe("buttons", () => {
   );
 
   it.each([...counts])("%s has no new button without hx-button", (file, n) => {
-    expect(
-      n,
-      `${file}: use <button hx-button> (AGENTS.md "Buttons, tags and fields")`,
-    ).toBeLessThanOrEqual(ALLOWED[file]?.count ?? 0);
+    expect(n, `${file}: use <button hx-button> (docs/STYLEGUIDE.md)`).toBeLessThanOrEqual(
+      ALLOWED[file]?.count ?? 0,
+    );
   });
 
   it("has an exact allowlist entry with a reason for every plain button", () => {
