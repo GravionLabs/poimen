@@ -1,26 +1,13 @@
 /* Snippets page: the text area of the edit form and the one-line text of a row. */
-.snippet-form textarea {
-  box-sizing: border-box;
-  width: 100%;
+.snippet-text {
   min-height: 5rem;
-  padding: 4px 6px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--h-text-color);
-  font: inherit;
   font-family: monospace;
-  font-size: 12px;
   resize: vertical;
-}
-
-.snippet-form textarea:focus-visible {
-  outline: 2px solid var(--h-focus-ring-color, currentColor);
 }
 
 .snippet-form .field + .field,
 .snippet-form .check {
-  margin-top: 8px;
+  margin-top: var(--h-space-2);
 }
 
 .snippet-text {
@@ -30,6 +17,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }

@@ -14,6 +14,7 @@ import { Subagents } from "../core/transcripts";
 import { parseStatus, type DeliverCard } from "../deliver/deliver-status";
 import { BottomPanel } from "./bottom-panel";
 import { FlowView } from "./flow-view";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 const named = "Claude Code and GitHub Copilot CLI";
 
@@ -38,6 +39,7 @@ describe("BottomPanel empty states", () => {
     active: Terminal | undefined,
     supported: boolean,
     cards = signal<DeliverCard[]>([]),
+    agents: { agent_id: string; description: string }[] = [],
   ) {
     const eventsAll = signal<Record<string, string>>({});
     const ui = {
@@ -56,11 +58,11 @@ describe("BottomPanel empty states", () => {
     };
     const subagents = {
       supported: signal(supported),
-      agents: signal([]),
+      agents: signal(agents),
       items: signal([]),
       paneId: signal(null),
       selected: signal(null),
-      selectedId: signal(null),
+      selectedId: signal(agents[0]?.agent_id ?? null),
       pick: vi.fn(),
     };
     const panes = new Map(active ? [[active.terminal_id, active]] : []);
@@ -94,6 +96,7 @@ describe("BottomPanel empty states", () => {
     fixture.detectChanges();
     return {
       fixture,
+      subagents,
       text: () =>
         (fixture.nativeElement as HTMLElement).querySelector(".empty")?.textContent?.trim(),
       show: (next: "output" | "flow" | "events") => {
@@ -108,6 +111,20 @@ describe("BottomPanel empty states", () => {
     expect(panel.text()).toBe(
       `Subagent output is available for ${named} agents. This pane does not run one.`,
     );
+  });
+
+  it("picks a subagent from the select of the Output tab", async () => {
+    const panel = render("output", pane({ agent: "claude" }), true, signal<DeliverCard[]>([]), [
+      { agent_id: "a1", description: "first" },
+      { agent_id: "a2", description: "second" },
+    ]);
+    const select = (panel.fixture.nativeElement as HTMLElement).querySelector("hx-select")!;
+    const settle = () => panel.fixture.detectChanges();
+    const labels = await optionLabels(select, settle);
+    expect(labels).toEqual([expect.stringContaining("first"), expect.stringContaining("second")]);
+    expect(shown(select)).toBe(labels[0]);
+    await choose(select, labels[1], settle);
+    expect(panel.subagents.pick.mock.calls).toEqual([["a2"]]);
   });
 
   it("names both harnesses on the Flow tab", () => {

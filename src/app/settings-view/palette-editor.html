@@ -4,7 +4,7 @@
   from the palette (Shift+Delete or the Hide button). Nothing is written to the repository.
 </p>
 @if (writeError(); as m) {
-  <p class="field-error" role="alert">{{ m }}</p>
+  <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
 }
 <section aria-label="Detected sources">
   <h3>Detected sources</h3>

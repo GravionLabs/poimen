@@ -1,0 +1,46 @@
+{
+  "comment": "Exceptions to the helix-lint preset (#1367). Every entry needs `files` (globs), `rules` and a `reason`; helixAllow throws without one and so fails `pnpm lint`. Remove an entry when its files migrate. Stylelint rules and `helix/no-raw-control` are listed under their own key.",
+  "stylelint": [
+    {
+      "files": ["src/styles/literal-colors.css"],
+      "rules": ["color-no-hex"],
+      "reason": "Terminal palette (--term-*, xterm.js light and dark) and the status bar tones --h-warn-color/--h-error-color: literal colors with no Helix token; only this file may use hex"
+    }
+  ],
+  "eslint": [
+    {
+      "files": ["src/app/bottom-panel/bottom-panel.html"],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Run picker is a native select: hx-select has no option groups (ui/select-usage.spec.ts); remove when helix-ui adds them"
+    },
+    {
+      "files": [
+        "src/app/command-palette/command-palette.html",
+        "src/app/jump-palette/jump-palette.html",
+        "src/app/ui/context-menu/context-menu.html"
+      ],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Invisible full-surface backdrop button that closes the overlay on click; it has no control look, so hx-button does not fit"
+    },
+    {
+      "files": ["src/app/ui/context-menu/context-menu.html"],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Menu items of app-context-menu own roving focus and keyboard handling (ADR in frontend.md); move to hx-list-row when helix-ui offers a menu item"
+    },
+    {
+      "files": ["src/app/notifications/notifications.html"],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Whole-row notification entry that carries the unread state and nested actions; a row, not a button look (hx-list-row would change the markup contract)"
+    },
+    {
+      "files": ["src/app/pane-dialog/pane-dialog.html"],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Visually hidden radio inputs behind selectable type cards (label.type); hx-radio has no card layout"
+    },
+    {
+      "files": ["src/app/ui/helix-candidates/tab-bar/tab-bar.html"],
+      "rules": ["helix/no-raw-control"],
+      "reason": "Tab bar is a helix-ui candidate that implements its own tab, scroll and close buttons; they move to helix-ui with it"
+    }
+  ]
+}

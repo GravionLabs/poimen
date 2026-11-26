@@ -1,15 +1,18 @@
 <div class="head">
   <div class="brand">Explorer</div>
 </div>
-<input
-  type="search"
-  class="filter"
-  placeholder="Filter folders"
-  aria-label="Filter folders"
-  [value]="query()"
-  (input)="setQuery($event)"
-  (keydown)="filterKey($event)"
-/>
+<hx-field
+  ><input
+    hx-input
+    size="small"
+    type="search"
+    class="filter"
+    placeholder="Filter folders"
+    aria-label="Filter folders"
+    [value]="query()"
+    (input)="setQuery($event)"
+    (keydown)="filterKey($event)"
+/></hx-field>
 <hx-tree
   class="dirs"
   ariaLabel="Directories"
@@ -35,9 +38,13 @@
         <span class="has-space" title="Has a space" aria-label="Has a space">●</span>
       }
       <button
+        hx-button
         type="button"
+        variant="text"
+        severity="secondary"
+        size="small"
         class="open-terminal"
-        title="Open terminal here"
+        hx-tooltip="Open terminal here"
         aria-label="Open terminal here"
         (click)="$event.stopPropagation(); openTerminal(node.key)"
         (dblclick)="$event.stopPropagation()"

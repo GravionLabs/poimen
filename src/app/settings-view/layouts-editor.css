@@ -1,36 +1,36 @@
 /* Layouts page: the tab editor and its preview. */
 .layout-form h3 {
-  margin: 1rem 0 0.4rem;
-  font-size: 0.9rem;
+  margin: var(--h-space-4) 0 calc(var(--h-space-1) * 1.6);
+  font-size: var(--h-font-size-sm);
 }
 
 .layout-form .leaf,
 .layout-form .place {
-  margin-top: 0.4rem;
+  margin-top: calc(var(--h-space-1) * 1.6);
 }
 
 .split-node {
-  margin-top: 0.4rem;
-  padding-left: 0.75rem;
+  margin-top: calc(var(--h-space-1) * 1.6);
+  padding-left: var(--h-space-3);
   border-left: 2px solid var(--h-content-border-color);
 }
 
 .split-children {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--h-space-1);
 }
 
 .layout-preview {
   display: flex;
-  gap: 1rem;
+  gap: var(--h-space-4);
   align-items: stretch;
 }
 
 .preview-tree {
   list-style: none;
   margin: 0;
-  padding: 0.5rem;
+  padding: var(--h-space-2);
   min-width: 12rem;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
@@ -71,16 +71,16 @@
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
-  gap: 0.25rem;
-  padding: 0.35rem;
+  gap: var(--h-space-1);
+  padding: calc(var(--h-space-1) * 1.4);
   border: 1px dashed var(--h-content-border-color);
 }
 
 .preview-tab {
-  padding: 0.1rem 0.5rem;
+  padding: calc(var(--h-space-1) * 0.4) var(--h-space-2);
   border: 1px solid var(--h-content-border-color);
   border-radius: 3px;
-  font-size: 0.8rem;
+  font-size: var(--h-font-size-xs);
 }
 
 /* Nested rows (split, terminal, place): flex rows that use the full width, labels fully visible. */
@@ -91,7 +91,7 @@
   flex-wrap: wrap;
   align-items: flex-end;
   grid-column: 1 / -1;
-  gap: 8px 12px;
+  gap: var(--h-space-2) var(--h-space-3);
 }
 
 .layout-form .pane-grid .leaf .field,
@@ -127,7 +127,7 @@
   flex: 0 0 auto;
 }
 
-.layout-form .pane-grid .split-node .field:has(select) {
+.layout-form .pane-grid .split-node .field:has(hx-select) {
   flex: 0 1 12rem;
 }
 
@@ -144,12 +144,11 @@
 .layout-form .pane-grid .split-node .actions {
   display: flex;
   flex: none;
-  gap: 2px;
+  gap: calc(var(--h-space-1) * 0.5);
 }
 
-.layout-form .pane-grid .field input[type="text"],
-.layout-form .pane-grid .field select,
-.layout-form .pane-grid .field.ratio input {
+.layout-form .pane-grid .field .hx-input[type="text"],
+.layout-form .pane-grid .field.ratio .hx-input {
   width: 100%;
   box-sizing: border-box;
 }

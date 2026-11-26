@@ -94,13 +94,25 @@ describe("chip picker", () => {
     fixture.detectChanges();
     const input = el.querySelector<HTMLElement>("[data-testid=chip-input]")!;
     const key = (target: HTMLElement, name: string) =>
-      target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+      target.dispatchEvent(
+        // The list (CDK key manager) reads `keyCode`.
+        new KeyboardEvent("keydown", {
+          key: name,
+          keyCode: { ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35 }[name],
+          bubbles: true,
+        }),
+      );
     const options = [...el.querySelectorAll<HTMLElement>("[data-testid=chip-option]")];
     key(input, "ArrowDown");
     expect(document.activeElement).toBe(options[0]);
     key(options[0], "ArrowDown");
     expect(document.activeElement).toBe(options[1]);
     key(options[1], "ArrowUp");
+    expect(document.activeElement).toBe(options[0]);
+    key(options[0], "End");
+    expect(document.activeElement).toBe(options[1]);
+    key(options[1], "Home");
+    expect(document.activeElement).toBe(options[0]);
     key(options[0], "ArrowUp");
     expect(document.activeElement).toBe(input);
   });

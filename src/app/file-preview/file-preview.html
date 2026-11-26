@@ -31,7 +31,7 @@
 </header>
 <section class="body">
   @if (error(); as message) {
-    <p class="note problem" role="alert">{{ message }}</p>
+    <hx-message class="note problem" severity="error" size="small">{{ message }}</hx-message>
   } @else if (data(); as shown) {
     @if (notice(); as text) {
       <p class="note">{{ text }}</p>

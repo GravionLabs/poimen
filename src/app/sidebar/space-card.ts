@@ -12,7 +12,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxInput } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import { silentLabel } from "../core/agent-priority";
 import { Attention, workspaceUnread } from "../core/attention";
@@ -108,7 +108,7 @@ export interface SpaceOrigin {
  */
 @Component({
   selector: "app-space-card",
-  imports: [HxButton, Icon, NgTemplateOutlet, SpaceEditFocus],
+  imports: [HxButton, Icon, NgTemplateOutlet, SpaceEditFocus, HxField, HxInput],
   templateUrl: "./space-card.html",
   styleUrl: "./space-card.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

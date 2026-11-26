@@ -27,7 +27,7 @@ import {
   type LinkedIssue,
   type PrAction,
 } from "../pulls";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxCheckbox, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { Icon } from "../../ui/icon/icon";
 import { LoadingRows } from "../../ui/loading/loading-rows";
 
@@ -40,7 +40,17 @@ import { LoadingRows } from "../../ui/loading/loading-rows";
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
-  imports: [LoadingRows, HxButton, ChipPicker, Icon],
+  imports: [
+    LoadingRows,
+    HxButton,
+    ChipPicker,
+    Icon,
+    HxField,
+    HxSelect,
+    HxCheckbox,
+    HxInput,
+    HxMessage,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {
@@ -65,6 +75,12 @@ export class PullDetailPane {
 
   protected readonly labels = PR_ACTION_LABELS;
   protected readonly mergeLabels = MERGE_METHOD_LABELS;
+  protected readonly mergeOptions = computed(() =>
+    (this.pulls.detail()?.mergeMethods ?? []).map((value) => ({
+      label: MERGE_METHOD_LABELS[value],
+      value,
+    })),
+  );
   protected readonly canMerge = canMerge;
   protected readonly canRerun = canRerun;
   protected readonly canEdit = canEditPeople;

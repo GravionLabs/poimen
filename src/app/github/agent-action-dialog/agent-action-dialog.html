@@ -8,15 +8,19 @@
     (confirmed)="d.harness && actions.confirmDialog()"
   >
     @if (hasReviewExtras(d.action)) {
-      <label>
-        Mode
-        <select data-testid="dialog-mode" (change)="where($event)">
-          <option value="worktree" [selected]="d.where === 'worktree'">Worktree</option>
-          <option value="diff" [selected]="d.where === 'diff'">Diff only</option>
-        </select>
-      </label>
+      <hx-field label="Mode">
+        <hx-select
+          size="small"
+          ariaLabel="Mode"
+          data-testid="dialog-mode"
+          [options]="modes"
+          [value]="d.where"
+          (valueChange)="where($event)"
+        />
+      </hx-field>
       <label>
         <input
+          hx-checkbox
           type="checkbox"
           data-testid="dialog-post"
           [checked]="d.post"
@@ -25,34 +29,37 @@
         Post review on GitHub
       </label>
     } @else if (d.action.run === "ask") {
-      <label>
-        Run in
-        <select data-testid="dialog-where" (change)="where($event)">
-          <option value="root" [selected]="d.where === 'root'">Repository root</option>
-          <option value="worktree" [selected]="d.where === 'worktree'">Worktree</option>
-        </select>
-      </label>
+      <hx-field label="Run in">
+        <hx-select
+          size="small"
+          ariaLabel="Run in"
+          data-testid="dialog-where"
+          [options]="places"
+          [value]="d.where"
+          (valueChange)="where($event)"
+        />
+      </hx-field>
     }
-    <label>
-      Harness
-      <select data-testid="dialog-harness" (change)="harness($event)">
-        @if (!actions.harnesses().length) {
-          <option [value]="d.harness">{{ d.harness || "(none available)" }}</option>
-        }
-        @for (h of actions.harnesses(); track h.id) {
-          <option [value]="h.id" [selected]="h.id === d.harness">{{ h.id }}</option>
-        }
-      </select>
-    </label>
-    <label>
-      Model
-      <select data-testid="dialog-model" (change)="model($event)">
-        <option value="" [selected]="d.model === ''">(harness default)</option>
-        @for (m of models(); track m) {
-          <option [value]="m" [selected]="m === d.model">{{ m }}</option>
-        }
-      </select>
-    </label>
+    <hx-field label="Harness">
+      <hx-select
+        size="small"
+        ariaLabel="Harness"
+        data-testid="dialog-harness"
+        [options]="harnessOptions()"
+        [value]="d.harness"
+        (valueChange)="harness($event)"
+      />
+    </hx-field>
+    <hx-field label="Model">
+      <hx-select
+        size="small"
+        ariaLabel="Model"
+        data-testid="dialog-model"
+        [options]="modelOptions()"
+        [value]="d.model"
+        (valueChange)="model($event)"
+      />
+    </hx-field>
     <div class="dialog-buttons">
       <button
         type="button"

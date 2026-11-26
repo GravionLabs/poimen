@@ -9,50 +9,61 @@
     <h2>Issues</h2>
   </header>
   @if (issues.error(); as err) {
-    <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
+    <hx-message class="problem" severity="error" size="small"
+      >Could not read the issues: {{ err }}</hx-message
+    >
   }
   @if (issues.loading() && !issues.result()) {
     <app-loading-rows [active]="true" label="Loading issues" testId="issues-loading" [rows]="6" />
   }
   @if (issues.result()) {
     <div class="toolbar" role="group" aria-label="Issue filters">
-      <select aria-label="State" [value]="issues.state()" (change)="setState(value($event))">
-        <option value="open">Open</option>
-        <option value="closed">Closed</option>
-      </select>
-      <select aria-label="Level" [value]="issues.level() ?? ''" (change)="setLevel(value($event))">
-        <option value="">All levels</option>
-        @for (l of levels; track l) {
-          <option [value]="l">{{ l }}</option>
-        }
-      </select>
-      <select
-        aria-label="Label"
-        [value]="issues.label() ?? ''"
-        (change)="issues.label.set(value($event) || null)"
-      >
-        <option value="">All labels</option>
-        @for (l of issues.labelNames(); track l) {
-          <option [value]="l">{{ l }}</option>
-        }
-      </select>
-      <select
-        aria-label="Assignee"
-        [value]="issues.assignee() ?? ''"
-        (change)="issues.assignee.set(value($event) || null)"
-      >
-        <option value="">Anyone</option>
-        @for (a of issues.assigneeNames(); track a) {
-          <option [value]="a">{{ a }}</option>
-        }
-      </select>
-      <input
-        type="search"
-        aria-label="Filter issues by title or number"
-        placeholder="Title or number"
-        [value]="issues.text()"
-        (input)="issues.text.set(value($event))"
-      />
+      <hx-field>
+        <hx-select
+          size="small"
+          ariaLabel="State"
+          [options]="stateOptions"
+          [value]="issues.state()"
+          (valueChange)="setState($event)"
+        />
+      </hx-field>
+      <hx-field>
+        <hx-select
+          size="small"
+          ariaLabel="Level"
+          [options]="levelOptions"
+          [value]="issues.level() ?? ''"
+          (valueChange)="setLevel($event)"
+        />
+      </hx-field>
+      <hx-field>
+        <hx-select
+          size="small"
+          ariaLabel="Label"
+          [options]="labelOptions()"
+          [value]="issues.label() ?? ''"
+          (valueChange)="issues.label.set($event || null)"
+        />
+      </hx-field>
+      <hx-field>
+        <hx-select
+          size="small"
+          ariaLabel="Assignee"
+          [options]="assigneeOptions()"
+          [value]="issues.assignee() ?? ''"
+          (valueChange)="issues.assignee.set($event || null)"
+        />
+      </hx-field>
+      <hx-field
+        ><input
+          hx-input
+          size="small"
+          type="search"
+          aria-label="Filter issues by title or number"
+          placeholder="Title or number"
+          [value]="issues.text()"
+          (input)="issues.text.set(value($event))"
+      /></hx-field>
       @if (issues.markedIssues().length) {
         <span class="hint" data-testid="marked-count"
           >{{ issues.markedIssues().length }} selected</span
@@ -61,49 +72,54 @@
     </div>
     @if (issues.markedIssues().length) {
       <div class="toolbar bulk" role="group" aria-label="Bulk actions" data-testid="bulk-bar">
-        <select
-          aria-label="Set milestone"
-          data-testid="bulk-milestone"
-          [disabled]="issues.bulkBusy()"
-          (change)="bulkMilestone(value($event)); $any($event.target).value = ''"
-        >
-          <option value="">Set milestone</option>
-          @for (m of issues.bulkMilestones(); track m) {
-            <option [value]="m">{{ m }}</option>
-          }
-        </select>
-        <select
-          aria-label="Add label"
-          data-testid="bulk-add-label"
-          [disabled]="issues.bulkBusy()"
-          (change)="bulkAddLabel(value($event)); $any($event.target).value = ''"
-        >
-          <option value="">Add label</option>
-          @for (l of issues.bulkLabels(); track l) {
-            <option [value]="l">{{ l }}</option>
-          }
-        </select>
-        <select
-          aria-label="Remove label"
-          data-testid="bulk-remove-label"
-          [disabled]="issues.bulkBusy()"
-          (change)="bulkRemoveLabel(value($event)); $any($event.target).value = ''"
-        >
-          <option value="">Remove label</option>
-          @for (l of issues.bulkLabels(); track l) {
-            <option [value]="l">{{ l }}</option>
-          }
-        </select>
-        <select
-          aria-label="Close"
-          data-testid="bulk-close"
-          [disabled]="issues.bulkBusy()"
-          (change)="bulkClose(value($event)); $any($event.target).value = ''"
-        >
-          <option value="">Close…</option>
-          <option value="completed">Close as completed</option>
-          <option value="not_planned">Close as not planned</option>
-        </select>
+        <hx-field>
+          <hx-select
+            #milestonePick
+            size="small"
+            ariaLabel="Set milestone"
+            placeholder="Set milestone"
+            data-testid="bulk-milestone"
+            [options]="milestoneOptions()"
+            [disabled]="issues.bulkBusy()"
+            (valueChange)="bulkMilestone($event); milestonePick.value.set(null)"
+          />
+        </hx-field>
+        <hx-field>
+          <hx-select
+            #addPick
+            size="small"
+            ariaLabel="Add label"
+            placeholder="Add label"
+            data-testid="bulk-add-label"
+            [options]="bulkLabelOptions()"
+            [disabled]="issues.bulkBusy()"
+            (valueChange)="bulkAddLabel($event); addPick.value.set(null)"
+          />
+        </hx-field>
+        <hx-field>
+          <hx-select
+            #removePick
+            size="small"
+            ariaLabel="Remove label"
+            placeholder="Remove label"
+            data-testid="bulk-remove-label"
+            [options]="bulkLabelOptions()"
+            [disabled]="issues.bulkBusy()"
+            (valueChange)="bulkRemoveLabel($event); removePick.value.set(null)"
+          />
+        </hx-field>
+        <hx-field>
+          <hx-select
+            #closePick
+            size="small"
+            ariaLabel="Close"
+            placeholder="Close…"
+            data-testid="bulk-close"
+            [options]="closeOptions"
+            [disabled]="issues.bulkBusy()"
+            (valueChange)="bulkClose($event); closePick.value.set(null)"
+          />
+        </hx-field>
         <button
           type="button"
           hx-button
@@ -118,9 +134,9 @@
       </div>
     }
     @for (e of issues.errors(); track e.repo) {
-      <p class="problem" role="alert" data-testid="issue-error">
+      <hx-message class="problem" data-testid="issue-error" severity="error" size="small">
         {{ e.repo }}: {{ errorText(e.error) }}
-      </p>
+      </hx-message>
     }
     @for (tree of issues.trees(); track tree.root) {
       <h3 class="mono">
@@ -164,6 +180,7 @@
             (contextmenu)="openRowMenu($event, tree.repo, tree.root, i)"
           >
             <input
+              hx-checkbox
               type="checkbox"
               data-testid="mark"
               [checked]="issues.marked().has(tree.repo + '#' + i.number)"
@@ -219,11 +236,11 @@
             @if (progress(row.node.level, i); as p) {
               <span class="progress" data-testid="progress" [title]="p.percent + '% done'">
                 <span class="hint">{{ p.done }}/{{ p.total }}</span>
-                <progress
-                  max="100"
+                <hx-progress-bar
                   [value]="p.percent"
-                  [attr.aria-label]="'Sub-issues of #' + i.number"
-                ></progress>
+                  [showValue]="false"
+                  [ariaLabel]="'Sub-issues of #' + i.number"
+                />
               </span>
             }
             @for (pr of i.prs; track pr.number) {

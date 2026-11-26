@@ -1,28 +1,33 @@
 @if (state.choices(); as choices) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="state.answer(null)"
-  ></button>
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Choose an agent"
-    (keydown.escape)="state.answer(null)"
+  <app-dialog-shell
+    heading="Send to which agent?"
+    label="Choose an agent"
+    width="360px"
+    (cancelled)="state.answer(null)"
   >
-    <h2>Send to which agent?</h2>
-    <ul>
+    <hx-list aria-label="Agents">
       @for (c of choices; track c.paneId) {
-        <li>
-          <button type="button" (click)="state.answer(c.paneId)">{{ c.label }}</button>
-        </li>
+        <button
+          hx-list-row
+          type="button"
+          [attr.data-dialog-focus]="$first ? '' : null"
+          (click)="state.answer(c.paneId)"
+        >
+          <span class="hx-list-row-label">{{ c.label }}</span>
+        </button>
       }
-    </ul>
-    <div class="buttons">
-      <button type="button" (click)="state.answer(null)">Cancel</button>
+    </hx-list>
+    <div class="dialog-buttons">
+      <button
+        hx-button
+        type="button"
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        (click)="state.answer(null)"
+      >
+        Cancel
+      </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }

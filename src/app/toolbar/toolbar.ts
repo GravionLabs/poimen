@@ -1,4 +1,5 @@
 import { HxAppToolbar } from "@gravionlabs/helix-desktop";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
 import { nextTheme, type ThemeSetting } from "../core/settings";
 
@@ -15,7 +16,7 @@ export function fixedLabel(scheme: string): string {
 /** Top bar of the window; holds the theme button. */
 @Component({
   selector: "app-toolbar",
-  imports: [HxAppToolbar],
+  imports: [HxAppToolbar, HxButton],
   templateUrl: "./toolbar.html",
   styleUrl: "./toolbar.css",
   host: { style: "display: contents" },

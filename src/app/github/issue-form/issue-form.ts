@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/c
 import { ChipPicker } from "../chip-picker/chip-picker";
 import { GithubIssues, formReady } from "../issues";
 import { renderMarkdown } from "../markdown";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxSelectButton, HxField, HxInput } from "@gravionlabs/helix-ui";
 
 /**
  * The form for a new issue (#341): title, Markdown body, labels and milestone. Opened by the "+" of
@@ -13,7 +13,7 @@ import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
   selector: "app-issue-form",
   templateUrl: "./issue-form.html",
   styleUrl: "./issue-form.css",
-  imports: [HxButton, HxSelectButton, ChipPicker],
+  imports: [HxButton, HxSelectButton, ChipPicker, HxField, HxInput],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IssueFormPane {

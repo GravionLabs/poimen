@@ -1,4 +1,4 @@
-import { HxCheckbox } from "@gravionlabs/helix-ui";
+import { HxCheckbox, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject } from "@angular/core";
 import { Schedules } from "../core/schedules";
 import { lastResultText, nextRunText } from "../core/schedules-model";
@@ -9,7 +9,7 @@ import { lastResultText, nextRunText } from "../core/schedules-model";
  */
 @Component({
   selector: "app-schedules-editor",
-  imports: [HxCheckbox],
+  imports: [HxCheckbox, HxMessage],
   templateUrl: "./schedules-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

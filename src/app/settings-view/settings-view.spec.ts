@@ -337,7 +337,7 @@ describe("SettingsView fonts", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
 
   const field = (host: HTMLElement, label: string) =>
-    [...host.querySelectorAll<HTMLLabelElement>("section[aria-label='Fonts'] label.field")]
+    [...host.querySelectorAll<HTMLElement>("section[aria-label='Fonts'] hx-field.field")]
       .find((l) => l.textContent?.trim().startsWith(label))!
       .querySelector("input")!;
 

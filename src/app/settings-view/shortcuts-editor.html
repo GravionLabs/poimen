@@ -4,10 +4,10 @@
   key. Only the changed entry of <code>shortcuts</code> is written to config.json.
 </p>
 @if (writeError(); as m) {
-  <p class="field-error" role="alert">{{ m }}</p>
+  <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
 }
 @if (resetError(); as m) {
-  <p class="field-error" role="alert">{{ m }}</p>
+  <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
 }
 @for (g of groups; track g.title) {
   <section class="shortcut-group" [attr.aria-label]="g.title">
@@ -94,13 +94,17 @@
         @if (recording(); as r) {
           @if (r.action === action) {
             @if (conflict(); as other) {
-              <li class="field-error" role="alert">
-                {{ display(r.accelerator ?? "") }} is already used by {{ title(other) }}. Pick
-                another combination.
+              <li>
+                <hx-message class="field-error" severity="error" size="small"
+                  >{{ display(r.accelerator ?? "") }} is already used by {{ title(other) }}. Pick
+                  another combination.</hx-message
+                >
               </li>
             }
             @if (r.error; as m) {
-              <li class="field-error" role="alert">{{ m }}</li>
+              <li>
+                <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
+              </li>
             }
           }
         }

@@ -1,7 +1,11 @@
 <hx-app-toolbar>
   <button
     slot="end"
+    hx-button
     type="button"
+    variant="text"
+    severity="secondary"
+    size="small"
     class="item"
     [attr.aria-pressed]="outputOpen()"
     (click)="outputToggle.emit()"
@@ -10,7 +14,11 @@
   </button>
   <button
     slot="end"
+    hx-button
     type="button"
+    variant="text"
+    severity="secondary"
+    size="small"
     class="item theme-button"
     [attr.aria-label]="fixedBy() ? fixed(fixedBy()!) : label(theme())"
     [disabled]="fixedBy() !== null"

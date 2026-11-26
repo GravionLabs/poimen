@@ -77,14 +77,18 @@
 
 @if (changes.scope() === "uncommitted" && changes.list()) {
   <div class="git" role="group" aria-label="Commit and push">
-    <textarea
-      class="message"
-      rows="2"
-      placeholder="Commit message"
-      aria-label="Commit message"
-      [value]="changes.commitMessage()"
-      (input)="changes.commitMessage.set($any($event.target).value)"
-    ></textarea>
+    <hx-field>
+      <textarea
+        hx-input
+        size="small"
+        class="message"
+        rows="2"
+        placeholder="Commit message"
+        aria-label="Commit message"
+        [value]="changes.commitMessage()"
+        (input)="changes.commitMessage.set($any($event.target).value)"
+      ></textarea>
+    </hx-field>
     @if (changes.messageHarness()) {
       @if (changes.generating()) {
         <button
@@ -160,7 +164,7 @@
   <p class="findings-note stale" role="status">{{ note }}</p>
 }
 @if (changes.error(); as error) {
-  <p class="problem" role="alert">{{ error }}</p>
+  <hx-message class="problem" severity="error" size="small">{{ error }}</hx-message>
 } @else if (changes.loading() && !changes.list()) {
   <app-loading-rows [active]="true" label="Loading changes" testId="changes-loading" [rows]="8" />
 } @else if (changes.list() && !changes.files().length) {
@@ -286,7 +290,7 @@
     </ng-template>
     <section class="diff" aria-label="Diff">
       @if (changes.contentError(); as error) {
-        <p class="problem" role="alert">{{ error }}</p>
+        <hx-message class="problem" severity="error" size="small">{{ error }}</hx-message>
       } @else {
         @let content = changes.content();
         @if (content?.state === "binary") {

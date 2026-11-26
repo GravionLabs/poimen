@@ -3,26 +3,26 @@
     <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -->
     <div class="picker" (keydown)="onKey($event)">
       <div class="head">
-        <input
-          class="field"
-          type="text"
-          placeholder="Filter by text or number"
-          aria-label="Filter issues"
-          [value]="picker.query()"
-          (input)="input($event)"
-        />
+        <hx-field class="filter"
+          ><input
+            hx-input
+            size="small"
+            type="text"
+            placeholder="Filter by text or number"
+            aria-label="Filter issues"
+            [value]="picker.query()"
+            (input)="input($event)"
+        /></hx-field>
         @if (picker.machines().length > 0) {
-          <select
-            class="mode"
-            aria-label="Machine"
-            title="Where the task runs"
-            (change)="machine($event)"
-          >
-            <option value="" [selected]="picker.machine() === null">This Mac</option>
-            @for (name of picker.machines(); track name) {
-              <option [value]="name" [selected]="picker.machine() === name">{{ name }}</option>
-            }
-          </select>
+          <hx-field class="mode" title="Where the task runs">
+            <hx-select
+              size="small"
+              ariaLabel="Machine"
+              [options]="machineOptions()"
+              [value]="picker.machine() ?? ''"
+              (valueChange)="machine($event)"
+            />
+          </hx-field>
         }
         @if (picker.modes().length > 0) {
           <button
@@ -57,7 +57,9 @@
         }
       </div>
       @if (picker.error(); as error) {
-        <p class="error" role="alert">{{ errorText(error) }} You can still type an issue number.</p>
+        <hx-message class="error" severity="error" size="small"
+          >{{ errorText(error) }} You can still type an issue number.</hx-message
+        >
       }
       @if (picker.loading()) {
         <app-loading-rows [active]="true" label="Loading issues" testId="task-loading" [rows]="5" />

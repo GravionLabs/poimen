@@ -1,4 +1,11 @@
-import { HxButton, HxInput } from "@gravionlabs/helix-ui";
+import {
+  HxButton,
+  HxInput,
+  HxField,
+  HxSelect,
+  HxInputGroup,
+  HxMessage,
+} from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -28,6 +35,7 @@ import {
 import { TauriBridge } from "../core/tauri";
 import { SettingsTransfer } from "../core/settings-transfer";
 import { SettingsImportPanel } from "./settings-import-panel";
+import { selectOptions, type SelectOption } from "../ui/select/select-options";
 
 /** Where the layout of the draft started: none, a source, or edited by hand. */
 type LayoutSource = "none" | "default" | "user" | "custom" | `preset:${string}` | `named:${string}`;
@@ -52,7 +60,7 @@ function panesText(layout: SpaceLayout): string {
 }
 
 function value(event: Event): string {
-  return (event.target as HTMLInputElement | HTMLSelectElement).value;
+  return (event.target as HTMLInputElement).value;
 }
 
 /**
@@ -61,7 +69,7 @@ function value(event: Event): string {
  */
 @Component({
   selector: "app-space-templates-editor",
-  imports: [SettingsImportPanel, HxButton, HxInput],
+  imports: [SettingsImportPanel, HxButton, HxInput, HxField, HxSelect, HxInputGroup, HxMessage],
   templateUrl: "./space-templates-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -120,6 +128,40 @@ export class SpaceTemplatesEditor {
     this.harnesses().find((h) => h.id === this.editing()?.draft.agent),
   );
   protected readonly matchLabel = matchLabel;
+  protected readonly providers = [
+    { label: "Any", value: "" },
+    { label: "GitHub", value: "github" },
+    { label: "Azure DevOps", value: "azure-devops" },
+  ];
+  /** The harnesses, plus the draft's own agent (not choosable) when none of them has its id. */
+  protected readonly agentOptions = computed((): SelectOption[] => {
+    const options: SelectOption[] = this.harnesses().map((h) => ({
+      label: `${h.id}${h.available ? "" : " (not found)"}`,
+      value: h.id,
+    }));
+    const agent = this.editing()?.draft.agent ?? "";
+    if (!this.harness()) options.push({ label: agent || "Choose…", value: agent, disabled: true });
+    return options;
+  });
+  /** Models of the chosen harness, plus the draft's own when the harness does not list it. */
+  protected readonly modelOptions = computed(() => {
+    const model = this.editing()?.draft.model;
+    const listed = this.harness()?.models ?? [];
+    const models = model && !listed.includes(model) ? [...listed, model] : listed;
+    return [{ label: "Default", value: "" }, ...selectOptions(models)];
+  });
+  protected readonly layoutOptions = computed((): SelectOption[] => {
+    const missing = this.unknownLayout();
+    return [
+      { label: "None (spaces.layout or the built-in default)", value: "none" },
+      { label: "Built-in default", value: "default" },
+      ...(this.settings().spacesLayout ? [{ label: "New space layout", value: "user" }] : []),
+      ...this.layoutNames().map((n) => ({ label: `Layout: ${n}`, value: `named:${n}` })),
+      ...(missing ? [{ label: `Layout: ${missing} (missing)`, value: `named:${missing}` }] : []),
+      ...this.presetNames().map((p) => ({ label: `Project preset: ${p}`, value: `preset:${p}` })),
+      ...(this.source() === "custom" ? [{ label: "Custom", value: "custom", disabled: true }] : []),
+    ];
+  });
 
   /** The panes of an inline layout; a layout name has none to edit here. */
   protected inlineLayout(l: SpaceTemplate["layout"]): SpaceLayout | null {
@@ -238,8 +280,7 @@ export class SpaceTemplatesEditor {
     }
   }
 
-  protected setProvider(event: Event): void {
-    const provider = value(event);
+  protected setProvider(provider: string | null): void {
     this.patch({
       remote:
         provider === "github"
@@ -255,27 +296,16 @@ export class SpaceTemplatesEditor {
     if (remote) this.patch({ remote: { ...remote, [field]: value(event) } as RemoteMatch });
   }
 
-  protected setAgent(event: Event): void {
-    this.patch({ agent: value(event), model: null });
+  protected setAgent(agent: string | null): void {
+    this.patch({ agent: agent ?? "", model: null });
   }
 
-  protected setModel(event: Event): void {
-    this.patch({ model: value(event) || null });
+  protected setModel(model: string | null): void {
+    this.patch({ model: model || null });
   }
 
-  /** Models of the chosen harness, plus the draft's own when the harness does not list it. */
-  protected models(): string[] {
-    const model = this.editing()?.draft.model;
-    const listed = this.harness()?.models ?? [];
-    return model && !listed.includes(model) ? [...listed, model] : listed;
-  }
-
-  protected agentKnown(): boolean {
-    return this.harness() !== undefined;
-  }
-
-  protected setSource(event: Event): void {
-    const source = value(event) as LayoutSource;
+  protected setSource(picked: string | null): void {
+    const source = (picked ?? "none") as LayoutSource;
     if (source.startsWith("named:")) {
       this.source.set(source);
       this.patch({ layout: source.slice(6) });

@@ -15,7 +15,7 @@ import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
-import { HxButton, HxInput } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxField, HxInputGroup, HxMessage } from "@gravionlabs/helix-ui";
 import { ProjectLayouts } from "./project-layouts";
 import {
   EMPTY_FORM,
@@ -34,7 +34,7 @@ import { activityText, overviewRows, spaceDirectory, spacePullUrl } from "./over
  */
 @Component({
   selector: "app-space-overview",
-  imports: [ProjectLayouts, HxButton, HxInput],
+  imports: [ProjectLayouts, HxButton, HxInput, HxField, HxInputGroup, HxMessage],
   templateUrl: "./space-overview.html",
   styleUrl: "./space-overview.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

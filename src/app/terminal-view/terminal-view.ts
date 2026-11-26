@@ -14,7 +14,7 @@ import {
   viewChild,
   type OnDestroy,
 } from "@angular/core";
-import { HxButton, HxTooltip } from "@gravionlabs/helix-ui";
+import { HxButton, HxTooltip, HxField, HxInput } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -105,7 +105,7 @@ export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
 
 @Component({
   selector: "app-terminal-view",
-  imports: [HxButton, HxTooltip, PromptBar, Icon, ContextMenu],
+  imports: [HxButton, HxTooltip, PromptBar, Icon, ContextMenu, HxField, HxInput],
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

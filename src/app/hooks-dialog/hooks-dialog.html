@@ -24,7 +24,7 @@
       status and tools.
     </p>
     @if (offer.error(); as error) {
-      <p class="error" role="alert">{{ error }}</p>
+      <hx-message class="error" severity="error" size="small">{{ error }}</hx-message>
     }
     <div class="dialog-buttons">
       <button

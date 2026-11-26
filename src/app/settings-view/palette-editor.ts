@@ -1,4 +1,4 @@
-import { HxButton, HxCheckbox } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
 import { PALETTE_SOURCES, type HiddenEntry } from "../core/palette-settings";
 import { PaletteVisibility } from "../core/palette-visibility";
@@ -10,7 +10,7 @@ import { SettingsStore } from "../core/settings";
  */
 @Component({
   selector: "app-palette-editor",
-  imports: [HxButton, HxCheckbox],
+  imports: [HxButton, HxCheckbox, HxMessage],
   templateUrl: "./palette-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

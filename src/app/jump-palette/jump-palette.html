@@ -12,43 +12,44 @@
         <circle cx="6.5" cy="6.5" r="4.5" />
         <path d="M10 10l4.5 4.5" />
       </svg>
-      <input
-        #field
-        class="query"
-        type="text"
-        role="combobox"
-        aria-expanded="true"
-        aria-controls="jump-list"
-        placeholder="Jump to an agent or space"
-        [value]="palette.query()"
-        (input)="type($event)"
-        (keydown)="key($event)"
-      />
+      <hx-field
+        ><input
+          hx-input
+          size="small"
+          #field
+          class="query"
+          type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="jump-list"
+          placeholder="Jump to an agent or space"
+          [value]="palette.query()"
+          (input)="type($event)"
+          (keydown)="key($event)"
+      /></hx-field>
     </div>
     <p class="sr-only" role="status" aria-live="polite">
       {{ palette.announcement() }}
     </p>
-    <ul id="jump-list" role="listbox">
+    <hx-list id="jump-list" class="rows" role="listbox" aria-label="Agents and spaces">
       @for (row of palette.rows(); track row.key) {
         @if (row.type === "heading") {
-          <li class="heading" role="presentation">{{ row.label }}</li>
+          <div class="heading" role="presentation">{{ row.label }}</div>
         } @else {
-          <li
-            role="option"
-            [class.selected]="row.index === palette.selected()"
-            [class.disabled]="row.entry.disabled"
-            [attr.aria-selected]="row.index === palette.selected()"
-            [attr.aria-disabled]="row.entry.disabled ? true : null"
-            [attr.title]="row.entry.disabled"
-          >
+          <div class="item" role="presentation">
             <button
+              hx-list-row
               type="button"
+              class="row"
               tabindex="-1"
+              [selected]="row.index === palette.selected()"
+              [attr.aria-disabled]="row.entry.disabled ? true : null"
+              [attr.title]="row.entry.disabled"
               (click)="choose(row.entry)"
               (mousemove)="palette.hover(row.index)"
             >
-              <app-icon class="kind" [name]="row.entry.icon" [size]="16" />
-              <span class="title">
+              <app-icon class="hx-list-row-icon kind" [name]="row.entry.icon" [size]="16" />
+              <span class="hx-list-row-label title">
                 @for (part of parts(row.entry.title, row.positions); track $index) {
                   @if (part.hit) {
                     <mark>{{ part.text }}</mark>
@@ -57,9 +58,13 @@
                   }
                 }
               </span>
-              <span class="detail">{{ row.entry.disabled ?? row.entry.detail }}</span>
+              <span class="hx-list-row-meta detail">{{
+                row.entry.disabled ?? row.entry.detail
+              }}</span>
               @if (row.age) {
-                <span class="age" [attr.title]="'In this state for ' + row.age">{{ row.age }}</span>
+                <span class="hx-list-row-meta age" [attr.title]="'In this state for ' + row.age">{{
+                  row.age
+                }}</span>
               }
               @if (row.context; as context) {
                 <span class="context">
@@ -74,12 +79,12 @@
                 </span>
               }
             </button>
-          </li>
+          </div>
         }
       } @empty {
-        <li class="empty" role="presentation">Nothing to jump to</li>
+        <div class="empty" role="presentation">Nothing to jump to</div>
       }
-    </ul>
+    </hx-list>
     <p class="footer">↑↓ navigate · ↵ jump · Esc close</p>
   </div>
 }

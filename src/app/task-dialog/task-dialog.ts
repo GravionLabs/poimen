@@ -1,8 +1,16 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+} from "@angular/core";
 import { LEVEL_FILTERS, TaskPicker, errorText, markers } from "./task-picker";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { LoadingRows } from "../ui/loading/loading-rows";
+import { selectOptions } from "../ui/select/select-options";
 
 /**
  * Picks an open issue and a task mode. Only returns the choice (see `TaskPicker`); keys: Up/Down
@@ -10,7 +18,7 @@ import { LoadingRows } from "../ui/loading/loading-rows";
  */
 @Component({
   selector: "app-task-dialog",
-  imports: [LoadingRows, DialogShell, HxButton],
+  imports: [LoadingRows, DialogShell, HxButton, HxField, HxSelect, HxInput, HxMessage],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./task-dialog.html",
   styleUrl: "./task-dialog.css",
@@ -20,6 +28,10 @@ export class TaskDialog {
   protected readonly levels = LEVEL_FILTERS;
   protected readonly markers = markers;
   protected readonly errorText = errorText;
+  protected readonly machineOptions = computed(() => [
+    { label: "This Mac", value: "" },
+    ...selectOptions(this.picker.machines()),
+  ]);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   constructor() {
@@ -34,6 +46,8 @@ export class TaskDialog {
   }
 
   protected onKey(event: KeyboardEvent): void {
+    // The machine select owns its keys: open, move in the list, pick and close.
+    if ((event.target as Element | null)?.closest?.("hx-select")) return;
     const handlers: Record<string, () => void> = {
       ArrowDown: () => this.picker.move(1),
       ArrowUp: () => this.picker.move(-1),
@@ -47,8 +61,8 @@ export class TaskDialog {
     handler();
   }
 
-  protected machine(event: Event): void {
-    this.picker.setMachine((event.target as HTMLSelectElement).value || null);
+  protected machine(value: string | null): void {
+    this.picker.setMachine(value || null);
   }
 
   protected input(event: Event): void {

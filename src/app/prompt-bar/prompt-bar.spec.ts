@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { signal } from "@angular/core";
 import { getTestBed, TestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { HxField, HxInput } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentPrompts, type PromptOutcome } from "../core/agent-prompt";
 import type { Terminal } from "../core/snapshot";
@@ -27,7 +28,7 @@ async function mount(outcome: PromptOutcome) {
     set: {
       templateUrl: undefined,
       styleUrl: undefined,
-      imports: [],
+      imports: [HxField, HxInput],
       template: readFileSync("src/app/prompt-bar/prompt-bar.html", "utf8"),
     },
   });

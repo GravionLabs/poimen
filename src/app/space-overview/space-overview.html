@@ -153,31 +153,30 @@
   <section id="config" class="config" aria-labelledby="config-title">
     <h3 id="config-title">Configuration</h3>
     <div class="field">
-      <label for="cfg-name">Name</label>
-      <input
-        hx-input
-        size="small"
-        id="cfg-name"
-        class="cfg-name"
-        type="text"
-        autocomplete="off"
-        [value]="name() ?? n.workspace.label"
-        (input)="setName($event)"
-      />
-      <button
-        type="button"
-        hx-button
-        variant="outlined"
-        severity="secondary"
-        size="small"
-        class="cfg-rename"
-        (click)="renameSpace()"
+      <hx-field class="grow" label="Name" [error]="nameError()"
+        ><hx-input-group
+          ><input
+            hx-input
+            size="small"
+            id="cfg-name"
+            class="cfg-name"
+            type="text"
+            autocomplete="off"
+            [value]="name() ?? n.workspace.label"
+            (input)="setName($event)"
+          /><button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            class="cfg-rename"
+            (click)="renameSpace()"
+          >
+            Rename
+          </button></hx-input-group
+        ></hx-field
       >
-        Rename
-      </button>
-      @if (nameError(); as message) {
-        <p class="error" role="alert">{{ message }}</p>
-      }
     </div>
     <div class="field">
       <span class="label">Directory</span>
@@ -189,14 +188,15 @@
         Other keys of the file are kept.
       </p>
       @if (fileError(); as message) {
-        <p class="error cfg-file-error" role="alert">{{ message }}</p>
+        <hx-message class="error cfg-file-error" severity="error" size="small">{{
+          message
+        }}</hx-message>
       }
       @if (errorOf("file"); as message) {
-        <p class="error" role="alert">{{ message }}</p>
+        <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
       }
-      <div class="field">
-        <label for="cfg-setup">Setup command</label>
-        <input
+      <hx-field class="field" label="Setup command" [error]="errorOf('setup')"
+        ><input
           hx-input
           size="small"
           id="cfg-setup"
@@ -205,14 +205,9 @@
           autocomplete="off"
           [value]="form().setup"
           (input)="setField('setup', $event)"
-        />
-        @if (errorOf("setup"); as message) {
-          <p class="error" role="alert">{{ message }}</p>
-        }
-      </div>
-      <div class="field">
-        <label for="cfg-teardown">Teardown command</label>
-        <input
+      /></hx-field>
+      <hx-field class="field" label="Teardown command" [error]="errorOf('teardown')"
+        ><input
           hx-input
           size="small"
           id="cfg-teardown"
@@ -221,11 +216,7 @@
           autocomplete="off"
           [value]="form().teardown"
           (input)="setField('teardown', $event)"
-        />
-        @if (errorOf("teardown"); as message) {
-          <p class="error" role="alert">{{ message }}</p>
-        }
-      </div>
+      /></hx-field>
       @defer (on immediate) {
         <app-project-layouts
           [layout]="form().layout"
@@ -239,9 +230,9 @@
       }
       <details class="advanced">
         <summary>Advanced</summary>
-        <div class="field">
-          <label for="cfg-layout">Layout (JSON)</label>
+        <hx-field class="field" label="Layout (JSON)">
           <textarea
+            size="small"
             hx-input
             id="cfg-layout"
             class="cfg-layout"
@@ -250,10 +241,10 @@
             [value]="form().layout"
             (input)="setField('layout', $event)"
           ></textarea>
-        </div>
-        <div class="field">
-          <label for="cfg-presets">Presets (JSON)</label>
+        </hx-field>
+        <hx-field class="field" label="Presets (JSON)">
           <textarea
+            size="small"
             hx-input
             id="cfg-presets"
             class="cfg-presets"
@@ -262,7 +253,7 @@
             [value]="form().presets"
             (input)="setField('presets', $event)"
           ></textarea>
-        </div>
+        </hx-field>
       </details>
       @if (trust(); as request) {
         <div class="trust" role="alert">

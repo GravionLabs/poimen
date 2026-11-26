@@ -11,8 +11,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
-  padding: 8px 10px 6px 14px;
+  gap: var(--h-space-1);
+  padding: var(--h-space-2) calc(var(--h-space-1) * 2.5) calc(var(--h-space-1) * 1.5)
+    calc(var(--h-space-1) * 3.5);
 }
 
 .sort-toggle[aria-pressed="true"] {
@@ -27,26 +28,26 @@
 }
 
 .connection {
-  margin: 0 10px 8px;
+  margin: 0 calc(var(--h-space-1) * 2.5) var(--h-space-2);
 }
 
 .filter {
-  margin: 0 10px 8px;
+  margin: 0 calc(var(--h-space-1) * 2.5) var(--h-space-2);
   width: calc(100% - 20px);
   /* The text is as small as the rows below it, not the size of a form (#1085). */
   height: var(--control-height);
-  font-size: 12px;
-  --h-form-field-font-size: 12px;
+  font-size: var(--h-font-size-xs);
+  --h-form-field-font-size: var(--h-font-size-xs);
 }
 
 .retry {
-  margin-left: 6px;
+  margin-left: calc(var(--h-space-1) * 1.5);
 }
 
 .local-title {
   margin: 0;
-  padding: 4px 14px;
-  font-size: 0.85em;
+  padding: var(--h-space-1) calc(var(--h-space-1) * 3.5);
+  font-size: var(--h-font-size-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   opacity: 0.7;
@@ -56,13 +57,13 @@
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--h-space-2);
   min-width: 0;
-  padding: 2px 8px 10px;
+  padding: calc(var(--h-space-1) * 0.5) var(--h-space-2) calc(var(--h-space-1) * 2.5);
 }
 
 .cards-empty {
-  margin: 4px 6px;
+  margin: var(--h-space-1) calc(var(--h-space-1) * 1.5);
   color: var(--h-text-muted-color);
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }

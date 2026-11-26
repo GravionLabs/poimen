@@ -9,7 +9,7 @@
     </button>
   </div>
   @for (w of warnings(); track $index) {
-    <p class="error warning" role="alert">{{ w }}</p>
+    <hx-message class="error warning" severity="error" size="small">{{ w }}</hx-message>
   }
   @if (machines.machines().length === 0) {
     <p class="hint">No machine is configured.</p>
@@ -129,7 +129,9 @@
           }
           @if (resultOf(m.name); as r) {
             @if (isError(r)) {
-              <p class="error" role="alert">Check failed: {{ r.error }}</p>
+              <hx-message class="error" severity="error" size="small"
+                >Check failed: {{ r.error }}</hx-message
+              >
             } @else {
               <p class="summary">{{ passed(r) ? "All required checks passed" : "Missing" }}</p>
               <ul class="checks" aria-label="Checks of {{ m.name }}">
@@ -187,7 +189,7 @@
         }
       }
       @if (removeError(); as e) {
-        <p class="error" role="alert">{{ e }}</p>
+        <hx-message class="error" severity="error" size="small">{{ e }}</hx-message>
       }
       <div class="dialog-buttons">
         <button

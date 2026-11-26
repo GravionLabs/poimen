@@ -5,21 +5,15 @@
 
 .prompt {
   display: flex;
-  gap: 8px;
+  gap: var(--h-space-2);
   align-items: center;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: var(--h-space-1) calc(var(--h-space-1) * 2.5);
+  font-size: var(--h-font-size-xs);
 }
 
-input {
+hx-field {
   flex: 1;
   min-width: 0;
-  padding: 3px 8px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 4px;
-  font: inherit;
 }
 
 .result {

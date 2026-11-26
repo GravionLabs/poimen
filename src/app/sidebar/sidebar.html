@@ -72,15 +72,17 @@
 @if (writeError(); as reason) {
   <hx-message class="connection" severity="warn" size="small">{{ reason }}</hx-message>
 }
-<input
-  hx-input
-  class="filter"
-  type="search"
-  placeholder="Filter by name, agent, branch"
-  aria-label="Filter panes"
-  [value]="query()"
-  (input)="setQuery($event)"
-/>
+<hx-field
+  ><input
+    size="small"
+    hx-input
+    class="filter"
+    type="search"
+    placeholder="Filter by name, agent, branch"
+    aria-label="Filter panes"
+    [value]="query()"
+    (input)="setQuery($event)"
+/></hx-field>
 @if (machines.machines().length) {
   <h2 class="local-title">This Mac</h2>
 }

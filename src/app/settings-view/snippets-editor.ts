@@ -1,4 +1,4 @@
-import { HxButton, HxCheckbox, HxInput } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { SettingsStore } from "../core/settings";
 import type { Snippet } from "../core/snippets-model";
@@ -17,13 +17,18 @@ const EMPTY: Snippet = { label: "", text: "", enter: true, target: "terminal" };
  */
 @Component({
   selector: "app-snippets-editor",
-  imports: [HxButton, HxCheckbox, HxInput],
+  imports: [HxButton, HxCheckbox, HxInput, HxField, HxSelect, HxMessage],
   templateUrl: "./snippets-editor.html",
   styleUrls: ["./settings-view.css", "./snippets-editor.css"],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SnippetsEditor {
   private readonly store = inject(SettingsStore);
+
+  protected readonly targets = [
+    { label: "The pane (typed into the terminal)", value: "terminal" },
+    { label: "An agent (sent as a prompt)", value: "agent" },
+  ];
 
   protected readonly snippets = computed(() => this.store.settings().snippets);
   protected readonly warnings = computed(() =>
@@ -68,9 +73,8 @@ export class SnippetsEditor {
     this.patch({ text: (event.target as HTMLTextAreaElement).value });
   }
 
-  protected setTarget(event: Event): void {
-    const target = (event.target as HTMLSelectElement).value === "agent" ? "agent" : "terminal";
-    this.patch({ target });
+  protected setTarget(value: string | null): void {
+    this.patch({ target: value === "agent" ? "agent" : "terminal" });
   }
 
   protected setEnter(event: Event): void {

@@ -1,4 +1,4 @@
-/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
+/* Rows are 34px. */
 @import "./github-badges.css";
 :host {
   display: block;
@@ -9,28 +9,28 @@
   color: var(--h-text-color);
 }
 .page {
-  padding: 16px 24px 32px;
+  padding: var(--h-space-4) var(--h-space-6) var(--h-space-8);
 }
 header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--h-space-3);
 }
 h1 {
-  font-size: 18px;
+  font-size: var(--h-font-size-lg);
   margin: 0;
 }
 h2 {
-  font-size: 14px;
-  margin: 20px 0 8px;
+  font-size: var(--h-font-size-sm);
+  margin: var(--h-space-5) 0 var(--h-space-2);
 }
 h2.page-title {
-  font-size: 16px;
+  font-size: var(--h-font-size-md);
   margin: 0;
 }
 .path,
 .hint {
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
   font-weight: normal;
 }
@@ -40,12 +40,12 @@ h2.page-title {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--h-font-size-sm);
 }
 th,
 td {
   text-align: left;
-  padding: 0 8px;
+  padding: 0 var(--h-space-2);
   height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
   vertical-align: middle;
@@ -56,7 +56,7 @@ th {
 }
 .mono {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 .unclaimed {
   color: var(--h-text-muted-color);
@@ -65,12 +65,12 @@ th {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin: 12px 0;
+  gap: var(--h-space-2);
+  margin: var(--h-space-3) 0;
 }
 .count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }
 .num {
@@ -88,7 +88,7 @@ tr.cursor {
   outline-offset: -1px;
 }
 tr.selected {
-  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+  background: var(--h-content-hover-background);
 }
 tbody:focus-visible {
   outline: none;
@@ -96,14 +96,14 @@ tbody:focus-visible {
 .layout {
   position: relative;
   display: flex;
-  gap: 24px;
+  gap: var(--h-space-6);
   align-items: flex-start;
-  margin-top: 12px;
+  margin-top: var(--h-space-3);
 }
 .side {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--h-space-2);
   width: 200px;
   flex: none;
 }
@@ -114,7 +114,7 @@ tbody:focus-visible {
 .nav-item {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--h-space-2);
   width: 100%;
   border-left: 2px solid transparent;
   text-align: left;
@@ -122,10 +122,10 @@ tbody:focus-visible {
 .nav-item.active {
   font-weight: 600;
   border-left-color: var(--h-primary-color);
-  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+  background: var(--h-content-hover-background);
 }
 .nav-count {
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }
 .content {
@@ -135,13 +135,13 @@ tbody:focus-visible {
 .show-empty {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: calc(var(--h-space-1) * 1.5);
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }
 tr.group th {
   height: 34px;
-  padding-top: 8px;
+  padding-top: var(--h-space-2);
   color: var(--h-text-color);
   font-weight: 600;
   background: var(--h-content-background);
@@ -172,12 +172,12 @@ td.c-title {
     display: none;
   }
   .layout {
-    gap: 12px;
+    gap: var(--h-space-3);
   }
   .side {
     width: 56px;
   }
-  .side select,
+  .side .repo-filter,
   .show-empty {
     display: none;
   }
@@ -185,11 +185,11 @@ td.c-title {
     flex-direction: column;
     align-items: center;
     gap: 0;
-    padding-inline: 4px;
+    padding-inline: var(--h-space-1);
   }
   .nav-item::before {
     content: attr(data-icon);
-    font-size: 16px;
+    font-size: var(--h-font-size-md);
     line-height: 1.2;
   }
   .nav-label {

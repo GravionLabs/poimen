@@ -80,7 +80,7 @@ function setup(entries: JumpEntry[]) {
     input.dispatchEvent(new KeyboardEvent("keydown", { key, cancelable: true }));
     fixture.detectChanges();
   };
-  return { fixture, press, chosen, open };
+  return { fixture, press, chosen, open, input };
 }
 
 describe("JumpPaletteView", () => {
@@ -110,10 +110,42 @@ describe("JumpPaletteView", () => {
     outside.remove();
   });
 
+  it("shows the entries as list rows and marks the highlighted and disabled ones", () => {
+    const { fixture, press } = setup([entry("a"), entry("b", "m is offline")]);
+    const rows = [
+      ...(fixture.nativeElement as HTMLElement).querySelectorAll(
+        'hx-list[role="listbox"] button[hx-list-row][role="option"]',
+      ),
+    ];
+    const state = () =>
+      rows.map((r) => [
+        r.classList.contains("hx-list-row-selected"),
+        r.getAttribute("aria-selected"),
+      ]);
+    expect(state()).toEqual([
+      [true, "true"],
+      [false, "false"],
+    ]);
+    press("ArrowDown");
+    expect(state()).toEqual([
+      [false, "false"],
+      [true, "true"],
+    ]);
+    expect(rows[1].getAttribute("aria-disabled")).toBe("true");
+    expect(rows[1].getAttribute("title")).toBe("m is offline");
+  });
+
+  it("keeps Tab in the field", () => {
+    const { input } = setup([entry("a")]);
+    const event = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("shows the age, the context line with the match, and announces the count", () => {
     const { fixture } = setup([entry("a"), entry("b")]);
     const el = fixture.nativeElement as HTMLElement;
-    const rows = el.querySelectorAll("li[role=option]");
+    const rows = el.querySelectorAll("[role=option]");
     expect(rows[0].querySelector(".age")?.textContent).toBe("3m");
     expect(rows[0].querySelector(".context .field")?.textContent).toBe("branch:");
     expect(rows[0].querySelector(".context mark")?.textContent).toBe("tab");
@@ -122,7 +154,7 @@ describe("JumpPaletteView", () => {
     );
     expect(rows[1].querySelector(".age")).toBeNull();
     expect(rows[1].querySelector(".context")).toBeNull();
-    const live = el.querySelector("[aria-live]");
+    const live = el.querySelector("p[aria-live]");
     expect(live?.getAttribute("role")).toBe("status");
     expect(live?.textContent?.trim()).toBe("2 results");
   });

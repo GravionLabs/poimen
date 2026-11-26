@@ -10,7 +10,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxSelectButton, HxMessage } from "@gravionlabs/helix-ui";
 import { ExternalEditor } from "../core/external-editor";
 import { TauriBridge } from "../core/tauri";
 import { renderMarkdown } from "../github/markdown";
@@ -33,7 +33,7 @@ type ViewMode = "rendered" | "source";
  */
 @Component({
   selector: "app-file-preview",
-  imports: [HxButton, HxSelectButton, SourceView],
+  imports: [HxButton, HxSelectButton, SourceView, HxMessage],
   templateUrl: "./file-preview.html",
   styles: `
     :host {
@@ -47,15 +47,15 @@ type ViewMode = "rendered" | "source";
     header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px 8px;
+      gap: var(--h-space-2);
+      padding: var(--h-space-1) var(--h-space-2);
       border-bottom: 1px solid var(--h-content-border-color);
-      font-size: 12px;
+      font-size: var(--h-font-size-xs);
     }
     .file {
       min-width: 0;
       display: flex;
-      gap: 8px;
+      gap: var(--h-space-2);
       white-space: nowrap;
     }
     .name {
@@ -83,9 +83,9 @@ type ViewMode = "rendered" | "source";
     .markdown {
       flex: 1;
       overflow: auto;
-      padding: 12px 20px;
+      padding: var(--h-space-3) var(--h-space-5);
       overflow-wrap: anywhere;
-      font-size: 13px;
+      font-size: var(--h-font-size-sm);
       line-height: 1.5;
     }
     .markdown :is(img) {
@@ -93,7 +93,7 @@ type ViewMode = "rendered" | "source";
     }
     .markdown :is(pre) {
       overflow: auto;
-      padding: 8px;
+      padding: var(--h-space-2);
       background: var(--term-bg);
       color: var(--term-fg);
     }
@@ -102,16 +102,13 @@ type ViewMode = "rendered" | "source";
     }
     .markdown :is(th, td) {
       border: 1px solid var(--h-content-border-color);
-      padding: 2px 8px;
+      padding: calc(var(--h-space-1) * 0.5) var(--h-space-2);
     }
     .note {
       margin: auto;
       max-width: 420px;
       text-align: center;
       color: var(--h-text-muted-color);
-    }
-    .note.problem {
-      color: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

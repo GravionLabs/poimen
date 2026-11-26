@@ -137,7 +137,11 @@ describe("MachinesPage", () => {
     );
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(el.querySelector("form [role=alert]")!.textContent).toContain("not an option");
+    const error = el.querySelector("form .hx-field-error-shown")!;
+    expect(error.textContent).toContain("not an option");
+    expect(field("ssh").getAttribute("aria-invalid")).toBe("true");
+    expect(field("ssh").getAttribute("aria-describedby")).toContain(error.id);
+    expect(field("name").getAttribute("aria-invalid")).toBeNull();
     expect(field("name").value).toBe("box");
 
     tauri.answer("machine_save", () => undefined);

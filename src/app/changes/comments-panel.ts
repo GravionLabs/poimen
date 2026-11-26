@@ -5,8 +5,9 @@ import {
   Output,
   inject,
   signal,
+  computed,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxField, HxSelect, HxInput, HxMessage } from "@gravionlabs/helix-ui";
 import { rowName } from "../core/snapshot";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
@@ -18,20 +19,20 @@ import { LineComments } from "./line-comments";
  */
 @Component({
   selector: "app-comments-panel",
-  imports: [HxButton],
+  imports: [HxButton, HxField, HxSelect, HxInput, HxMessage],
   templateUrl: "./comments-panel.html",
   styles: `
     :host {
       display: block;
       max-height: 40%;
       overflow: auto;
-      padding: 6px 12px;
+      padding: calc(var(--h-space-1) * 1.5) var(--h-space-3);
       border-top: 1px solid var(--h-content-border-color);
     }
     header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--h-space-2);
     }
     .spacer {
       flex: 1;
@@ -43,14 +44,14 @@ import { LineComments } from "./line-comments";
     }
     ul {
       list-style: none;
-      margin: 4px 0;
+      margin: var(--h-space-1) 0;
       padding: 0;
     }
     li {
       display: flex;
       align-items: baseline;
-      gap: 8px;
-      padding: 2px 0;
+      gap: var(--h-space-2);
+      padding: calc(var(--h-space-1) * 0.5) 0;
     }
     .text {
       flex: 1;
@@ -60,30 +61,19 @@ import { LineComments } from "./line-comments";
     .where {
       font-family: var(--font-mono);
     }
-    textarea {
+    hx-field {
       flex: 1;
-      font: inherit;
-      color: inherit;
-      background: transparent;
     }
-    select {
-      font: inherit;
-      color: inherit;
-      background: transparent;
-      border: 1px solid var(--h-content-border-color);
-      height: var(--control-height);
-      padding: 1px 8px;
-    }
-    button.where {
+    .where.hx-button {
       font-family: var(--font-mono);
       color: var(--h-text-muted-color);
     }
     .actions {
       display: inline-flex;
-      gap: 4px;
+      gap: var(--h-space-1);
     }
     .problem {
-      margin: 4px 0;
+      margin: var(--h-space-1) 0;
       color: var(--status-error);
     }
   `,
@@ -92,6 +82,12 @@ import { LineComments } from "./line-comments";
 export class CommentsPanel {
   protected readonly comments = inject(LineComments);
   protected readonly editing = signal<string | null>(null);
+  protected readonly agentOptions = computed(() => [
+    { label: "Pick an agent…", value: "" },
+    ...this.comments
+      .agents()
+      .map((agent) => ({ label: this.label(agent), value: agent.terminal_id })),
+  ]);
   /** Asks the tab to show the file of a comment. */
   @Output() readonly open = new EventEmitter<LineComment>();
 

@@ -30,9 +30,18 @@ import {
   reviewBadge,
   type PullRow,
 } from "./pulls";
-import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import {
+  HxButton,
+  HxSelectButton,
+  HxField,
+  HxSelect,
+  HxCheckbox,
+  HxInput,
+  HxMessage,
+} from "@gravionlabs/helix-ui";
 import { delayedBusy } from "../ui/loading/delayed";
 import { LoadingRows } from "../ui/loading/loading-rows";
+import { selectOptions } from "../ui/select/select-options";
 
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
@@ -47,6 +56,11 @@ import { LoadingRows } from "../ui/loading/loading-rows";
     IssuesSection,
     PullDetailPane,
     IssueDetailPane,
+    HxField,
+    HxSelect,
+    HxCheckbox,
+    HxInput,
+    HxMessage,
   ],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
@@ -92,6 +106,10 @@ export class GithubView {
     },
   ]);
   /** `All repositories` plus every repository any of the three lists knows. */
+  protected readonly repoOptions = computed(() => [
+    { label: "All repositories", value: "" },
+    ...selectOptions(this.repoNames()),
+  ]);
   protected readonly repoNames = computed(() =>
     [
       ...new Set([
@@ -155,7 +173,7 @@ export class GithubView {
           : this.milestones.loading();
   }
 
-  protected setRepo(value: string): void {
+  protected setRepo(value: string | null): void {
     this.filter.repo.set(value || null);
   }
 

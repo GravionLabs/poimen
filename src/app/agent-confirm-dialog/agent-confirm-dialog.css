@@ -1,6 +1,6 @@
 .text {
-  margin: 6px 0 0;
-  padding: 8px;
+  margin: calc(var(--h-space-1) * 1.5) 0 0;
+  padding: var(--h-space-2);
   max-height: 30vh;
   overflow: auto;
   white-space: pre-wrap;
@@ -8,5 +8,5 @@
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }

@@ -47,20 +47,27 @@
 }
 @if (searchOpen()) {
   <div class="search-bar" role="search" (keydown)="searchKey($event)">
-    <input
-      #searchInput
-      class="search-input"
-      type="text"
-      placeholder="Find"
-      aria-label="Find in terminal"
-      spellcheck="false"
-      autocomplete="off"
-      [value]="searchQuery()"
-      (input)="setQuery($any($event.target).value)"
-    />
+    <hx-field
+      ><input
+        hx-input
+        size="small"
+        #searchInput
+        class="search-input"
+        type="text"
+        placeholder="Find"
+        aria-label="Find in terminal"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="searchQuery()"
+        (input)="setQuery($any($event.target).value)"
+    /></hx-field>
     <span class="search-count" aria-live="polite">{{ searchCounter() }}</span>
     <button
+      hx-button
       type="button"
+      variant="text"
+      severity="secondary"
+      size="small"
       class="search-toggle"
       hx-tooltip="Match case"
       aria-label="Match case"
@@ -70,7 +77,11 @@
       Aa
     </button>
     <button
+      hx-button
       type="button"
+      variant="text"
+      severity="secondary"
+      size="small"
       class="search-toggle"
       hx-tooltip="Regular expression"
       aria-label="Regular expression"
@@ -80,7 +91,11 @@
       .*
     </button>
     <button
+      hx-button
       type="button"
+      variant="text"
+      severity="secondary"
+      size="small"
       hx-tooltip="Previous match"
       [hxTooltipShortcut]="['Shift', 'Enter']"
       aria-label="Previous match"
@@ -89,7 +104,11 @@
       &uarr;
     </button>
     <button
+      hx-button
       type="button"
+      variant="text"
+      severity="secondary"
+      size="small"
       hx-tooltip="Next match"
       [hxTooltipShortcut]="['Enter']"
       aria-label="Next match"
@@ -98,7 +117,11 @@
       &darr;
     </button>
     <button
+      hx-button
       type="button"
+      variant="text"
+      severity="secondary"
+      size="small"
       hx-tooltip="Close"
       [hxTooltipShortcut]="['Escape']"
       aria-label="Close search"

@@ -3,7 +3,7 @@ import { IssueFormPane } from "./issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi, onTestFinished } from "vitest";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE, UiState } from "../core/ui-state";
 import { expectFocusInside, press } from "../ui/dialog-shell/dialog-contract";
@@ -18,6 +18,7 @@ import { MilestonesSection } from "./milestones-section";
 import { PullDetailPane } from "./pull-detail/pull-detail";
 import { ChipPicker } from "./chip-picker/chip-picker";
 import { GithubPulls, type Pull, type PullsResult } from "./pulls";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -213,14 +214,46 @@ describe("agent actions in the pull request views", () => {
     dialogFixture.detectChanges();
     const d = dialogFixture.nativeElement as HTMLElement;
     expect(q(d, "[data-testid=dialog-harness]")!.textContent).toContain("claude");
-    expect(q(d, "[data-testid=dialog-model]")!.textContent).toContain("opus");
-    const model = q(d, "[data-testid=dialog-model]") as HTMLSelectElement;
-    model.value = "opus";
-    model.dispatchEvent(new Event("change"));
+    expect(
+      await optionLabels(q(d, "[data-testid=dialog-model]")!, () => dialogFixture.detectChanges()),
+    ).toContain("opus");
+    const settle = () => dialogFixture.detectChanges();
+    const model = q(d, "[data-testid=dialog-model]")!;
+    await choose(model, "opus", settle);
+    expect(shown(model)).toBe("opus");
     q(d, "[data-testid=dialog-start]")!.click();
     await fixture.whenStable();
     expect(tauri.calls("agent_action_plan")[0]).toMatchObject({ harness: "claude", model: "opus" });
     expect(tauri.calls("agent_start")).toHaveLength(1);
+  });
+
+  it("a select of the dialog opens inside it and keeps Escape (#1361)", async () => {
+    // jsdom has no popover: with it, the CDK places the list inside the dialog, as in the webview.
+    const popover = HTMLElement.prototype as { showPopover?: () => void };
+    popover.showPopover = () => undefined;
+    onTestFinished(() => void delete popover.showPopover);
+    const { fixture, el } = await openDetail();
+    const dialogFixture = TestBed.createComponent(AgentActionDialog);
+    q(el, "[data-testid=agent-action]")!.dispatchEvent(
+      new MouseEvent("click", { shiftKey: true, bubbles: true }),
+    );
+    await fixture.whenStable();
+    dialogFixture.detectChanges();
+    const d = dialogFixture.nativeElement as HTMLElement;
+    const trigger = q(d, "[data-testid=dialog-model] .hx-select-trigger")!;
+    trigger.click();
+    dialogFixture.detectChanges();
+    await dialogFixture.whenStable();
+    const list = d.querySelector<HTMLElement>("dialog .hx-select-overlay [role=listbox]")!;
+    expect(list).not.toBeNull();
+    list.focus();
+    press("Escape");
+    dialogFixture.detectChanges();
+    expect(d.querySelector(".hx-select-overlay [role=listbox]")).toBeNull();
+    expect(TestBed.inject(AgentActions).dialog()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    press("Escape");
+    expect(TestBed.inject(AgentActions).dialog()).toBeNull();
   });
 
   it("the dialog takes the focus, Escape cancels and Start is the one primary button", async () => {

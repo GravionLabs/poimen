@@ -1,0 +1,9 @@
+/* Lint probe (#1367): a hard-coded color and font size that the helix-lint preset reports. */
+.probe {
+  color: #123456;
+  font-size: 13px;
+}
+
+button {
+  border-radius: 4px;
+}

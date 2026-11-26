@@ -5,7 +5,7 @@
   <code>mode</code>, optional <code>precheck</code>). They run with your rights.
 </p>
 @if (error(); as m) {
-  <p class="field-error" role="alert">{{ m }}</p>
+  <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
 }
 <label class="check">
   <input

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * A hint on a control is `hx-tooltip` (AGENTS.md "Tooltips"), not the native `title` attribute: it
+ * A hint on a control is `hx-tooltip` (docs/STYLEGUIDE.md "Tooltips"), not the native `title` attribute: it
  * appears late, cannot be styled and shows no shortcut. `LEGACY` is the number of `title` attributes
  * (`title=`, `[title]`, `[attr.title]`) each file still has; it only goes down. When you convert one,
  * lower the number (delete the line at 0).
@@ -14,7 +14,7 @@ const LEGACY: Record<string, number> = {
   "src/app/changes/changes-view.html": 7,
   "src/app/changes/comments-panel.html": 1,
   "src/app/deliver/deliver-view.html": 3,
-  "src/app/explorer/explorer.html": 2,
+  "src/app/explorer/explorer.html": 1,
   "src/app/github/chip-picker/chip-picker.html": 1,
   "src/app/github/github-view.html": 6,
   "src/app/github/inbox-section.html": 1,
@@ -26,14 +26,12 @@ const LEGACY: Record<string, number> = {
   "src/app/machines-page/machine-form.html": 1,
   "src/app/machines-page/machines-page.html": 1,
   "src/app/notifications/notifications.html": 1,
-  "src/app/pane-dialog/pane-dialog.html": 1,
   "src/app/settings-view/layout-tabs-editor.html": 9,
   "src/app/settings-view/layouts-editor.html": 3,
   "src/app/settings-view/settings-view.html": 5,
   "src/app/settings-view/space-templates-editor.html": 6,
   "src/app/sidebar/machines-section/machines-section.html": 2,
   "src/app/sidebar/space-card.html": 18,
-  "src/app/space-dialog/space-dialog.html": 1,
   "src/app/space-overview/space-overview.html": 2,
   "src/app/status-bar/status-bar.html": 12,
   "src/app/task-dialog/task-dialog.html": 2,
@@ -63,7 +61,7 @@ describe("title attributes", () => {
   );
 
   it.each([...counts])("%s has no new title attribute", (file, n) => {
-    expect(n, `${file}: use hx-tooltip (AGENTS.md "Tooltips")`).toBeLessThanOrEqual(
+    expect(n, `${file}: use hx-tooltip (docs/STYLEGUIDE.md "Tooltips")`).toBeLessThanOrEqual(
       LEGACY[file] ?? 0,
     );
   });

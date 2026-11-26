@@ -14,8 +14,7 @@
           [style.margin-left.rem]="item.depth * 1.5"
         >
           <div class="pane-fields">
-            <label class="field">
-              <span>Tab name</span>
+            <hx-field class="field" label="Tab name">
               <input
                 hx-input
                 size="small"
@@ -25,21 +24,19 @@
                 [value]="item.tab.name"
                 (input)="setTabName(item.path, $event)"
               />
-            </label>
-            <label class="field">
+            </hx-field>
+            <div class="field">
               <span>Shape</span>
-              <select
-                aria-labelledby="tabs-col-shape"
-                (change)="setShape(item.path, value($event))"
-              >
-                <option value="terminal" [selected]="item.tab.root.kind === 'terminal'">
-                  Terminal
-                </option>
-                <option value="split" [selected]="item.tab.root.kind === 'split'">
-                  Split tree
-                </option>
-              </select>
-            </label>
+              <hx-field>
+                <hx-select
+                  size="small"
+                  ariaLabelledby="tabs-col-shape"
+                  [options]="shapes"
+                  [value]="item.tab.root.kind"
+                  (valueChange)="setShape(item.path, $any($event))"
+                />
+              </hx-field>
+            </div>
             <span class="actions">
               <span class="group"
                 ><button
@@ -137,30 +134,25 @@
               />
             </label>
             @if (item.tab.place; as p) {
-              <label class="field">
-                <span>Direction</span>
-                <select
-                  [attr.aria-label]="'Place direction of ' + item.tab.name"
-                  (change)="setPlace(item.path, { direction: $any(value($event)) })"
-                >
-                  <option value="right" [selected]="p.direction === 'right'">right</option>
-                  <option value="down" [selected]="p.direction === 'down'">down</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Of</span>
-                <select
-                  [attr.aria-label]="'Place of for ' + item.tab.name"
-                  (change)="setPlace(item.path, { of: value($event) || null })"
-                >
-                  <option value="" [selected]="p.of === null">parent tab</option>
-                  @for (n of placeTargets(ti); track n) {
-                    <option [value]="n" [selected]="p.of === n">{{ n }}</option>
-                  }
-                </select>
-              </label>
-              <label class="field ratio">
-                <span>Ratio</span>
+              <hx-field class="field" label="Direction">
+                <hx-select
+                  size="small"
+                  [ariaLabel]="'Place direction of ' + item.tab.name"
+                  [options]="placeDirections"
+                  [value]="p.direction"
+                  (valueChange)="setPlace(item.path, { direction: $any($event) })"
+                />
+              </hx-field>
+              <hx-field class="field" label="Of">
+                <hx-select
+                  size="small"
+                  [ariaLabel]="'Place of for ' + item.tab.name"
+                  [options]="ofOptions()[ti]"
+                  [value]="p.of ?? ''"
+                  (valueChange)="setPlace(item.path, { of: $any($event) || null })"
+                />
+              </hx-field>
+              <hx-field class="field ratio" label="Ratio">
                 <input
                   hx-input
                   size="small"
@@ -172,18 +164,18 @@
                   [value]="p.ratio"
                   (input)="setPlace(item.path, { ratio: ratioOf($event) })"
                 />
-              </label>
+              </hx-field>
             }
           </div>
           @if (errs()?.tab?.[ti]; as m) {
-            <p class="field-error">{{ m }}</p>
+            <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
           }
         </li>
       }
     </ol>
   </div>
   @if (errs()?.tabs; as m) {
-    <p class="field-error">{{ m }}</p>
+    <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
   }
   <div class="toolbar-row">
     <button
@@ -220,8 +212,7 @@
   @if (node.kind === "terminal") {
     <div class="pane-fields leaf">
       @if (at.length > 0) {
-        <label class="field">
-          <span>Terminal name</span>
+        <hx-field class="field" label="Terminal name">
           <input
             hx-input
             size="small"
@@ -230,10 +221,9 @@
             [value]="node.name ?? ''"
             (input)="setLeaf(tab, at, 'name', $event)"
           />
-        </label>
+        </hx-field>
       }
-      <label class="field grow">
-        <span>Command</span>
+      <hx-field class="field grow" label="Command">
         <input
           hx-input
           size="small"
@@ -243,9 +233,8 @@
           [value]="node.command ?? ''"
           (input)="setLeaf(tab, at, 'command', $event)"
         />
-      </label>
-      <label class="field">
-        <span>Directory</span>
+      </hx-field>
+      <hx-field class="field" label="Directory">
         <input
           hx-input
           size="small"
@@ -254,7 +243,7 @@
           [value]="node.cwd ?? ''"
           (input)="setLeaf(tab, at, 'cwd', $event)"
         />
-      </label>
+      </hx-field>
       @if (flat()[ti].tab.root.kind === "split") {
         <span class="actions">
           <button
@@ -299,18 +288,16 @@
   } @else {
     <div class="split-node">
       <div class="pane-fields">
-        <label class="field">
-          <span>Split</span>
-          <select
-            [attr.aria-label]="'Split direction in ' + flat()[ti].tab.name"
-            (change)="setSplit(tab, at, { direction: $any(value($event)) })"
-          >
-            <option value="right" [selected]="node.direction === 'right'">side by side</option>
-            <option value="down" [selected]="node.direction === 'down'">stacked</option>
-          </select>
-        </label>
-        <label class="field ratio">
-          <span>Ratio</span>
+        <hx-field class="field" label="Split">
+          <hx-select
+            size="small"
+            [ariaLabel]="'Split direction in ' + flat()[ti].tab.name"
+            [options]="splitDirections"
+            [value]="node.direction"
+            (valueChange)="setSplit(tab, at, { direction: $any($event) })"
+          />
+        </hx-field>
+        <hx-field class="field ratio" label="Ratio">
           <input
             hx-input
             size="small"
@@ -322,7 +309,7 @@
             [value]="node.ratio"
             (input)="setSplit(tab, at, { ratio: ratioOf($event) })"
           />
-        </label>
+        </hx-field>
       </div>
       <div class="split-children">
         <ng-container

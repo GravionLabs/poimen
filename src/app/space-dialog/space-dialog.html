@@ -1,11 +1,12 @@
 @if (actions.open()) {
   <app-dialog-shell heading="New space" (cancelled)="cancel()">
     <form (submit)="$event.preventDefault(); submit()">
-      <label>
-        Directory
-        <span class="path-row">
-          <input
-            class="field path"
+      <hx-field label="Directory" hint="An existing space for the directory is focused instead."
+        ><hx-input-group
+          ><input
+            hx-input
+            size="small"
+            class="path"
             name="path"
             type="text"
             list="space-dialog-dirs"
@@ -13,8 +14,7 @@
             autocomplete="off"
             [value]="path()"
             (input)="typePath($event)"
-          />
-          <button
+          /><button
             type="button"
             hx-button
             variant="outlined"
@@ -23,25 +23,20 @@
             (click)="browse()"
           >
             Browse...
-          </button>
-        </span>
-      </label>
-      <datalist id="space-dialog-dirs">
-        @for (dir of actions.dirs(); track dir) {
-          <option [value]="dir"></option>
-        }
-      </datalist>
-      <label>
-        Label
+          </button></hx-input-group
+        ></hx-field
+      >
+      <hx-field label="Label">
         <input
-          class="field"
+          hx-input
+          size="small"
           name="label"
           type="text"
           placeholder="Name of the directory"
           [value]="label()"
           (input)="typeLabel($event)"
         />
-      </label>
+      </hx-field>
       @if (path().trim()) {
         <p class="hint template" data-testid="template-hint">
           @if (actions.template(); as t) {
@@ -55,10 +50,14 @@
           }
         </p>
       }
-      <p class="hint">An existing space for the directory is focused instead.</p>
       @if (actions.error(); as message) {
-        <p class="error" role="alert">{{ message }}</p>
+        <hx-message class="error" severity="error" size="small">{{ message }}</hx-message>
       }
+      <datalist id="space-dialog-dirs">
+        @for (dir of actions.dirs(); track dir) {
+          <option [value]="dir"></option>
+        }
+      </datalist>
       <div class="dialog-buttons">
         <button
           type="button"
@@ -111,20 +110,17 @@
 @if (actions.renaming(); as r) {
   <app-dialog-shell heading="Rename space" (cancelled)="actions.cancelRename()">
     <form (submit)="$event.preventDefault(); rename($any($event.target))">
-      <label>
-        Name
+      <hx-field label="Name" [error]="actions.renameError()">
         <input
-          class="field"
+          hx-input
+          size="small"
           name="name"
           type="text"
           autocomplete="off"
           [value]="r.current"
           (input)="actions.clearRenameError()"
         />
-      </label>
-      @if (actions.renameError(); as message) {
-        <p class="error" role="alert">{{ message }}</p>
-      }
+      </hx-field>
       <div class="dialog-buttons">
         <button
           type="button"
@@ -142,19 +138,13 @@
   </app-dialog-shell>
 }
 @if (actions.closeError(); as message) {
-  <p class="error close-error" role="alert">
-    {{ message }}
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      aria-label="Dismiss"
-      title="Dismiss"
-      (click)="actions.dismissCloseError()"
-    >
-      <app-icon name="close" />
-    </button>
-  </p>
+  <hx-message
+    class="close-error"
+    severity="error"
+    size="small"
+    closable
+    closeLabel="Dismiss"
+    (close)="actions.dismissCloseError()"
+    >{{ message }}</hx-message
+  >
 }

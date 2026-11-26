@@ -1,7 +1,6 @@
 @if (editing(); as e) {
   <section class="snippet-form" aria-label="Edit snippet">
-    <label class="field grow">
-      <span>Label</span>
+    <hx-field class="field grow" label="Label" [error]="errors()?.label">
       <input
         hx-input
         size="small"
@@ -10,33 +9,28 @@
         [value]="e.draft.label"
         (input)="setLabel($event)"
       />
-    </label>
-    @if (errors()?.label; as m) {
-      <p class="field-error">{{ m }}</p>
-    }
-    <label class="field">
-      <span>Text</span>
+    </hx-field>
+    <hx-field class="field" label="Text" [error]="errors()?.text">
       <textarea
+        class="snippet-text"
+        hx-input
+        size="small"
         name="snippet-text"
         rows="4"
         [value]="e.draft.text"
         (input)="setText($event)"
       ></textarea>
-    </label>
-    @if (errors()?.text; as m) {
-      <p class="field-error">{{ m }}</p>
-    }
-    <label class="field">
-      <span>Send to</span>
-      <select name="snippet-target" (change)="setTarget($event)">
-        <option value="terminal" [selected]="e.draft.target === 'terminal'">
-          The pane (typed into the terminal)
-        </option>
-        <option value="agent" [selected]="e.draft.target === 'agent'">
-          An agent (sent as a prompt)
-        </option>
-      </select>
-    </label>
+    </hx-field>
+    <hx-field class="field" label="Send to">
+      <hx-select
+        size="small"
+        ariaLabel="Send to"
+        name="snippet-target"
+        [options]="targets"
+        [value]="e.draft.target"
+        (valueChange)="setTarget($event)"
+      />
+    </hx-field>
     <label class="check">
       <input
         hx-checkbox
@@ -82,7 +76,7 @@
     </ul>
   }
   @if (writeError(); as m) {
-    <p class="field-error" role="alert">{{ m }}</p>
+    <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
   }
   <ul class="rows" aria-label="Snippets">
     @for (s of snippets(); track s.label; let i = $index) {

@@ -47,7 +47,7 @@ export function diffThemeRules(): Record<string, Record<string, string>> {
       color: "var(--term-fg)",
       backgroundColor: "var(--term-bg)",
       height: "100%",
-      fontSize: "12px",
+      fontSize: "var(--h-font-size-xs)",
     },
     ".cm-scroller": { fontFamily: "var(--font-mono)", overflow: "auto" },
     ".cm-content": { caretColor: "var(--term-cursor)" },

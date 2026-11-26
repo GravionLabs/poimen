@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { HxList, HxListRow } from "@gravionlabs/helix-ui";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { PaletteItem } from "../core/command-palette";
 import { titleParts } from "./title-parts";
@@ -60,6 +61,7 @@ function makeHost() {
   };
   @Component({
     selector: "app-host",
+    imports: [HxList, HxListRow],
     template: readFileSync("src/app/command-palette/command-palette.html", "utf8"),
   })
   class Host {
@@ -100,7 +102,7 @@ describe("command palette template", () => {
     const tabs = [...el.querySelectorAll('[role="tablist"] [role="tab"]')];
     expect(tabs.map((t) => t.textContent?.trim())).toEqual(["All", "Project"]);
     expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["true", "false"]);
-    expect(el.querySelector('ul[role="listbox"]')).not.toBeNull();
+    expect(el.querySelector('hx-list[role="listbox"]')).not.toBeNull();
     expect(el.querySelector("hx-tag")).toBeNull();
   });
 

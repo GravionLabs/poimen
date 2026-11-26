@@ -27,6 +27,7 @@ import {
 } from "./issues";
 import { IssuesSection } from "./issues-section";
 import { SpaceActions } from "../core/space-actions";
+import { choose, shown } from "../../testing/select";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -309,7 +310,7 @@ describe("IssuesSection", () => {
     ).toEqual(["3 passed", "1 failed"]);
     const bar = items(el)[0].querySelector("[data-testid=progress]")!;
     expect(bar.textContent).toContain("1/4");
-    expect(bar.querySelector("progress")!.value).toBe(25);
+    expect(bar.querySelector("hx-progress-bar")!.getAttribute("aria-valuenow")).toBe("25");
     expect(el.querySelector("[data-testid=issue-error]")!.textContent).toContain("o/m");
   });
 
@@ -350,11 +351,25 @@ describe("IssuesSection", () => {
 
   it("reads closed issues when the state changes", async () => {
     const fixture = await render();
-    const select = fixture.nativeElement.querySelector("select[aria-label=State]")!;
-    select.value = "closed";
-    select.dispatchEvent(new Event("change"));
+    const state = fixture.nativeElement.querySelector('hx-select[ariaLabel="State"]')!;
+    await choose(state, "Closed", () => fixture.detectChanges());
     await fixture.whenStable();
+    expect(shown(state)).toBe("Closed");
     expect(tauri.calls("github_issues")[1]).toEqual({ dirs: expect.any(Array), closed: true });
+  });
+
+  it("runs a bulk pick once and shows the placeholder again", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    const issues = TestBed.inject(GithubIssues);
+    const edit = vi.spyOn(issues, "bulkEdit").mockResolvedValue({ done: [], failed: [] });
+    issues.mark("o/n#1");
+    issues.bulkLabels.set(["bug"]);
+    fixture.detectChanges();
+    const add = el.querySelector("[data-testid=bulk-add-label]")!;
+    await choose(add, "bug", () => fixture.detectChanges());
+    expect(edit.mock.calls).toEqual([[{ addLabels: ["bug"] }]]);
+    expect(shown(add)).toBe("Add label");
   });
 
   it("opens issues and pull requests in the browser, GitHub links only", async () => {

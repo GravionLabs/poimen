@@ -3,23 +3,14 @@
   z-index: 62;
   right: 16px;
   bottom: 32px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
   max-width: 420px;
-  padding: 8px 12px;
-  border: 1px solid var(--app-danger-text);
-  border-radius: 6px;
-  background: var(--h-content-background);
-  color: var(--h-text-color);
-  font-size: 12px;
 }
 
 .types {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 0 0 12px;
+  gap: calc(var(--h-space-1) * 1.5);
+  margin: 0 0 var(--h-space-3);
   padding: 0;
   border: 0;
 }
@@ -36,9 +27,9 @@
 .type {
   position: relative;
   display: flex;
-  gap: 10px;
+  gap: calc(var(--h-space-1) * 2.5);
   align-items: center;
-  padding: 8px 10px;
+  padding: var(--h-space-2) calc(var(--h-space-1) * 2.5);
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
   text-align: left;
@@ -59,14 +50,6 @@
   outline-offset: 1px;
 }
 
-.type input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .text {
   display: flex;
   flex-direction: column;
@@ -75,5 +58,5 @@
 
 .detail {
   color: var(--h-text-muted-color);
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }

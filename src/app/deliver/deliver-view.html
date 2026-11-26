@@ -197,9 +197,9 @@
           poimen does not know (it reads version {{ supported }}). Update poimen to see this run.
         </p>
       } @else {
-        <p class="problem" role="alert" data-testid="invalid">
+        <hx-message class="problem" data-testid="invalid" severity="error" size="small">
           The run cannot be shown: {{ $any(card.state).error }}
-        </p>
+        </hx-message>
       }
     </section>
   }

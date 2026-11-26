@@ -10,6 +10,7 @@ import type { SpaceTemplate } from "../core/space-templates";
 import { tauri } from "../core/tauri.mock";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -175,10 +176,9 @@ describe("LayoutsEditor", () => {
     fixture.detectChanges();
     type(input("Command in agent"), "codex");
     // The shape select turns a tab into a split tree, whose leaves can be split again.
-    const shape = host.querySelectorAll<HTMLSelectElement>('[aria-labelledby="tabs-col-shape"]')[1];
-    shape.value = "split";
-    shape.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    const shape = host.querySelectorAll("hx-select")[1];
+    expect(shape.querySelector("button")!.getAttribute("aria-labelledby")).toBe("tabs-col-shape");
+    await choose(shape, "Split tree", () => fixture.detectChanges());
     expect(host.querySelectorAll('[aria-label="Command in tests"]')).toHaveLength(2);
     const ratio = host.querySelector<HTMLInputElement>('[aria-label="Place ratio of tests"]')!;
     type(ratio, "0.7");
@@ -214,14 +214,15 @@ describe("LayoutsEditor", () => {
     fixture.detectChanges();
     button("Add child tab to agent").click();
     fixture.detectChanges();
-    const of = host.querySelector<HTMLSelectElement>('[aria-label="Place of for tests"]')!;
-    expect([...of.options].map((o) => o.value)).toEqual(["", "agent", "tab"]);
-    of.value = "tab";
-    of.dispatchEvent(new Event("change"));
-    fixture.detectChanges();
+    const of = () =>
+      host
+        .querySelector('.hx-select-trigger[aria-label="Place of for tests"]')!
+        .closest("hx-select")!;
+    const settle = () => fixture.detectChanges();
+    expect(await optionLabels(of(), settle)).toEqual(["parent tab", "agent", "tab"]);
+    await choose(of(), "tab", settle);
     type(host.querySelectorAll<HTMLInputElement>("[data-tab]")[2], "docs");
-    const again = host.querySelector<HTMLSelectElement>('[aria-label="Place of for tests"]')!;
-    expect(again.value).toBe("docs");
+    expect(shown(of())).toBe("docs");
     expect(input("Place ratio of tests").value).toBe("0.4");
   });
 
@@ -242,7 +243,7 @@ describe("LayoutsEditor", () => {
     button("Edit review").click();
     fixture.detectChanges();
     type(host.querySelector<HTMLInputElement>('input[name="layout-name"]')!, "other");
-    expect(host.querySelector(".field-error")?.textContent).toContain(
+    expect(host.querySelector(".hx-field-error-shown")?.textContent).toContain(
       'Another layout is called "other"',
     );
     expect(button("Save layout").disabled).toBe(true);

@@ -16,6 +16,7 @@
         <li>
           <label>
             <input
+              hx-checkbox
               type="checkbox"
               [checked]="checked(request, space.id)"
               (change)="toggle(request, space.id)"
@@ -29,17 +30,21 @@
       }
     </ul>
     <p class="hint">Tools: {{ request.tools.join(", ") }}.</p>
-    <label class="limit">
+    <div class="limit">
       At most
-      <input
-        type="number"
-        min="1"
-        [max]="request.maxAgents"
-        [value]="limit(request)"
-        (input)="setLimit(request, $any($event.target).value)"
-      />
+      <hx-field
+        ><input
+          hx-input
+          aria-label="At most agents at once"
+          size="small"
+          type="number"
+          min="1"
+          [max]="request.maxAgents"
+          [value]="limit(request)"
+          (input)="setLimit(request, $any($event.target).value)"
+      /></hx-field>
       agents at once
-    </label>
+    </div>
     <p class="hint">
       The grant ends after {{ duration(request.durationS) }}, when {{ request.leadName }} ends, or
       when you revoke it. Inside it, these tools run in the spaces above with no question, and every
@@ -50,7 +55,7 @@
       <p class="hint">{{ grants.waiting() - 1 }} more waiting.</p>
     }
     @if (grants.error(); as error) {
-      <p class="error" role="alert">{{ error }}</p>
+      <hx-message class="error" severity="error" size="small">{{ error }}</hx-message>
     }
     <div class="dialog-buttons">
       <button

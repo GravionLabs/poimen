@@ -12,6 +12,7 @@ import { Deliver } from "./deliver";
 import { DeliverDialog } from "./deliver-dialog";
 import { DeliverLauncher } from "./deliver-launcher";
 import type { DeliverPlan } from "./deliver-start";
+import { choose, optionLabels, shown } from "../../testing/select";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -82,10 +83,15 @@ async function setup(plan: (args?: Record<string, unknown>) => DeliverPlan = () 
     }
   };
   const field = async (testId: string, value: string) => {
-    const el = root.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-testid=${testId}]`)!;
-    el.value = value;
-    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input"));
-    await settle();
+    const el = root.querySelector<HTMLElement>(`[data-testid=${testId}]`)!;
+    if (el instanceof HTMLInputElement) {
+      el.value = value;
+      el.dispatchEvent(new Event("input"));
+      await settle();
+    } else {
+      await choose(el, value, settle);
+      expect(shown(el)).toBe(value);
+    }
   };
   const click = async (testId: string) => {
     root.querySelector<HTMLButtonElement>(`[data-testid=${testId}]`)!.click();
@@ -115,10 +121,9 @@ describe("the Deliver dialog (#746)", () => {
     const { launcher, root, settle, text } = await setup();
     await launcher.openMilestone("/work/app", "M016");
     await settle();
-    const options = [...root.querySelectorAll("[data-testid=milestone] option")].map((o) =>
-      o.textContent!.trim(),
-    );
-    expect(options).toEqual(["M016", "M017"]);
+    const milestone = root.querySelector("[data-testid=milestone]")!;
+    expect(await optionLabels(milestone, settle)).toEqual(["M016", "M017"]);
+    expect(shown(milestone)).toBe("M016");
     expect(text("base")).toBe("Base branch: loop default");
     expect(text("command")).toBe("deliver-loop --milestone M016");
     const labels = [...root.querySelectorAll("button")].map((b) => b.textContent!.trim());

@@ -3,18 +3,15 @@
   <span class="count">{{ comments.pending().length }} pending</span>
   <span class="spacer"></span>
   @if (comments.agents().length > 1) {
-    <select
-      aria-label="Agent to send to"
-      [value]="comments.chosen() ?? ''"
-      (change)="comments.chosen.set($any($event.target).value || null)"
-    >
-      <option value="">Pick an agent…</option>
-      @for (agent of comments.agents(); track agent.terminal_id) {
-        <option [value]="agent.terminal_id" [selected]="agent.terminal_id === comments.chosen()">
-          {{ label(agent) }}
-        </option>
-      }
-    </select>
+    <hx-field>
+      <hx-select
+        size="small"
+        ariaLabel="Agent to send to"
+        [options]="agentOptions()"
+        [value]="comments.chosen() ?? ''"
+        (valueChange)="comments.chosen.set($event || null)"
+      />
+    </hx-field>
   }
   <button
     type="button"
@@ -34,7 +31,7 @@
   }
 }
 @if (comments.error(); as error) {
-  <p class="problem" role="alert">{{ error }}</p>
+  <hx-message class="problem" severity="error" size="small">{{ error }}</hx-message>
 }
 <ul class="pending" aria-label="Pending comments">
   @for (c of comments.pending(); track c.id) {
@@ -51,13 +48,17 @@
         {{ where(c) }}
       </button>
       @if (editing() === c.id) {
-        <textarea
-          rows="3"
-          [value]="c.text"
-          aria-label="Edit comment"
-          #field
-          (keydown.escape)="editing.set(null)"
-        ></textarea>
+        <hx-field>
+          <textarea
+            hx-input
+            size="small"
+            rows="3"
+            [value]="c.text"
+            aria-label="Edit comment"
+            #field
+            (keydown.escape)="editing.set(null)"
+          ></textarea>
+        </hx-field>
         <span class="actions">
           <button type="button" hx-button size="small" class="save" (click)="save(c, field.value)">
             Save

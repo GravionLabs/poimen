@@ -1,7 +1,6 @@
 @if (editing(); as e) {
   <section class="layout-form" aria-label="Edit layout">
-    <label class="field grow">
-      <span>Layout name</span>
+    <hx-field class="field grow" label="Layout name" [error]="errors()?.name">
       <input
         hx-input
         size="small"
@@ -10,12 +9,9 @@
         [value]="e.draft.name"
         (input)="setName($event)"
       />
-    </label>
-    @if (errors()?.name; as m) {
-      <p class="field-error">{{ m }}</p>
-    }
+    </hx-field>
     @if (refusal(); as m) {
-      <p class="field-error" role="alert">{{ m }}</p>
+      <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
     }
     <app-layout-tabs-editor
       [tabList]="e.draft.tabs"
@@ -53,18 +49,17 @@
     </ul>
   }
   @if (refusal(); as m) {
-    <p class="field-error" role="alert">{{ m }}</p>
+    <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
   }
   @if (writeError(); as m) {
-    <p class="field-error" role="alert">{{ m }}</p>
+    <hx-message class="field-error" severity="error" size="small">{{ m }}</hx-message>
   }
   <ul class="rows" aria-label="Named layouts">
     @for (l of layouts(); track l.name; let i = $index) {
       <li class="row">
         @if (renaming(); as r) {
           @if (r.index === i) {
-            <label class="field grow">
-              <span>New name</span>
+            <hx-field class="field grow" label="New name" [error]="renameError()">
               <input
                 hx-input
                 size="small"
@@ -75,7 +70,7 @@
                 (keydown.enter)="confirmRename()"
                 (keydown.escape)="cancelRename()"
               />
-            </label>
+            </hx-field>
             <span class="actions">
               <button
                 hx-button
@@ -97,9 +92,6 @@
                 Rename
               </button>
             </span>
-            @if (renameError(); as m) {
-              <p class="field-error">{{ m }}</p>
-            }
           }
         }
         @if (renaming()?.index !== i) {

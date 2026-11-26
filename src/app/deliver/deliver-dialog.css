@@ -1,13 +1,5 @@
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.choice {
   margin-bottom: 10px;
-}
-
-.field input,
-.field select {
-  height: var(--control-height);
 }
 
 .command {

@@ -16,7 +16,9 @@
         <button type="button" hx-button data-testid="show-run" (click)="showRun()">Show run</button>
       </div>
     } @else if (plan()?.available === false) {
-      <p class="error" role="alert" data-testid="missing">{{ missing }}</p>
+      <hx-message class="error" data-testid="missing" severity="error" size="small">{{
+        missing
+      }}</hx-message>
       <div class="dialog-buttons">
         <button
           type="button"
@@ -35,46 +37,53 @@
         its agent sessions itself.
       </p>
       @if (open.target.kind === "milestone") {
-        <label class="field">
-          <span>Milestone</span>
-          <select
+        <hx-field class="choice" label="Milestone">
+          <hx-select
+            size="small"
+            ariaLabel="Milestone"
             data-testid="milestone"
+            [options]="milestoneOptions()"
             [value]="milestone()"
-            (change)="milestone.set(value($event))"
-          >
-            @for (name of open.milestones; track name) {
-              <option [value]="name" [selected]="name === milestone()">{{ name }}</option>
-            }
-          </select>
-        </label>
+            (valueChange)="milestone.set($event)"
+          />
+        </hx-field>
       } @else {
-        <label class="field">
-          <span>Issues</span>
-          <input type="text" readonly data-testid="issues" [value]="targetText(open.target)" />
-        </label>
+        <hx-field class="choice" label="Issues">
+          <input
+            hx-input
+            size="small"
+            type="text"
+            readonly
+            data-testid="issues"
+            [value]="targetText(open.target)"
+          />
+        </hx-field>
       }
-      <label class="field">
-        <span>Harness</span>
-        <select data-testid="harness" [value]="harness()" (change)="harness.set(value($event))">
-          <option value="">loop default</option>
-          @for (h of harnesses; track h) {
-            <option [value]="h">{{ h }}</option>
-          }
-        </select>
-      </label>
-      <label class="field">
-        <span>Model (optional)</span>
+      <hx-field class="choice" label="Harness">
+        <hx-select
+          size="small"
+          ariaLabel="Harness"
+          data-testid="harness"
+          [options]="harnessOptions"
+          [value]="harness()"
+          (valueChange)="harness.set($event ?? '')"
+        />
+      </hx-field>
+      <hx-field class="choice" label="Model (optional)">
         <input
+          hx-input
+          size="small"
           type="text"
           data-testid="model"
           placeholder="loop default"
           [value]="model()"
           (input)="model.set(value($event))"
         />
-      </label>
-      <label class="field">
-        <span>Max (optional)</span>
+      </hx-field>
+      <hx-field class="choice" label="Max (optional)">
         <input
+          hx-input
+          size="small"
           type="text"
           inputmode="numeric"
           data-testid="max"
@@ -82,12 +91,16 @@
           [value]="max()"
           (input)="max.set(value($event))"
         />
-      </label>
+      </hx-field>
       <p class="hint" data-testid="base">Base branch: {{ plan()?.base ?? "loop default" }}</p>
       @if (invalid(); as why) {
-        <p class="error" role="alert" data-testid="invalid">{{ why }}</p>
+        <hx-message class="error" data-testid="invalid" severity="error" size="small">{{
+          why
+        }}</hx-message>
       } @else if (plan()?.error; as why) {
-        <p class="error" role="alert" data-testid="invalid">{{ why }}</p>
+        <hx-message class="error" data-testid="invalid" severity="error" size="small">{{
+          why
+        }}</hx-message>
       }
       <pre class="command" data-testid="command">{{ plan()?.command }}</pre>
       <div class="dialog-buttons">
