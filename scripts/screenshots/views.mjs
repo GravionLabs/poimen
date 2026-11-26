@@ -31,6 +31,28 @@ export async function terminalShows(page, ...ids) {
   );
 }
 
+/** Opens the command palette from an open pane: a focused terminal keeps the keys for itself. */
+async function openPalette(page) {
+  await page.getByText("Spaces", { exact: true }).first().click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+}
+
+/** The sidebar may have revealed the open pane by then or not yet: shoot it from the top. */
+async function scrollSidebarUp(page) {
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            for (const el of document.querySelectorAll("app-sidebar, app-sidebar *"))
+              el.scrollTop = 0;
+            done();
+          }),
+        ),
+      ),
+  );
+}
+
 /**
  * Each view: `name` (the file is `<name>-<theme>.png`), `ui` (more saved UI state), `run(page)` and the
  * guide page that shows it.
@@ -77,6 +99,70 @@ export const VIEWS = [
       await openPane(page, "claude");
       await terminalShows(page, "t1", "t2");
       await page.locator("app-flow-view, .flow").first().waitFor();
+    },
+  },
+  {
+    name: "palette",
+    run: async (page) => {
+      await ready(page);
+      await page.keyboard.press("ControlOrMeta+Shift+P");
+      await page.getByText("Close Tab").first().waitFor();
+    },
+  },
+  {
+    name: "jump",
+    run: async (page) => {
+      await ready(page);
+      await page.keyboard.press("ControlOrMeta+K");
+      await page.getByText("Needs you").first().waitFor();
+    },
+  },
+  {
+    name: "agent-picker",
+    run: async (page) => {
+      await ready(page);
+      await openPane(page, "claude");
+      await terminalShows(page, "t1", "t2");
+      await openPalette(page);
+      await page.getByRole("tab", { name: "Skills" }).click();
+      await page.getByText("Skill: deliver").first().click();
+      await page.getByRole("dialog", { name: "Choose an agent" }).waitFor();
+    },
+  },
+  {
+    name: "terminal-search",
+    run: async (page) => {
+      await ready(page);
+      await openPane(page, "claude");
+      await terminalShows(page, "t1", "t2");
+      await page.keyboard.press("ControlOrMeta+Shift+F");
+      await page
+        .getByRole("textbox", { name: /search|find/i })
+        .first()
+        .fill("demo");
+      await page.getByText("1 of 2").waitFor();
+    },
+  },
+  {
+    name: "changes",
+    run: async (page) => {
+      await ready(page);
+      await openPane(page, "claude");
+      await terminalShows(page, "t1", "t2");
+      await openPalette(page);
+      await page.keyboard.type("Show Changes");
+      await page.getByText("Show Changes").first().click();
+      await page.locator(".cm-content").getByText("configurations").first().waitFor();
+      await scrollSidebarUp(page);
+    },
+  },
+  {
+    name: "github",
+    run: async (page) => {
+      await ready(page);
+      await button(page, "GitHub").click();
+      await page.getByRole("button", { name: /^Issues/ }).click();
+      await page.getByText("tooltip delay").first().waitFor();
     },
   },
   {

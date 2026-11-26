@@ -478,6 +478,36 @@ export const CLOSED_ISSUES = [
   gh(1102, "[PBI] feat(tabs): tab strip in the shell", ["pbi"], { state: "CLOSED" }),
 ];
 
+/** The skill the palette offers in the poimen repository. */
+export const DETECTED = [{ source: "skills", name: "deliver", description: "Ship an issue" }];
+
+/** The Changes tab of the poimen repository: the changed files and the content of each. */
+export const CHANGES = {
+  base: "main",
+  scope: "base",
+  from: "1a2b3c4",
+  files: [
+    ["angular.json", "modified", 12, 1],
+    ["src/demo/kit/backend.ts", "added", 74, 0],
+    ["src/demo/tauri.demo.ts", "added", 18, 0],
+  ].map(([path, status, additions, deletions]) => ({
+    path,
+    old_path: null,
+    status,
+    additions,
+    deletions,
+    binary: false,
+    staged: false,
+    conflicted: false,
+  })),
+};
+
+export const CHANGED_FILE = {
+  state: "text",
+  old: '{\n  "serve": {\n    "configurations": {}\n  }\n}\n',
+  new: '{\n  "serve": {\n    "configurations": {\n      "demo": { "port": 1422 }\n    }\n  }\n}\n',
+};
+
 /** The main agent's calls of terminal `t1`, by tool use id: the skills and the subagent it started. */
 export const MAIN_CALLS = [
   {

@@ -3,7 +3,10 @@
 import { DEFAULT_SETTINGS } from "../../app/core/settings";
 import { DemoBackend, type DemoChannel } from "../kit/backend";
 import {
+  CHANGED_FILE,
+  CHANGES,
   CLOSED_ISSUES,
+  DETECTED,
   HARNESSES,
   MAIN_CALLS,
   MILESTONES,
@@ -75,9 +78,20 @@ export function createPoimenDemo(): DemoBackend {
     close_terminal: null,
     schedules_list: { paused: false, schedules: [] },
     schedules_alerts: { alerts: [] },
+    changes_file: CHANGED_FILE,
+    changes_findings: { state: "none" },
+    worktree_branches: [],
+    changes_pr_state: { branch: null, base: null, pushed: false, existing: null },
   });
   const POIMEN = `${HOME}/code/poimen`;
   backend.answer({
+    changes_list: (args) => ({ ...CHANGES, scope: text(args, "scope") }),
+    detected_entries: (args) => (text(args, "dir") === POIMEN ? DETECTED : []),
+    repo_root: (args) => text(args, "dir"),
+    github_pulls: (args) =>
+      ((args?.["dirs"] as string[] | undefined) ?? [])
+        .filter((d) => d === POIMEN)
+        .map((root) => ({ root, repo: "acme/poimen", status: "ok", pulls: [] })),
     subagents_watch: (args, b) => {
       const id = text(args, "terminalId");
       const session = SNAPSHOT.terminals.find((t) => t.terminal_id === id)?.agent_session?.value;
