@@ -1,5 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { ESLint } from "eslint";
+import { readFileSync } from "node:fs";
+import { helixAllow as eslintAllow } from "@gravionlabs/helix-lint/eslint";
+import { helixAllow as stylelintAllow } from "@gravionlabs/helix-lint/stylelint";
+import stylelint from "stylelint";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -45,6 +49,26 @@ describe("lint probe", () => {
       "@angular-eslint/template/alt-text",
       "@angular-eslint/template/click-events-have-key-events",
       "@angular-eslint/template/interactive-supports-focus",
+      "helix/no-raw-control",
     ]);
+  });
+
+  it("Stylelint reports the helix-lint preset violations (#1367)", async () => {
+    const { results } = await stylelint.lint({ files: `${PROBE}/*.css`, ignorePath: [] });
+    const rules = results.flatMap((r) => r.warnings.map((w) => w.rule));
+    expect(rules.sort()).toEqual(["color-no-hex", "declaration-property-value-allowed-list"]);
+  });
+
+  it("every allowlist entry names a reason; an entry without one throws (#1367)", () => {
+    const allow = JSON.parse(readFileSync("scripts/lint/helix-allow.json", "utf8")) as {
+      eslint: { files: string[]; rules: string[]; reason: string }[];
+      stylelint: { files: string[]; rules: string[]; reason: string }[];
+    };
+    for (const entry of [...allow.eslint, ...allow.stylelint]) {
+      expect(entry.reason.trim().length).toBeGreaterThan(10);
+    }
+    const bare = { files: ["src/**"], rules: ["helix/no-raw-control"] } as never;
+    expect(() => eslintAllow(bare)).toThrow();
+    expect(() => stylelintAllow(bare)).toThrow();
   });
 });

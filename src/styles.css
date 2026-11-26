@@ -141,7 +141,7 @@
   --status-working-on-active: var(--h-blue-800);
   --status-blocked-on-active: var(--h-orange-800);
   --status-done-on-active: var(--h-green-800);
-  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #000);
+  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, black);
   /* Origin colors of the space cards (#1074), one per machine by name: >= 3:1 on the card. */
   --origin-0: var(--h-purple-700);
   --origin-1: var(--h-teal-700);
@@ -187,7 +187,7 @@
   --status-working-on-active: var(--h-blue-300);
   --status-blocked-on-active: var(--h-orange-300);
   --status-done-on-active: var(--h-green-300);
-  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #fff);
+  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, white);
   --origin-0: var(--h-purple-300);
   --origin-1: var(--h-teal-300);
   --origin-2: var(--h-pink-300);
