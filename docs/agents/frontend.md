@@ -69,6 +69,15 @@ Look at a presentational component without Tauri: `pnpm fixtures:list` prints th
 
 Colors come from the tokens only. `src/styles.css` maps helix's button tokens onto the derived chrome (`--app-action*`, `--app-danger-text` from `deriveTokens`); `src/app/ui/button-contrast.spec.ts` checks every variant and state in every bundled scheme. `src/app/ui/button-usage.spec.ts` fails on a new `<button>` without `hx-button`; the tab bar, the context menu and palette items are allow-listed, other files have a legacy count that only goes down (lower it when you convert). Reference surfaces: settings Appearance and the hooks dialog.
 
+## Forms, rows and text sizes (#1360, helix-ui 22.9)
+
+New and migrated UI builds on these helix primitives (migration: #1354); existing views move over in their own issues.
+
+- Form field: `hx-field` (`HxField`) around one control (`hx-input`, `hx-checkbox`, `hx-radio`, `hx-switch`, `hx-select`), with the inputs `label`, `hint`, `error` and `required`. It wires `id`/`for` and the `aria-*` attributes, so do not build label, hint or error markup and CSS in a component.
+- Rows (sidebars, search results, outlines, pickers): `<hx-list aria-label="…">` (`HxList`, `role="list"` or `"listbox"`) with `button[hx-list-row]` or `a[hx-list-row]` (`HxListRow`, inputs `selected`, `current`); `.hx-list-row-icon`, `.hx-list-row-label` (truncates) and `.hx-list-row-meta` inside. The list owns the keyboard (one tab stop, arrows, Home, End).
+- Text sizes: `var(--h-font-size-xs|sm|md|lg|xl|2xl|3xl)` (0.75 to 2rem). Spacing (`gap`, `padding`, `margin`): `var(--h-space-1)` to `var(--h-space-8)` (0.25rem steps; 7 is 1.75rem, 8 is 2rem). No new literal sizes where a token fits.
+- Status bar tones: `src/styles.css` sets `--h-warn-color` and `--h-error-color`, because helix-desktop 22.9 changed their fallbacks.
+
 ## Toasts (#1040)
 
 - One `app-toasts` (`ui/toasts/`, mounted in `app.html`) holds the single `<hx-toast position="bottom-right">`; `app.config.ts` provides `HxMessageService`, and `core/toast.ts` (`MESSAGES`, `injectMessages`, `TOAST_MS`, `TOAST_ERROR_MS`) is how services reach it (a spec without the provider gets its own instance; `src/testing/toasts.ts` has `lastToast` and `testMessages` to read it).
