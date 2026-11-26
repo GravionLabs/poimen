@@ -13,7 +13,7 @@ const styles = readFileSync("src/styles.css", "utf8");
 const helixCss = readFileSync("node_modules/@gravionlabs/helix-ui/styles.css", "utf8");
 const { light, dark } = helixTokens();
 
-// Filled primary and danger, outlined secondary (the rule in AGENTS.md); text and outlined for all three.
+// Filled primary and danger, outlined secondary (the rule in docs/STYLEGUIDE.md); text and outlined for all three.
 const KINDS = [
   ["filled", "primary"],
   ["filled", "danger"],

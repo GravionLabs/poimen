@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * A hint on a control is `hx-tooltip` (AGENTS.md "Tooltips"), not the native `title` attribute: it
+ * A hint on a control is `hx-tooltip` (docs/STYLEGUIDE.md "Tooltips"), not the native `title` attribute: it
  * appears late, cannot be styled and shows no shortcut. `LEGACY` is the number of `title` attributes
  * (`title=`, `[title]`, `[attr.title]`) each file still has; it only goes down. When you convert one,
  * lower the number (delete the line at 0).
@@ -61,7 +61,7 @@ describe("title attributes", () => {
   );
 
   it.each([...counts])("%s has no new title attribute", (file, n) => {
-    expect(n, `${file}: use hx-tooltip (AGENTS.md "Tooltips")`).toBeLessThanOrEqual(
+    expect(n, `${file}: use hx-tooltip (docs/STYLEGUIDE.md "Tooltips")`).toBeLessThanOrEqual(
       LEGACY[file] ?? 0,
     );
   });

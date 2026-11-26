@@ -29,17 +29,11 @@ How each area works is in `docs/agents/`. Read the file before you touch the are
 - **The backend owns state** (`poimen-server`). poimen never stores pane state of its own; snapshots from the backend are authoritative and events only invalidate them.
 - **Non-destructive.** Closing a view or the app releases controllers and never ends a terminal. Taking over a controller requires an explicit user action. One exception, off by default: the server may stop an idle agent process (status `done` for the set time, harness with `exitInput` and `resumeArgs`, known session id) and resume its session on the first controller attach; the terminal itself is never ended ([ADR 0014](docs/adr/0014-hibernate-idle-agents.md)).
 - **Tests stay read-only.** Live tests (`#[ignore]`) may list and observe, never control, send input or create panes in the user's session.
-- **Buttons, tags and fields (#844).** Actions are `button[hx-button]` (helix-ui, `HxButton` in the component's `imports`), information is not a button.
-  - One filled **primary** per surface: the action the surface exists for (Save, Install). Everything else is `variant="outlined" severity="secondary"`; low-weight actions (Cancel in a row, Reset, a link-like step) are `variant="text"`. **Danger** (`severity="danger"`) only for an action that destroys or cannot be undone (Delete, Remove, Stop server), filled when it is the one action of a confirmation, else outlined or text.
-  - Small is the default in dense rows (`size="small"`, `min-height` is `--control-height` in `src/styles.css`). Icon-only buttons have `aria-label` and a `title` (tooltip).
-  - A status, count or label that does nothing is an `hx-tag` (or plain text): no border, no pointer cursor, no hover. If it can be clicked it is a button (`variant="text"`), which has the hover and `:focus-visible` state.
-  - Inputs and selects in a row use `height: var(--control-height)` so `align-items: center` lines them up with the buttons.
-  - Colors come from the tokens only; the button specs (`button-contrast`, `button-usage`) and reference surfaces are in `docs/agents/frontend.md`.
-- **Tooltips (#1039).** Icon-only controls use `hx-tooltip`, not `title` (`aria-label` stays); `ui/title-usage.spec.ts` counts `title`; see `frontend.md`.
-- **Context menus (#851).** Every context menu is an `app-context-menu` (`src/app/ui/context-menu/`, model in `menu-model.ts`): the parent renders it with `@if` at a point (`at`) with `MenuGroup`s and handles `picked`/`closed`. It owns backdrop, focus, keyboard, clamping and disabled entries (`frontend.md`). No menu CSS in a component.
-- **Dialogs (#848).** Every dialog is an `app-dialog-shell` (`src/app/ui/dialog-shell/`): a native modal `<dialog>` with the heading, the one close icon button and the content projected; buttons go in a `.dialog-buttons` element (Cancel first, the confirming action last as the one primary, `severity="danger"` for a destructive one), the shared rules for `.hint`, `.error`, labels and fields are in `src/styles.css` under `dialog.dialog`. The shell owns focus, Tab, Escape and Enter (`frontend.md`); `[cancelDefault]="true"` puts the focus on Cancel for a destructive or risky confirmation. A dialog spec checks focus on open, Escape and focus return with `ui/dialog-shell/dialog-contract.ts`. Components use decorator inputs in the shell and `Icon` because the specs run without Angular's compiler transform.
-- **Feedback (#1040).** Toast (`SpaceActions.notify`/`fail`): a result the user did not watch, or why a write failed. Inline: a lasting state (disconnected, read-only). Agent events (waiting, done, failed): notification center only, never a toast.
 - **Protocol drift.** The server protocol is versioned (`PROTOCOL_VERSION`). Keep all wire shapes in the `poimen-protocol` crate, each with a parsing test.
+
+## UI style guide
+
+Before changing UI, read the base guide `node_modules/@gravionlabs/helix-ui/styleguide/STYLEGUIDE.md`, then [`docs/STYLEGUIDE.md`](docs/STYLEGUIDE.md), which lists poimen's rules (buttons, tooltips, context menus, dialogs, feedback) and deviations; read a deep-dive file of the base when its condition applies. Both are binding: a deviation needs a reason in the PR description. Feedback and interaction rules: [Helix UX rules](https://github.com/GravionLabs/helix/blob/main/docs/UX-RULES.md).
 
 ## Decisions
 
