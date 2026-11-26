@@ -2,23 +2,23 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: var(--h-space-4);
 }
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--h-space-3);
+  margin-bottom: var(--h-space-3);
 }
 h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--h-font-size-md);
 }
 .space-actions,
 .actions {
   display: flex;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
   flex-wrap: wrap;
 }
 table {
@@ -28,33 +28,33 @@ table {
 th,
 td {
   text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  padding: calc(var(--h-space-1) * 1.5) var(--h-space-2);
+  border-bottom: 1px solid var(--h-content-border-color);
 }
 .dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin-right: 6px;
+  margin-right: calc(var(--h-space-1) * 1.5);
   /* The dot color comes from the global status classes (#849). */
 }
 .empty {
   opacity: 0.7;
 }
 .config {
-  margin-top: 24px;
+  margin-top: var(--h-space-6);
 }
 .config h3 {
-  margin: 0 0 8px;
-  font-size: 0.95rem;
+  margin: 0 0 var(--h-space-2);
+  font-size: var(--h-font-size-md);
 }
 .field {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--h-space-2);
+  margin-bottom: var(--h-space-2);
 }
 
 .field .label {
@@ -72,16 +72,16 @@ hx-field.field {
   font-family: monospace;
 }
 .layout-section h4 {
-  margin: 12px 0 4px;
-  font-size: 0.9rem;
+  margin: var(--h-space-3) 0 var(--h-space-1);
+  font-size: var(--h-font-size-sm);
 }
 .preset {
-  margin-bottom: 12px;
-  padding-left: 8px;
-  border-left: 2px solid rgba(128, 128, 128, 0.4);
+  margin-bottom: var(--h-space-3);
+  padding-left: var(--h-space-2);
+  border-left: 2px solid var(--h-content-border-color);
 }
 .advanced {
-  margin-bottom: 8px;
+  margin-bottom: var(--h-space-2);
 }
 .error {
   flex-basis: 100%;
@@ -92,7 +92,7 @@ hx-field.field {
   opacity: 0.7;
 }
 .trust {
-  border: 1px solid rgba(128, 128, 128, 0.5);
-  padding: 8px;
-  margin-bottom: 8px;
+  border: 1px solid var(--h-content-border-color);
+  padding: var(--h-space-2);
+  margin-bottom: var(--h-space-2);
 }

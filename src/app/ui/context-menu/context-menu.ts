@@ -50,13 +50,13 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
       max-width: min(420px, 100vw - 8px);
       max-height: calc(100vh - 8px);
       overflow-y: auto;
-      padding: 4px;
+      padding: var(--h-space-1);
       border: 1px solid var(--h-content-border-color);
       border-radius: 6px;
       background: var(--h-content-background);
       color: var(--h-text-color);
-      box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
-      font-size: 12px;
+      box-shadow: var(--h-overlay-popover-shadow);
+      font-size: var(--h-font-size-xs);
       outline: none;
     }
 
@@ -66,11 +66,11 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 24px;
+      gap: var(--h-space-6);
       width: 100%;
-      padding: 5px 10px;
+      padding: calc(var(--h-space-1) * 1.25) calc(var(--h-space-1) * 2.5);
       border-radius: 4px;
-      font-size: 12px;
+      font-size: var(--h-font-size-xs);
       cursor: pointer;
     }
 
@@ -110,13 +110,13 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
 
     .menu-separator {
       height: 1px;
-      margin: 4px 0;
+      margin: var(--h-space-1) 0;
       background: var(--h-content-border-color);
     }
 
     .menu-heading {
-      padding: 4px 10px 2px;
-      font-size: 10px;
+      padding: var(--h-space-1) calc(var(--h-space-1) * 2.5) calc(var(--h-space-1) * 0.5);
+      font-size: var(--h-font-size-xs);
       letter-spacing: 0.04em;
       text-transform: uppercase;
       opacity: 0.6;
@@ -125,7 +125,7 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
     }
 
     .menu-empty {
-      padding: 5px 10px;
+      padding: calc(var(--h-space-1) * 1.25) calc(var(--h-space-1) * 2.5);
       opacity: 0.7;
     }
 

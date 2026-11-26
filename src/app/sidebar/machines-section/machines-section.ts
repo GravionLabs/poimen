@@ -72,7 +72,7 @@ export const machineUsable = (machine: MachineStatus): boolean => machine.state 
     .machine {
       border-top: 1px solid var(--h-content-border-color);
       /* The cards of a machine line up with the cards above (.cards in sidebar.css: 8px). */
-      padding: 6px 8px;
+      padding: calc(var(--h-space-1) * 1.5) var(--h-space-2);
     }
 
     .machine.offline .note {
@@ -88,7 +88,7 @@ export const machineUsable = (machine: MachineStatus): boolean => machine.state 
     .machine-head {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: calc(var(--h-space-1) * 1.5);
     }
 
     .machine-name {
@@ -99,8 +99,8 @@ export const machineUsable = (machine: MachineStatus): boolean => machine.state 
     }
 
     .note {
-      margin: 2px 0 4px;
-      font-size: 0.85em;
+      margin: calc(var(--h-space-1) * 0.5) 0 var(--h-space-1);
+      font-size: var(--h-font-size-xs);
       opacity: 0.8;
     }
 

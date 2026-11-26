@@ -50,31 +50,31 @@ const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[hre
       border-radius: 8px;
       background: var(--h-content-background);
       color: var(--h-text-color);
-      box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
-      font-size: 13px;
+      box-shadow: var(--h-overlay-modal-shadow);
+      font-size: var(--h-font-size-sm);
       overflow: auto;
     }
 
     .dialog::backdrop {
-      background: rgb(0 0 0 / 35%);
+      background: var(--h-mask-background);
     }
 
     .inner {
-      padding: 16px;
+      padding: var(--h-space-4);
     }
 
     .head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
-      margin: 0 0 10px;
+      gap: var(--h-space-2);
+      margin: 0 0 calc(var(--h-space-1) * 2.5);
     }
 
     h2 {
       min-width: 0;
       margin: 0;
-      font-size: 14px;
+      font-size: var(--h-font-size-sm);
       overflow-wrap: anywhere;
     }
   `,

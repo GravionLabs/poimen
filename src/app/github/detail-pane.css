@@ -5,12 +5,12 @@
   width: 420px;
   flex: none;
   box-sizing: border-box;
-  padding: 0 16px 16px;
+  padding: 0 var(--h-space-4) var(--h-space-4);
   border-left: 1px solid var(--h-content-border-color);
   background: var(--h-content-background);
   max-height: calc(100vh - 120px);
   overflow: auto;
-  font-size: 13px;
+  font-size: var(--h-font-size-sm);
 }
 .pane:focus-visible {
   outline: none;
@@ -23,55 +23,55 @@
     right: 0;
     z-index: 5;
     width: min(420px, 100%);
-    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--h-overlay-modal-shadow);
   }
 }
 .head {
   position: sticky;
   top: 0;
   background: var(--h-content-background);
-  padding: 12px 0 8px;
+  padding: var(--h-space-3) 0 var(--h-space-2);
   border-bottom: 1px solid var(--h-content-border-color);
 }
 .title {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--h-space-2);
 }
 h2 {
-  font-size: 15px;
+  font-size: var(--h-font-size-md);
   margin: 0;
 }
 h3 {
-  font-size: 13px;
-  margin: 16px 0 6px;
+  font-size: var(--h-font-size-sm);
+  margin: var(--h-space-4) 0 calc(var(--h-space-1) * 1.5);
 }
 h2,
 h3 {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
 }
 .meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+  gap: calc(var(--h-space-1) * 2.5);
+  margin-top: calc(var(--h-space-1) * 1.5);
 }
 .actions:empty {
   display: none;
 }
 .actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--h-space-2);
+  margin-top: var(--h-space-2);
 }
 .mono {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 .hint {
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }
 .problem {
@@ -85,11 +85,11 @@ h3 {
 .list li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--h-space-2);
+  padding: calc(var(--h-space-1) * 0.75) 0;
 }
 .state {
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
   text-transform: uppercase;
   color: var(--h-text-muted-color);
   min-width: 70px;

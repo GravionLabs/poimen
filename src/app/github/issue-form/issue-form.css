@@ -1,21 +1,21 @@
 .form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 12px;
+  gap: var(--h-space-2);
+  margin: var(--h-space-3) 0;
+  padding: var(--h-space-3);
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
 }
 h3 {
-  font-size: 13px;
+  font-size: var(--h-font-size-sm);
   margin: 0;
 }
-textarea {
+.markdown-source {
   font-family: monospace;
 }
 
 .buttons {
   display: flex;
-  gap: 4px;
+  gap: var(--h-space-1);
 }

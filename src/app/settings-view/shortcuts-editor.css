@@ -1,17 +1,17 @@
 /* Keyboard page: one row per action, the shortcut as a key cap string. */
 .shortcut-group + .shortcut-group {
-  margin-top: 16px;
+  margin-top: var(--h-space-4);
 }
 
 .shortcut-group h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 var(--h-space-1);
+  font-size: var(--h-font-size-sm);
 }
 
 .shortcut-keys {
   min-width: 9rem;
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 
 .shortcut-keys.unbound {

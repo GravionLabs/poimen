@@ -18,8 +18,8 @@
   border-radius: 6px;
   background: var(--h-content-background);
   color: var(--h-text-color);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
-  font-size: 12px;
+  box-shadow: var(--h-overlay-popover-shadow);
+  font-size: var(--h-font-size-xs);
   overflow: hidden;
 }
 
@@ -27,9 +27,9 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
   height: 28px;
-  padding: 0 8px;
+  padding: 0 var(--h-space-2);
   border-bottom: 1px solid var(--h-content-border-color);
 }
 
@@ -68,9 +68,9 @@
   --h-list-row-gap: 8px;
   --h-list-row-padding-x: 10px;
   --h-list-row-padding-y: 0;
-  --h-list-row-font-size: 12px;
-  --h-list-row-meta-font-size: 11px;
-  padding: 2px 0;
+  --h-list-row-font-size: var(--h-font-size-xs);
+  --h-list-row-meta-font-size: var(--h-font-size-xs);
+  padding: calc(var(--h-space-1) * 0.5) 0;
   /* 10 rows of 24px; in the grouped view (no query) the group headings take space from those 10 rows */
   max-height: 240px;
   overflow-y: auto;
@@ -87,9 +87,9 @@
 }
 
 .heading {
-  padding: 6px 10px 2px;
+  padding: calc(var(--h-space-1) * 1.5) calc(var(--h-space-1) * 2.5) calc(var(--h-space-1) * 0.5);
   color: var(--h-text-muted-color);
-  font-size: 10px;
+  font-size: var(--h-font-size-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -97,7 +97,7 @@
 }
 
 .empty {
-  padding: 4px 10px;
+  padding: var(--h-space-1) calc(var(--h-space-1) * 2.5);
   color: var(--h-text-muted-color);
   cursor: default;
 }
@@ -128,7 +128,7 @@ mark {
 }
 
 .shortcut {
-  padding: 0 4px;
+  padding: 0 var(--h-space-1);
   border: 1px solid var(--h-content-border-color);
   border-radius: 3px;
   font-family: inherit;
@@ -138,17 +138,17 @@ mark {
 .footer {
   flex: none;
   margin: 0;
-  padding: 3px 10px;
+  padding: calc(var(--h-space-1) * 0.75) calc(var(--h-space-1) * 2.5);
   border-top: 1px solid var(--h-content-border-color);
   color: var(--h-text-muted-color);
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
 }
 
 .lock {
   width: 12px;
   height: 12px;
   flex: none;
-  margin-left: 8px;
+  margin-left: var(--h-space-2);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
@@ -156,29 +156,17 @@ mark {
 }
 
 .tabs {
+  --control-height: 22px;
+  --h-button-text-primary-color: var(--h-primary-color);
+  --h-button-text-secondary-color: var(--h-text-muted-color);
   display: flex;
   flex: none;
-  gap: 2px;
-  padding: 2px 6px;
+  gap: calc(var(--h-space-1) * 0.5);
+  padding: calc(var(--h-space-1) * 0.5) calc(var(--h-space-1) * 1.5);
   border-bottom: 1px solid var(--h-content-border-color);
 }
 
-.tabs button {
-  all: unset;
-  box-sizing: border-box;
-  padding: 2px 8px;
-  border-radius: 3px;
-  color: var(--h-text-muted-color);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.tabs button:hover {
-  color: var(--h-text-color);
-}
-
-.tabs button.active {
-  color: var(--h-primary-color);
+.tabs .active {
   font-weight: 600;
 }
 
@@ -188,7 +176,7 @@ mark {
 }
 
 .source + .shortcut {
-  margin-left: 8px;
+  margin-left: var(--h-space-2);
 }
 
 .item {
@@ -204,7 +192,7 @@ mark {
 .hide {
   flex: none;
   visibility: hidden;
-  margin-right: 4px;
+  margin-right: var(--h-space-1);
 }
 
 .item:has(.hx-list-row-selected) .hide,

@@ -1,14 +1,13 @@
-/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px. */
 /* Badges, chips, check icons, progress bars and the hover icon button shared by the three lists. */
 .badge,
 .chip {
   display: inline-block;
-  padding: 0 8px;
+  padding: 0 var(--h-space-2);
   border: 1px solid var(--badge-tone, var(--h-content-border-color));
   border-radius: 10px;
   background: color-mix(in srgb, var(--badge-tone, var(--h-text-muted-color)) 15%, transparent);
   color: var(--h-text-color);
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
   line-height: 18px;
   white-space: nowrap;
 }
@@ -16,17 +15,17 @@
   --badge-tone: var(--h-text-muted-color);
   border-radius: 4px;
 }
-button.badge {
+.badge.hx-button {
   min-height: 20px;
-  padding: 0 8px;
+  padding: 0 var(--h-space-2);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
   cursor: pointer;
 }
-button.badge:hover {
+.badge.hx-button:hover {
   background: color-mix(in srgb, var(--badge-tone, var(--h-text-muted-color)) 28%, transparent);
 }
-button.badge:focus-visible {
+.badge.hx-button:focus-visible {
   outline: 2px solid var(--h-primary-color);
   outline-offset: 1px;
 }
@@ -54,12 +53,12 @@ button.badge:focus-visible {
 }
 .checks {
   display: inline-flex;
-  gap: 8px;
+  gap: var(--h-space-2);
 }
 .check {
   display: inline-flex;
-  gap: 2px;
-  font-size: 12px;
+  gap: calc(var(--h-space-1) * 0.5);
+  font-size: var(--h-font-size-xs);
 }
 /* The count keeps the text color (AA); only the icon glyph is tinted, mixed toward the text color. */
 .check {

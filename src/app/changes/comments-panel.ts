@@ -26,13 +26,13 @@ import { LineComments } from "./line-comments";
       display: block;
       max-height: 40%;
       overflow: auto;
-      padding: 6px 12px;
+      padding: calc(var(--h-space-1) * 1.5) var(--h-space-3);
       border-top: 1px solid var(--h-content-border-color);
     }
     header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--h-space-2);
     }
     .spacer {
       flex: 1;
@@ -44,14 +44,14 @@ import { LineComments } from "./line-comments";
     }
     ul {
       list-style: none;
-      margin: 4px 0;
+      margin: var(--h-space-1) 0;
       padding: 0;
     }
     li {
       display: flex;
       align-items: baseline;
-      gap: 8px;
-      padding: 2px 0;
+      gap: var(--h-space-2);
+      padding: calc(var(--h-space-1) * 0.5) 0;
     }
     .text {
       flex: 1;
@@ -64,16 +64,16 @@ import { LineComments } from "./line-comments";
     hx-field {
       flex: 1;
     }
-    button.where {
+    .where.hx-button {
       font-family: var(--font-mono);
       color: var(--h-text-muted-color);
     }
     .actions {
       display: inline-flex;
-      gap: 4px;
+      gap: var(--h-space-1);
     }
     .problem {
-      margin: 4px 0;
+      margin: var(--h-space-1) 0;
       color: var(--status-error);
     }
   `,

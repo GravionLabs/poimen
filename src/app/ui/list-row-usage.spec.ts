@@ -40,13 +40,10 @@ describe("list rows", () => {
     expect(ts).toMatch(/imports: \[[^\]]*HxList,\s*HxListRow\b/);
   });
 
-  it.each(["agent-picker/agent-picker", "github/chip-picker/chip-picker"])(
-    "%s.css has no row styles",
-    (path) => {
-      const css = readFileSync(`src/app/${path}.css`, "utf8");
-      expect(css).not.toMatch(/hx-list-row|li button|\.options button/);
-    },
-  );
+  it("the chip picker has no row styles", () => {
+    const css = readFileSync("src/app/github/chip-picker/chip-picker.css", "utf8");
+    expect(css).not.toMatch(/hx-list-row|li button|\.options button/);
+  });
 
   it("lists every hand-built sidebar row with a reason", () => {
     const found = templates("src/app/sidebar")

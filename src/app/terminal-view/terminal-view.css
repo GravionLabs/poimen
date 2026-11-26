@@ -17,11 +17,11 @@ app-prompt-bar[hidden] {
 
 .view-banner {
   display: flex;
-  gap: 8px;
+  gap: var(--h-space-2);
   align-items: center;
-  padding: 6px 10px;
+  padding: calc(var(--h-space-1) * 1.5) calc(var(--h-space-1) * 2.5);
   background: color-mix(in srgb, var(--status-blocked) 16%, transparent);
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 
 .view-banner span {
@@ -35,7 +35,7 @@ app-prompt-bar[hidden] {
   flex: 1;
   min-height: 0;
   display: flex;
-  padding: 4px 0 0 6px;
+  padding: var(--h-space-1) 0 0 calc(var(--h-space-1) * 1.5);
   background: var(--term-bg);
   /* An observer renders at the controller's size; what does not fit is clipped. */
   overflow: hidden;
@@ -54,33 +54,33 @@ app-prompt-bar[hidden] {
   right: 18px;
   z-index: 5;
   display: flex;
-  gap: 4px;
+  gap: var(--h-space-1);
   align-items: center;
-  padding: 4px 6px;
-  font-size: 12px;
+  padding: var(--h-space-1) calc(var(--h-space-1) * 1.5);
+  font-size: var(--h-font-size-xs);
   color: var(--term-fg);
   background: var(--term-bg);
   border: 1px solid var(--term-ansi-8, currentColor);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+  box-shadow: var(--h-overlay-popover-shadow);
 }
 
 /* The bar sits on the terminal, so its buttons take the terminal colors, not the app tokens. */
-.search-bar button.hx-button {
+.search-bar .hx-button {
   min-width: 22px;
-  padding-inline: 4px;
+  padding-inline: var(--h-space-1);
   font: inherit;
   color: inherit;
   background: transparent;
   border-color: transparent;
 }
 
-.search-bar button.hx-button:hover,
-.search-bar button.hx-button:focus-visible {
+.search-bar .hx-button:hover,
+.search-bar .hx-button:focus-visible {
   border-color: var(--term-ansi-8, currentColor);
 }
 
-.search-bar button.hx-button[aria-pressed="true"] {
+.search-bar .hx-button[aria-pressed="true"] {
   background: var(--term-selection-bg);
   border-color: var(--term-ansi-8, currentColor);
 }
@@ -88,7 +88,7 @@ app-prompt-bar[hidden] {
 .search-input {
   width: 180px;
   box-shadow: none;
-  padding: 2px 4px;
+  padding: calc(var(--h-space-1) * 0.5) var(--h-space-1);
   font: inherit;
   color: inherit;
   background: transparent;

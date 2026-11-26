@@ -38,7 +38,11 @@
     <div class="tabs" role="tablist" aria-label="Sources">
       @for (tab of palette.sourceTabs(); track tab.id) {
         <button
+          hx-button
           type="button"
+          variant="text"
+          size="small"
+          [severity]="tab.id === palette.tab() ? 'primary' : 'secondary'"
           role="tab"
           tabindex="-1"
           [attr.aria-selected]="tab.id === palette.tab()"

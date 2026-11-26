@@ -22,7 +22,7 @@ hx-status-item {
   max-width: min(420px, calc(100vw - 20px));
   max-height: 60vh;
   overflow: auto;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   white-space: normal;
 }
 
@@ -31,17 +31,17 @@ hx-status-item {
 }
 
 .update-details h3 {
-  margin: 4px 0;
-  font-size: 12px;
+  margin: var(--h-space-1) 0;
+  font-size: var(--h-font-size-xs);
 }
 
 .update-details .restart-note {
-  margin: 4px 0 8px;
+  margin: var(--h-space-1) 0 var(--h-space-2);
   opacity: 0.8;
 }
 
 .update-details .message {
-  margin: 4px 0 8px;
+  margin: var(--h-space-1) 0 var(--h-space-2);
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
@@ -49,7 +49,7 @@ hx-status-item {
 }
 
 .update-details .install {
-  margin-top: 4px;
+  margin-top: var(--h-space-1);
 }
 
 .available {
@@ -63,7 +63,7 @@ hx-status-item {
 }
 
 /* A button in a plain item (#1309): as high as the bar, in the bar's own type. */
-.schedules button {
+.schedules .hx-button {
   min-height: 0;
   height: 100%;
   padding-block: 0;
@@ -71,7 +71,7 @@ hx-status-item {
 }
 
 .conn {
-  gap: 5px;
+  gap: calc(var(--h-space-1) * 1.25);
 }
 
 .dot {
@@ -102,7 +102,7 @@ hx-status-item {
   stroke-width: 1.4;
   stroke-linejoin: round;
   stroke-linecap: round;
-  margin-inline-end: 4px;
+  margin-inline-end: var(--h-space-1);
 }
 
 .help-button {

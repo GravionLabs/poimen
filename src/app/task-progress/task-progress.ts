@@ -13,18 +13,18 @@ import { TaskStarter } from "../core/task-start";
       bottom: 40px;
       z-index: 20;
       margin: 0;
-      padding: 8px 12px;
+      padding: var(--h-space-2) var(--h-space-3);
       list-style: none;
       background: var(--h-content-background);
       color: var(--h-text-color);
       border: 1px solid color-mix(in srgb, var(--h-text-color) 30%, transparent);
       border-radius: 6px;
-      font-size: 12px;
+      font-size: var(--h-font-size-xs);
     }
     li {
       display: flex;
-      gap: 6px;
-      padding: 2px 0;
+      gap: calc(var(--h-space-1) * 1.5);
+      padding: calc(var(--h-space-1) * 0.5) 0;
       opacity: 0.7;
     }
     li.current {

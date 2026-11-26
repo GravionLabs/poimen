@@ -218,7 +218,7 @@ body {
 button.hx-button {
   min-height: var(--control-height);
   padding-block: 0;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 
 button.hx-button.hx-button-icon-only {
@@ -361,7 +361,7 @@ dialog.dialog .hx-field-label {
 dialog.dialog label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--h-space-1);
 }
 
 dialog.dialog label:has(> input[type="checkbox"]),
@@ -371,24 +371,24 @@ dialog.dialog label:has(> input[type="radio"]) {
 }
 
 dialog.dialog :is(label, hx-field) + :is(label, hx-field) {
-  margin-top: 8px;
+  margin-top: var(--h-space-2);
 }
 
 dialog.dialog .hint {
-  margin: 8px 0 0;
+  margin: var(--h-space-2) 0 0;
   opacity: 0.7;
 }
 
 dialog.dialog hx-message {
   display: block;
-  margin-top: 8px;
+  margin-top: var(--h-space-2);
 }
 
 dialog.dialog .dialog-buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--h-space-2);
+  margin-top: var(--h-space-3);
 }
 
 /* Focus given back to a button that a mouse click opened a menu or dialog from (#1072). */
@@ -401,7 +401,7 @@ dialog.dialog .dialog-buttons {
   position: absolute;
   width: 1px;
   height: 1px;
-  margin: -1px;
+  margin: calc(var(--h-space-1) * -0.25);
   padding: 0;
   overflow: hidden;
   clip-path: inset(50%);
@@ -411,8 +411,8 @@ dialog.dialog .dialog-buttons {
 
 /* Lead runs of the Runs view (#1213); global: a nested component with a style file breaks the specs of its parent. */
 app-lead-runs .card {
-  margin-top: 16px;
-  padding: 12px 16px;
+  margin-top: var(--h-space-4);
+  padding: var(--h-space-3) var(--h-space-4);
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
 }
@@ -428,8 +428,8 @@ app-lead-runs .grant {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--h-space-2);
+  font-size: var(--h-font-size-xs);
 }
 app-lead-runs .hint {
   color: var(--h-text-muted-color);
@@ -439,11 +439,11 @@ app-lead-runs .mono {
 }
 app-lead-runs ul {
   list-style: none;
-  margin: 8px 0 0;
+  margin: var(--h-space-2) 0 0;
   padding: 0;
 }
 app-lead-runs p {
-  margin: 4px 0 0;
+  margin: var(--h-space-1) 0 0;
 }
 app-lead-runs .blocked {
   color: var(--status-blocked);
@@ -459,9 +459,9 @@ app-schedule-runs li {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
+  gap: var(--h-space-2);
+  padding: var(--h-space-1) 0;
+  font-size: var(--h-font-size-xs);
 }
 app-schedule-runs .hint {
   color: var(--h-text-muted-color);

@@ -109,8 +109,8 @@ export function checkLabel(id: string): string {
     }
     .hint {
       max-width: 80ch;
-      margin: 8px 0;
-      font-size: 12px;
+      margin: var(--h-space-2) 0;
+      font-size: var(--h-font-size-xs);
       color: var(--h-text-muted-color);
     }
     .rows {
@@ -119,7 +119,7 @@ export function checkLabel(id: string): string {
       list-style: none;
     }
     .row-item {
-      padding: 8px 0;
+      padding: var(--h-space-2) 0;
       align-items: center;
     }
     .row-item + .row-item {
@@ -129,17 +129,17 @@ export function checkLabel(id: string): string {
       font-weight: 600;
     }
     .toolbar {
-      margin: 8px 0;
+      margin: var(--h-space-2) 0;
     }
     .actions {
       margin-left: auto;
       display: flex;
-      gap: 6px;
+      gap: calc(var(--h-space-1) * 1.5);
     }
     .machine {
       display: flex;
       flex-wrap: wrap;
-      gap: 4px 12px;
+      gap: var(--h-space-1) var(--h-space-3);
     }
     .state,
     .detail {
@@ -159,8 +159,8 @@ export function checkLabel(id: string): string {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: 2px 8px;
-      padding: 2px 0;
+      gap: calc(var(--h-space-1) * 0.5) var(--h-space-2);
+      padding: calc(var(--h-space-1) * 0.5) 0;
     }
     .status {
       min-width: 56px;
@@ -179,7 +179,7 @@ export function checkLabel(id: string): string {
       user-select: all;
       flex-basis: 100%;
       margin: 0;
-      padding: 4px 8px;
+      padding: var(--h-space-1) var(--h-space-2);
       overflow-x: auto;
       border: 1px solid var(--h-content-border-color);
       border-radius: 4px;

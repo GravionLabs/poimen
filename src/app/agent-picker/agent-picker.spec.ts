@@ -5,6 +5,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { AgentPicker as PickerState } from "../core/agent-picker";
 import { AgentPicker } from "./agent-picker";
+import { expectFocusInside, focusOpener } from "../ui/dialog-shell/dialog-contract";
 
 beforeAll(() => {
   try {
@@ -24,6 +25,7 @@ function setup() {
       template: readFileSync("src/app/agent-picker/agent-picker.html", "utf8"),
     },
   });
+  const opener = focusOpener();
   const state = TestBed.inject(PickerState);
   const answer = state.pick([
     { paneId: "p1", label: "Claude" },
@@ -42,7 +44,7 @@ function setup() {
     );
     fixture.detectChanges();
   };
-  return { answer, rows, press };
+  return { answer, el, rows, press, fixture, opener };
 }
 
 describe("AgentPicker", () => {
@@ -59,6 +61,22 @@ describe("AgentPicker", () => {
     expect(document.activeElement).toBe(rows[1]);
     press("Home");
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("is a modal dialog with the focus on the first agent", async () => {
+    const { el, rows, fixture } = setup();
+    await fixture.whenStable();
+    expectFocusInside(el);
+    expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("gives the focus back to the opener when it closes", async () => {
+    const { answer, fixture, press, opener } = setup();
+    await fixture.whenStable();
+    press("Escape");
+    await expect(answer).resolves.toBeNull();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(opener);
   });
 
   it("answers with the chosen row (a native button, so Enter clicks it)", async () => {

@@ -1,32 +1,32 @@
-/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
+/* Rows are 34px. */
 @import "./github-badges.css";
 .issues {
-  margin-top: 32px;
+  margin-top: var(--h-space-8);
 }
 header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--h-space-3);
 }
 h2 {
-  font-size: 16px;
+  font-size: var(--h-font-size-md);
   margin: 0;
 }
 h3 {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  margin: 16px 0 6px;
+  gap: calc(var(--h-space-1) * 1.5);
+  font-size: var(--h-font-size-sm);
+  margin: var(--h-space-4) 0 calc(var(--h-space-1) * 1.5);
 }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0;
+  gap: var(--h-space-2);
+  margin: var(--h-space-3) 0;
 }
 .hint {
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }
 .problem {
@@ -39,13 +39,13 @@ h3 {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--h-font-size-sm);
 }
 .row {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: var(--h-space-2);
   min-height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
 }
@@ -61,7 +61,7 @@ h3 {
 }
 .pr {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--h-space-1);
 }
 .title {
   flex: 1 1 auto;
@@ -70,7 +70,7 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row > button,
+.row > .hx-button,
 .row > .pr,
 .row > .nr {
   flex: none;
@@ -82,13 +82,13 @@ h3 {
 .progress {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
 }
 .row.selected {
-  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+  background: var(--h-content-hover-background);
 }
 .row.marked {
-  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+  background: var(--h-content-hover-background);
 }
 .row.cursor {
   outline: 1px solid var(--h-primary-color);
