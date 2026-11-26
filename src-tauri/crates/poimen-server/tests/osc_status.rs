@@ -395,3 +395,43 @@ fn the_status_history_keeps_changes_with_their_source_and_at_most_twenty() {
     assert_eq!(changes.len(), poimen_client::protocol::MAX_STATUS_HISTORY);
     assert_eq!(changes.last().unwrap().status, AgentStatus::Blocked);
 }
+
+#[test]
+fn the_hook_agent_behind_a_program_status_is_told_apart() {
+    let env = Env::new("hook-agent");
+    let terminal = || env.client.list_terminals(None).unwrap().remove(0);
+    let report = |seq: u64, status: &str| {
+        env.client
+            .request(
+                "terminal.report_agent",
+                json!({"terminal_id": env.terminal, "seq": seq, "status": status, "agent": "claude"}),
+            )
+            .unwrap();
+    };
+    // A program status alone names no hook agent.
+    env.print(r"\033]7501;state=working:app=deliver\033\\");
+    wait_for(&env, Some(AgentStatus::Working));
+    assert_eq!(terminal().hook_agent_kind(), None);
+    // A hook agent that arrives behind it is told, with an event for the clients.
+    let rx = events(&env.client);
+    report(1, "idle");
+    assert_eq!(
+        next_status(&rx),
+        (AgentStatus::Working, Some("deliver".into()))
+    );
+    assert_eq!(terminal().hook_agent.as_deref(), Some("claude"));
+    assert_eq!(terminal().hook_agent_kind(), Some("claude"));
+    // The agent ends behind the program status.
+    report(2, "gone");
+    assert_eq!(terminal().hook_agent_kind(), None);
+    report(3, "idle");
+    // The program status ends: the hook agent is the terminal's agent again.
+    env.print(r"\033]7501;state=clear\033\\");
+    wait_for(&env, Some(AgentStatus::Idle));
+    assert_eq!(terminal().hook_agent, None);
+    assert_eq!(terminal().hook_agent_kind(), Some("claude"));
+    // A program status over a running hook agent keeps its kind.
+    env.print(r"\033]7501;state=done:app=deliver\033\\");
+    wait_for(&env, Some(AgentStatus::Done));
+    assert_eq!(terminal().hook_agent_kind(), Some("claude"));
+}

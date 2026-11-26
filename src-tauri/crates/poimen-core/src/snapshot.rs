@@ -134,6 +134,10 @@ pub struct Terminal {
     /// The agent kind (`claude`, `copilot`, ...); absent for a plain terminal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The kind of the hook agent in the pane (#1314); absent for a shell, also one whose only
+    /// status is a program's own report (OSC 7501), which names itself in `agent`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_agent: Option<String>,
     /// The agent's own session (the transcript's session id in `value`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionRef>,

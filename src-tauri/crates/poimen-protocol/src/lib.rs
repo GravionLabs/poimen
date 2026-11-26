@@ -31,7 +31,7 @@ pub use grant::{
     GrantVerdict,
 };
 pub use schedule::*;
-pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
+pub use status::{AgentInfo, Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version of the server and this crate, raised on incompatible changes (`ping`).
 pub const PROTOCOL_VERSION: u32 = 8;
@@ -538,6 +538,10 @@ pub struct Terminal {
     /// Where `agent` comes from: `osc7501` or the hook kind (#1153).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_source: Option<String>,
+    /// The kind of the hook agent behind a program status, only while `agent_source` is
+    /// `osc7501` and the hooks report one (#1314).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_agent: Option<String>,
     /// The last status changes, newest last, in memory only (#1153).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub status_history: Vec<StatusChange>,
@@ -565,48 +569,6 @@ pub enum AgentStatus {
     /// The program failed (OSC 7501 `state=error`, #682). Older clients do not know it.
     Error,
     Gone,
-}
-
-/// The agent of a terminal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentInfo {
-    pub status: AgentStatus,
-    /// Which agent, e.g. `claude`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    /// The latest notification text of the agent (see [`clean_message`]); cleared when the agent
-    /// turns `working` again.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    /// When `message` was accepted, milliseconds since the epoch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message_at: Option<u64>,
-    /// Progress of the program, 0 to 100 (OSC 7501 `progress`, #682).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub progress: Option<u8>,
-    /// Why the agent is blocked: `permission`, `question` or `auth` (OSC 7501 `kind`, #682).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    /// `warning` for a `done` that wants a look (OSC 7501 `tone`, #1152); only with `done`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tone: Option<String>,
-    /// The program's own title (OSC 7501 `title`, #682), plain text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    /// When the last accepted `terminal.report_agent` came in, milliseconds since the epoch,
-    /// also when the status did not change (#897).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reported_at: Option<u64>,
-    /// When `status` last changed, milliseconds since the epoch (#897).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_since: Option<u64>,
-    /// When the server marked the agent silent, milliseconds since the epoch: `working` without a
-    /// report for `agents.silentAfter` minutes (#898). Set only by the server's sweeper, cleared
-    /// by the next report; never present for another status.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub silent_since: Option<u64>,
 }
 
 /// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a

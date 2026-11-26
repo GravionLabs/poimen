@@ -127,6 +127,7 @@ impl Shared {
         entry.info.agent = None;
         entry.hook_agent = None;
         entry.osc = None;
+        entry.sync_hook_agent();
         entry.host = Some(spawned);
         entry.ended_endpoint = None;
         let hibernated = entry.info.hibernated.clone();
@@ -175,6 +176,7 @@ impl Shared {
             .osc
             .take()
             .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+        entry.sync_hook_agent();
         if !entry.info.tokens.is_empty() {
             entry.info.tokens.clear();
             entry.tokens.clear();

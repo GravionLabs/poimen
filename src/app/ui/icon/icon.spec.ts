@@ -41,10 +41,16 @@ describe("Icon", () => {
   });
 
   it("draws a monogram badge with its letters and a label (#1215)", () => {
-    const el = render(`<app-icon name="agent:Cc" label="Claude Code" [size]="16" />`);
+    const el = render(`<app-icon name="agent:CC" label="Claude Code" [size]="16" />`);
     expect(el.querySelector("svg rect")).not.toBeNull();
-    expect(el.querySelector("svg text")?.textContent?.trim()).toBe("Cc");
+    expect(el.querySelector("svg text")?.textContent?.trim()).toBe("CC");
     expect(el.querySelector("app-icon")?.getAttribute("aria-label")).toBe("Claude Code");
+  });
+
+  it("draws the shell in the frame of the agent badges (#1314)", () => {
+    const paths = render(`<app-icon name="terminal" />`).querySelectorAll("svg path");
+    expect(paths[0].getAttribute("d")).toMatch(/^M7 2h10a5 5/);
+    expect(paths.length).toBe(3);
   });
 
   it("draws the lock", () => {

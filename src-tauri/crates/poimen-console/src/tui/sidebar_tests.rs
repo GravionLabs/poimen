@@ -26,6 +26,7 @@ fn term(id: &str, space: &str, name: &str, cwd: &str) -> Terminal {
         task: None,
         report: None,
         agent_source: None,
+        hook_agent: None,
         status_history: Vec::new(),
         memory_bytes: None,
         from_history: false,

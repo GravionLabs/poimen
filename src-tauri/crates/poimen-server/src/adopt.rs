@@ -102,6 +102,7 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
         .agent
         .clone()
         .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+    let agent_kept = agent.is_some();
     let hibernated = t.hibernated.clone().or_else(|| resumable(shared, t));
     Some(TerminalEntry {
         info: Terminal {
@@ -126,7 +127,9 @@ fn ended(shared: &Arc<Shared>, t: &store::StoredTerminal) -> Option<TerminalEntr
             run: t.run.clone(),
             task: t.task.clone(),
             report: t.report.clone(),
-            agent_source: None,
+            // Kept, so a program's status is not taken for a hook agent's (#1314).
+            agent_source: (t.osc && agent_kept).then(|| "osc7501".to_string()),
+            hook_agent: None,
             memory_bytes: None,
             status_history: Vec::new(),
             from_history: true,
@@ -245,6 +248,7 @@ fn adopted(
                     a.agent.clone().unwrap_or_default()
                 }
             }),
+            hook_agent: (t.hook_agent.as_ref().filter(|_| t.osc)).and_then(|a| a.agent.clone()),
             memory_bytes: None,
             status_history: Vec::new(),
             from_history: false,
