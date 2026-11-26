@@ -65,32 +65,34 @@
   outline: none;
 }
 
-ul {
-  margin: 0;
+.rows {
+  /* palette density on the Helix list tokens: 24px rows */
+  --h-list-row-list-gap: 0;
+  --h-list-row-gap: 8px;
+  --h-list-row-padding-x: 10px;
+  --h-list-row-padding-y: 0;
+  --h-list-row-font-size: 12px;
+  --h-list-row-meta-font-size: 11px;
   padding: 2px 0;
   /* 10 rows of 24px (a row with a context line is taller); in the grouped view (no query) the group headings take space from those 10 rows */
   max-height: 240px;
   overflow-y: auto;
-  list-style: none;
 }
 
-li button {
-  all: unset;
-  box-sizing: border-box;
-  display: flex;
+.item,
+.heading,
+.empty {
+  flex: none;
+}
+
+.row {
   flex-wrap: wrap;
-  align-items: center;
-  column-gap: 8px;
-  width: 100%;
+  row-gap: 0;
   min-height: 24px;
-  padding: 0 10px;
-  cursor: pointer;
 }
 
 .age {
-  flex: none;
-  color: var(--h-text-muted-color);
-  font-size: 11px;
+  margin-inline-start: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -117,7 +119,7 @@ li button {
   white-space: nowrap;
 }
 
-li.heading {
+.heading {
   padding: 6px 10px 2px;
   color: var(--h-text-muted-color);
   font-size: 10px;
@@ -127,20 +129,14 @@ li.heading {
   cursor: default;
 }
 
-li.empty {
+.empty {
   padding: 4px 10px;
   color: var(--h-text-muted-color);
   cursor: default;
 }
 
-li.selected {
-  background: var(--h-highlight-background, rgb(128 128 128 / 20%));
-  color: var(--h-highlight-color, inherit);
-}
-
 .title {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 1 auto;
   white-space: pre;
 }
 
@@ -150,16 +146,9 @@ mark {
   font-weight: 600;
 }
 
-.shortcut {
-  flex: none;
-  margin-left: auto;
-  padding: 0 4px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 3px;
-  color: var(--h-text-muted-color);
-  font: inherit;
-  font-size: 11px;
-  white-space: nowrap;
+/* on a hover or selection background the accent and muted colors would lose contrast */
+.row:is(:hover, .hx-list-row-selected) :is(mark, .context) {
+  color: inherit;
 }
 
 .footer {
@@ -171,31 +160,16 @@ mark {
   font-size: 11px;
 }
 
-.lock {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  margin-left: 8px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  opacity: 0.7;
-}
-
 .detail {
+  flex: 0 1 auto;
   min-width: 0;
-  margin-left: auto;
   overflow: hidden;
-  color: var(--h-text-muted-color);
-  font-size: 11px;
   text-overflow: ellipsis;
   white-space: pre;
 }
 
-li.disabled {
-  opacity: 0.5;
-}
-
-li.disabled button {
+/* a disabled entry stays hoverable: it can be highlighted and its tooltip says why */
+.row[aria-disabled="true"] {
   cursor: not-allowed;
+  pointer-events: auto;
 }

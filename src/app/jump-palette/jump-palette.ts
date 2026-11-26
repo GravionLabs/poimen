@@ -1,4 +1,4 @@
-import { HxField, HxInput } from "@gravionlabs/helix-ui";
+import { HxField, HxInput, HxList, HxListRow } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -17,7 +17,7 @@ import { titleParts } from "../command-palette/title-parts";
 @Component({
   selector: "app-jump-palette",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Icon, HxField, HxInput],
+  imports: [Icon, HxField, HxInput, HxList, HxListRow],
   templateUrl: "./jump-palette.html",
   styleUrl: "./jump-palette.css",
 })
@@ -43,7 +43,9 @@ export class JumpPaletteView {
       this.palette.selected();
       if (!this.palette.isOpen()) return;
       queueMicrotask(() =>
-        this.host.nativeElement.querySelector(".selected")?.scrollIntoView({ block: "nearest" }),
+        this.host.nativeElement
+          .querySelector(".hx-list-row-selected")
+          ?.scrollIntoView({ block: "nearest" }),
       );
     });
   }
@@ -63,7 +65,8 @@ export class JumpPaletteView {
       const entry = this.palette.current();
       if (entry) this.choose(entry);
     } else if (event.key === "Escape") this.dismiss();
-    else return;
+    // The list has a tab stop of its own; the palette is driven from the field.
+    else if (event.key !== "Tab") return;
     event.preventDefault();
   }
 
