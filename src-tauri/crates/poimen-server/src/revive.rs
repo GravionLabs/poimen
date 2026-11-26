@@ -125,6 +125,7 @@ impl Shared {
         entry.info.host_bundled_version = Some(host_bundled_version());
         // The old agent's state is not the new shell's: the resume waits for `gone`.
         entry.info.agent = None;
+        entry.info.agent_source = None;
         entry.hook_agent = None;
         entry.osc = None;
         entry.sync_hook_agent();

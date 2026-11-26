@@ -101,6 +101,7 @@ export const SNAPSHOT: Snapshot = {
   terminals: [
     term("t1", "tab1", "s1", {
       agent: "claude",
+      hook_agent: "claude",
       agent_session: { value: "demo-session-1" },
       agent_status: "working",
       agent_progress: 60,
@@ -115,6 +116,7 @@ export const SNAPSHOT: Snapshot = {
     term("t2", "tab1", "s1", { cwd: `${HOME}/code/poimen`, program: "zsh", label: "shell" }),
     term("t7", "tab1", "s1", {
       agent: "claude",
+      hook_agent: "claude",
       agent_session: { value: "demo-session-2" },
       agent_status: "done",
       started_by: "t1",
@@ -126,6 +128,7 @@ export const SNAPSHOT: Snapshot = {
     term("t3", "tab2", "s1", { cwd: `${HOME}/code/poimen`, program: "pnpm", label: "tests" }),
     term("t4", "tab3", "s2", {
       agent: "claude",
+      hook_agent: "claude",
       agent_session: { value: "demo-session-3" },
       agent_status: "blocked",
       agent_kind: "permission",
@@ -138,6 +141,7 @@ export const SNAPSHOT: Snapshot = {
     }),
     term("t5", "tab4", "s3", {
       agent: "copilot",
+      hook_agent: "copilot",
       agent_session: { value: "demo-session-4" },
       agent_status: "done",
       agent_message: "Rewrote the install guide",
@@ -261,6 +265,7 @@ export const MACHINE_SNAPSHOT: Snapshot = {
   terminals: [
     term("t1", "tab1", "s1", {
       agent: "claude",
+      hook_agent: "claude",
       agent_session: { value: "remote-session-1" },
       agent_status: "working",
       agent_status_since: ago(6),

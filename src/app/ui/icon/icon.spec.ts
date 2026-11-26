@@ -44,6 +44,8 @@ describe("Icon", () => {
     const el = render(`<app-icon name="agent:CC" label="Claude Code" [size]="16" />`);
     expect(el.querySelector("svg rect")).not.toBeNull();
     expect(el.querySelector("svg text")?.textContent?.trim()).toBe("CC");
+    // Wide capitals ("GM", "MW") stay inside the frame in every font.
+    expect(el.querySelector("svg text")?.getAttribute("textLength")).toBe("14");
     expect(el.querySelector("app-icon")?.getAttribute("aria-label")).toBe("Claude Code");
   });
 
