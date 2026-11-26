@@ -5,6 +5,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.38.1] — 2026-11-26
+
+### Documentation
+- **site**: Screenshots of the restyled views in light and dark (#1365)
+- Project style guide on the Helix base guide, UI rules moved out of AGENTS.md (#1366) (#1392)
+
+
+### Refactoring
+- **ui**: Every select on hx-select in an hx-field (#1361) (#1386)
+- **ui**: Inputs and textareas on hx-input in an hx-field with hint and error (#1362) (#1387)
+- **ui**: Palette and picker rows on hx-list-row (#1363) (#1388)
+- **ui**: Remaining raw buttons and progress bars on hx-button and hx-progress-bar (#1364) (#1389)
+- **styles**: Font sizes on the type scale, no control look or raw colors in component styles (#1365) (#1390)
+- **styles**: Font sizes on the type scale, no control look or raw colors in component styles (#1365)
+
+
 ## [0.38.0] — 2026-11-26
 
 ### Bug Fixes
@@ -32,6 +48,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Schedule notes after the status bar hint (#1309)
 - **adr**: Accept ADR 0020 (#1095) (#1306)
 - **adr**: MCP 2026-07-28 and its extensions (#1299) (#1304)
+- Update CHANGELOG.md for v0.38.0 [skip ci]
 
 
 ### Features
