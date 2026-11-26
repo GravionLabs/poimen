@@ -56,7 +56,11 @@ describe("lint probe", () => {
   it("Stylelint reports the helix-lint preset violations (#1367)", async () => {
     const { results } = await stylelint.lint({ files: `${PROBE}/*.css`, ignorePath: [] });
     const rules = results.flatMap((r) => r.warnings.map((w) => w.rule));
-    expect(rules.sort()).toEqual(["color-no-hex", "declaration-property-value-allowed-list"]);
+    expect(rules.sort()).toEqual([
+      "color-no-hex",
+      "declaration-property-value-allowed-list",
+      "selector-disallowed-list",
+    ]);
   });
 
   it("every allowlist entry names a reason; an entry without one throws (#1367)", () => {

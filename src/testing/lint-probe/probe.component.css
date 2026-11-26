@@ -3,3 +3,7 @@
   color: #123456;
   font-size: 13px;
 }
+
+button {
+  border-radius: 4px;
+}
