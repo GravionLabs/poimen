@@ -12,7 +12,7 @@ import {
   signal,
 } from "@angular/core";
 import { HxStatusBar, HxStatusItem, HxStatusPopover } from "@gravionlabs/helix-desktop";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxTooltip } from "@gravionlabs/helix-ui";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
 import type { ConnectionState } from "../core/spaces-store";
@@ -25,6 +25,7 @@ import {
   type Mode,
 } from "../core/backend";
 import type { LimitsItem } from "../core/claude-limits";
+import type { ScheduleHint } from "../core/schedules-model";
 import { densityFlags, nextLevel, shortRuns, type DensityLevel } from "./status-density";
 import { TaskProgress } from "../task-progress/task-progress";
 
@@ -69,7 +70,7 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
-  imports: [TaskProgress, HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
+  imports: [TaskProgress, HxButton, HxTooltip, HxStatusBar, HxStatusItem, HxStatusPopover],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -125,6 +126,10 @@ export class StatusBar {
   readonly limits = input<LimitsItem | null>(null);
   /** The deliver item was clicked. */
   readonly showDeliver = output<void>();
+  /** The next scheduled run, or that schedules are paused (#1309); `null` hides it. */
+  readonly schedules = input<ScheduleHint | null>(null);
+  /** The schedule hint was clicked. */
+  readonly showSchedules = output<void>();
 
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);

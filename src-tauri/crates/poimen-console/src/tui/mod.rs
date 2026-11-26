@@ -34,6 +34,8 @@ pub mod config;
 pub mod grid;
 pub mod input;
 pub mod palette;
+mod palette_input;
+mod record;
 mod reload;
 pub mod screen;
 pub mod sidebar;
@@ -49,8 +51,8 @@ use std::time::Duration;
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
-    AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
-    SplitDirection, TabCreate, TabSplit, TerminalStatus, decode_bytes,
+    AttachMode, ClientInfo, ClientKind, ErrorCode, Event, SpaceCreate, SplitDirection, TabCreate,
+    TabSplit, TerminalStatus, decode_bytes,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use poimen_core::github::OpenIssue;
@@ -66,6 +68,7 @@ use config::Config;
 use grid::{Grid, Palette};
 use input::{Routed, Router, Wheel};
 use ratatui::layout::Rect;
+use record::record;
 use sidebar::{Model, Row};
 use tree::Dir;
 
@@ -493,6 +496,14 @@ fn sync_panes(app: &mut App, client: &Client, tx: &Sender<Msg>) {
         (None, _) => Vec::new(),
     };
     app.panes.retain(|p| desired.contains(&p.terminal_id));
+    // An ended terminal that runs again (resumed, #1232) is attached anew.
+    let model = &app.model;
+    app.panes.retain(|p| {
+        p.exited.is_none()
+            || model
+                .terminal(&p.terminal_id)
+                .is_none_or(|t| t.status != TerminalStatus::Running)
+    });
     if app.take_over != app.selected {
         app.take_over = None;
     }
@@ -645,56 +656,6 @@ fn reload(app: &mut App, client: &Client) {
     }
 }
 
-fn record(
-    app: &mut App,
-    client: &Client,
-    tx: &Sender<Msg>,
-    generation: u64,
-    rec: Result<Event, String>,
-) {
-    let Some(at) = app.panes.iter().position(|p| p.generation == generation) else {
-        return;
-    };
-    let focused = app.selected.as_deref() == Some(app.panes[at].terminal_id.as_str());
-    match rec {
-        Ok(Event::TerminalOutput { data, .. }) => {
-            let pane = &mut app.panes[at];
-            if let Ok(bytes) = decode_bytes(&data) {
-                pane.grid.feed(&bytes);
-                let replies = pane.grid.take_replies(&app.palette);
-                if pane.controls() && !replies.is_empty() {
-                    let _ = pane.writer.input(&String::from_utf8_lossy(&replies));
-                }
-            }
-        }
-        Ok(Event::TerminalResized { cols, rows, .. }) => app.panes[at].grid.resize(cols, rows),
-        Ok(Event::TerminalExited { exit_code, .. }) => app.panes[at].exited = Some(exit_code),
-        Ok(Event::TerminalDetached { reason, .. }) => {
-            let id = app.panes[at].terminal_id.clone();
-            match reason {
-                DetachReason::TakenOver => {
-                    attach_pane(app, client, tx, &id, How::Observe);
-                    if focused {
-                        app.notice = Some("another client took over the control; observing".into());
-                    }
-                }
-                DetachReason::Overflow if focused => {
-                    select(app, client, tx, Some(id), How::Control);
-                }
-                DetachReason::Overflow => attach_pane(app, client, tx, &id, How::Observe),
-                DetachReason::Closed => {
-                    app.panes.remove(at);
-                }
-            }
-        }
-        Ok(_) => {}
-        Err(e) => {
-            app.notice = Some(format!("attachment ended: {e}"));
-            app.panes.remove(at);
-        }
-    }
-}
-
 fn on_input<B: Backend>(
     app: &mut App,
     router: &mut Router,
@@ -703,25 +664,8 @@ fn on_input<B: Backend>(
     terminal: &Terminal<B>,
     ev: &InputEvent,
 ) -> Result<Option<Outcome>, Error> {
-    // The palette takes every key while it is open.
     if app.command_palette.is_some() {
-        match ev {
-            InputEvent::Key(key) => {
-                let out = app.command_palette.as_mut().and_then(|p| p.key(key));
-                match out {
-                    Some(palette::Out::Close) => app.command_palette = None,
-                    Some(palette::Out::Run(command)) => run_command(app, client, tx, command),
-                    None => {}
-                }
-            }
-            InputEvent::Paste(text) => {
-                if let Some(p) = app.command_palette.as_mut() {
-                    p.paste(text);
-                }
-            }
-            _ => {}
-        }
-        return Ok(None);
+        return Ok(palette_input::on_input(app, router, client, tx, ev));
     }
     if app.list.is_some() {
         return Ok(on_list_input(app, client, tx, ev));

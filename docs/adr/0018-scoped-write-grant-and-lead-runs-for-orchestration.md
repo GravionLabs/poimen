@@ -4,6 +4,7 @@
 - Date: 2026-11-24
 - Issues: #1208, #1207
 - Builds on: [ADR 0012](0012-mcp-server-for-agent-sessions.md), [ADR 0016](0016-poimen-hosts-the-sessions-of-scripted-runs.md), [ADR 0008](0008-remote-machines-over-ssh.md)
+- Amended by: [ADR 0021](0021-mcp-2026-07-28-and-its-extensions.md) (the push model of #1182 is MCP Events; `wait_any` stays as the fallback)
 
 ## Context
 

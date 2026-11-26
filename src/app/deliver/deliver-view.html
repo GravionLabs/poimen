@@ -19,6 +19,14 @@
       }
     </section>
   }
+  @if (schedules.runs().length > 0) {
+    <section class="section" data-testid="schedule-runs" aria-labelledby="runs-scheduled">
+      <h2 id="runs-scheduled" class="section-title">Scheduled runs</h2>
+      @defer {
+        <app-schedule-runs (paneChosen)="paneChosen.emit($event)" />
+      }
+    </section>
+  }
   @if (overview.loading() && overview.repos().length === 0 && !overview.failure()) {
     <app-loading-rows [active]="true" label="Loading milestones" testId="runs-loading" [rows]="5" />
   }

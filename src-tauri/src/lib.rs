@@ -34,6 +34,7 @@ mod project_edit;
 mod pull_request;
 mod remote_runs;
 mod remote_transcripts;
+mod schedules;
 mod schemes;
 mod server_install;
 mod server_paths;
@@ -1042,36 +1043,6 @@ async fn rebuild_space(
         rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
-}
-
-/// Writes one layout (`tabs[]` or `panes[]`) to `path`, a file chosen in the save dialog.
-#[tauri::command]
-async fn layout_export(path: String, layout: serde_json::Value) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        layout_file::export(std::path::Path::new(&path), &layout)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Reads and validates the layout file `path`; writes nothing.
-#[tauri::command]
-async fn layout_import(path: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || layout_file::import(std::path::Path::new(&path)))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-/// Exports the user settings (without `trustedProjects`) to `path`, a file chosen in the save
-/// dialog; `template` exports only that space template.
-#[tauri::command]
-async fn settings_export(path: String, template: Option<String>) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        settings_transfer::export(&home, std::path::Path::new(&path), template.as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// What importing the settings file `path` would add, change and remove, and what it leaves out;
@@ -2761,9 +2732,9 @@ pub fn run() {
             settings_write::set_space_templates,
             resolve_space_template,
             settings_write::revoke_project,
-            settings_export,
-            layout_export,
-            layout_import,
+            settings_write::settings_export,
+            layout_file::layout_export,
+            layout_file::layout_import,
             settings_import_plan,
             settings_import_apply,
             remove_spaces_layout,
@@ -2777,6 +2748,11 @@ pub fn run() {
             project::detected_entries,
             project::repo_root,
             settings_write::set_palette,
+            schedules::schedules_list,
+            schedules::schedules_alerts,
+            schedules::schedules_ack_alerts,
+            schedules::set_schedule_enabled,
+            schedules::set_schedules_paused,
             project::detected_run,
             repo_info,
             subagents_watch,

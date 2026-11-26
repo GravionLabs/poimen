@@ -70,6 +70,7 @@
       "agent_status": "working",
       "focused": false,
       "agent": "claude",
+      "hook_agent": "claude",
       "agent_session": { "value": "abc-1" }
     },
     {

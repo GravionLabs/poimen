@@ -10,6 +10,7 @@ pub use poimen_protocol::files::state_file_path;
 use poimen_protocol::{AgentInfo, Space, Tab};
 use serde::{Deserialize, Serialize};
 
+use crate::scheduler::{Alerts, Persisted, StoredSchedule};
 use crate::tabs::Layout;
 
 fn current_version() -> u64 {
@@ -33,6 +34,12 @@ struct File {
     /// The running terminals; absent from a file of a server before #604 (and when none runs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     terminals: Vec<StoredTerminal>,
+    /// The scheduler's state (#1000); absent without a schedule.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    schedules: Vec<StoredSchedule>,
+    /// The unacknowledged alerts of the scheduler (#1308); absent while there never was one.
+    #[serde(default, skip_serializing_if = "Alerts::is_unused")]
+    schedule_alerts: Alerts,
 }
 
 /// A running terminal as the next server needs it to adopt the host: who it is, where its host
@@ -119,6 +126,7 @@ pub(crate) struct Stored {
     pub(crate) next_id: u64,
     /// The terminals that ran when the file was written.
     pub(crate) terminals: Vec<StoredTerminal>,
+    pub(crate) schedules: Persisted,
 }
 
 /// The version of the file this server writes and the highest it reads.
@@ -330,6 +338,10 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         layout,
         next_id,
         terminals: file.terminals,
+        schedules: Persisted {
+            list: file.schedules,
+            alerts: file.schedule_alerts,
+        },
     })
 }
 
@@ -341,7 +353,9 @@ pub(crate) fn save(
     layout: &Layout,
     next_id: u64,
     terminals: Vec<StoredTerminal>,
+    schedules: impl Into<Persisted>,
 ) -> io::Result<()> {
+    let Persisted { list, alerts } = schedules.into();
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
     }
@@ -351,6 +365,8 @@ pub(crate) fn save(
         tabs: layout.tabs.clone(),
         next_id: Some(next_id),
         terminals,
+        schedules: list,
+        schedule_alerts: alerts,
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
@@ -463,7 +479,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, _) = temp("modes");
         let path = dir.path().join("fresh").join("server.json");
-        save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(path.parent().unwrap()), 0o700);
@@ -489,7 +505,7 @@ mod tests {
             parent: None,
             place: None,
         });
-        save(&path, &saved, 40, Vec::new()).unwrap();
+        save(&path, &saved, 40, Vec::new(), Vec::new()).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.layout, saved);
         assert_eq!(loaded.next_id, 40);
@@ -561,7 +577,7 @@ mod tests {
     #[test]
     fn the_terminal_list_round_trips_with_endpoint_seq_status_and_tokens() {
         let (_dir, path) = temp("terms");
-        save(&path, &layout(&["s1"]), 20, vec![stored("t9")]).unwrap();
+        save(&path, &layout(&["s1"]), 20, vec![stored("t9")], Vec::new()).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.terminals, vec![stored("t9")]);
         let text = fs::read_to_string(&path).unwrap();
@@ -577,7 +593,7 @@ mod tests {
     #[test]
     fn a_file_without_terminals_has_no_terminal_key_and_loads_an_empty_list() {
         let (_dir, path) = temp("noterms");
-        save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("terminals"));
         assert!(load(&path).unwrap().terminals.is_empty());
     }
@@ -624,9 +640,9 @@ mod tests {
     fn the_persisted_counter_wins_over_the_ids_left_in_the_file() {
         // A split that was dropped took its id with it; the counter still remembers it.
         let (_dir, path) = temp("counter");
-        save(&path, &layout(&["s1"]), 30, Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 30, Vec::new(), Vec::new()).unwrap();
         assert_eq!(load(&path).unwrap().next_id, 30);
-        save(&path, &layout(&["s50"]), 30, Vec::new()).unwrap();
+        save(&path, &layout(&["s50"]), 30, Vec::new(), Vec::new()).unwrap();
         assert_eq!(load(&path).unwrap().next_id, 51);
     }
 

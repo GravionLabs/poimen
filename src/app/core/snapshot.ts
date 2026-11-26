@@ -70,10 +70,7 @@ export interface Space {
   label: string;
   number: number;
   agent_status: AgentStatus;
-  /**
-   * The space's own directory (poimen backend: persisted in `server.json`, so it outlives the
-   * terminals across a server restart).
-   */
+  /** The space's own directory; the poimen server keeps it across its restarts. */
   cwd?: string;
   /** The machine the space lives on (remote spaces only, #280); its ids are qualified. */
   machine?: string;
@@ -87,7 +84,7 @@ export interface Tab {
   agent_status: AgentStatus;
   /**
    * The split tree of the tab as the server keeps it (poimen backend); absent for a terminal
-   * without a leaf (an exited one), which is a tab of its own.
+   * without a leaf (most exited ones), which is a tab of its own.
    */
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */
@@ -184,6 +181,8 @@ export interface Terminal extends SessionLink {
   tab_id: string;
   space_id: string;
   agent?: string;
+  /** The hook agent's kind (#1314): absent for a shell, also one with only an OSC 7501 status. */
+  hook_agent?: string;
   /** The agent's own session (Claude Code, Copilot CLI: the transcript's session id in `value`). */
   agent_session?: { value?: string };
   agent_status: AgentStatus;

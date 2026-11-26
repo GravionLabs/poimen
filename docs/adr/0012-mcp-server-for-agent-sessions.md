@@ -4,7 +4,7 @@
 - Date: 2026-11-15
 - Issues: #612
 - Builds on: [ADR 0006](0006-poimen-console-with-herdr-scope.md)
-- Amended by: [ADR 0018](0018-scoped-write-grant-and-lead-runs-for-orchestration.md) (scoped write grant for lead runs, `wait_any`, run state of a lead)
+- Amended by: [ADR 0018](0018-scoped-write-grant-and-lead-runs-for-orchestration.md) (scoped write grant for lead runs, `wait_any`, run state of a lead), [ADR 0021](0021-mcp-2026-07-28-and-its-extensions.md) (MCP `2026-07-28`, long waits as tasks, events, skills)
 
 ## Context
 

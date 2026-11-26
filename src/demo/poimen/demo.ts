@@ -73,6 +73,8 @@ export function createPoimenDemo(): DemoBackend {
     project_entries: { commands: [], presets: [], locked: false },
     terminal_resize: null,
     close_terminal: null,
+    schedules_list: { paused: false, schedules: [] },
+    schedules_alerts: { alerts: [] },
   });
   const POIMEN = `${HOME}/code/poimen`;
   backend.answer({

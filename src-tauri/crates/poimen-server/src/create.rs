@@ -83,6 +83,9 @@ pub(crate) enum Wanted<'a> {
     Resolved { root_command: Option<&'a str> },
     /// The named preset of the project file, without `setup`.
     Preset(&'a str),
+    /// The user's own layout (template > `spaces.layout` > default); the project files are not
+    /// read, so nothing of them runs or asks (a scheduled run, #1000).
+    User,
 }
 
 /// The preset `name` of the project file in `sources`.
@@ -114,7 +117,13 @@ pub(crate) fn prepare(
         ));
     }
     let root = git::toplevel(cwd).unwrap_or_else(|| cwd.to_owned());
-    let sources = Sources::read(&root);
+    let sources = match wanted {
+        Wanted::User => Sources {
+            root,
+            ..Sources::default()
+        },
+        _ => Sources::read(&root),
+    };
     let user = home.map(UserSpaces::load).unwrap_or_default();
     let (agent, user_layout, mut warnings) = space_layout::inputs(cwd, &user, home, available);
     let preset = match wanted {
@@ -122,7 +131,7 @@ pub(crate) fn prepare(
             ErrorCode::NotFound,
             format!("the project file has no preset {name}"),
         ))?),
-        Wanted::Resolved { .. } => None,
+        Wanted::Resolved { .. } | Wanted::User => None,
     };
     let plan = |allow: bool| match (&preset, wanted) {
         (Some(layout), _) => Ok((
@@ -138,6 +147,13 @@ pub(crate) fn prepare(
             user_layout.as_ref(),
             allow,
             root_command,
+            agent.as_deref(),
+        ),
+        (None, Wanted::User) => space_layout::plan(
+            &sources,
+            user_layout.as_ref(),
+            allow,
+            None,
             agent.as_deref(),
         ),
         (None, Wanted::Preset(_)) => unreachable!("a preset is looked up above"),

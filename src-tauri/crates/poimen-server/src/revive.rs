@@ -125,8 +125,10 @@ impl Shared {
         entry.info.host_bundled_version = Some(host_bundled_version());
         // The old agent's state is not the new shell's: the resume waits for `gone`.
         entry.info.agent = None;
+        entry.info.agent_source = None;
         entry.hook_agent = None;
         entry.osc = None;
+        entry.sync_hook_agent();
         entry.host = Some(spawned);
         entry.ended_endpoint = None;
         let hibernated = entry.info.hibernated.clone();
@@ -175,6 +177,7 @@ impl Shared {
             .osc
             .take()
             .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
+        entry.sync_hook_agent();
         if !entry.info.tokens.is_empty() {
             entry.info.tokens.clear();
             entry.tokens.clear();
@@ -192,9 +195,13 @@ impl Shared {
             terminal_id: terminal_id.to_string(),
             exit_code,
         });
-        // An exited terminal is no longer in the tree, nor in the terminal list.
-        let events = inner.layout.remove_terminal(terminal_id);
-        publish_all(self, events);
+        // An exited terminal leaves the tree and is not kept for a restart. The one of a
+        // scheduled run (#1305) stays in its tab until it is closed, so its output can be read.
+        let now = self.clock_ms();
+        if !inner.schedules.ended(terminal_id, exit_code, now) {
+            let events = inner.layout.remove_terminal(terminal_id);
+            publish_all(self, events);
+        }
         self.persist(&inner);
     }
 }

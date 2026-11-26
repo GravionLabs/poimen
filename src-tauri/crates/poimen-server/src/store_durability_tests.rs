@@ -38,8 +38,8 @@ fn nothing_on_disk_gives_no_spaces() {
 #[test]
 fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
     let (_dir, path) = fresh("bad-bak");
-    save(&path, &layout(&["s1"]), 5, Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 6, Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1", "s2"]), 6, Vec::new(), Vec::new()).unwrap();
     fs::write(&path, "{ nope").unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
@@ -51,7 +51,14 @@ fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
     );
     assert!(!path.exists(), "the damaged file is moved, not rewritten");
     // The next save writes a new main file and keeps the damaged copy.
-    save(&path, &loaded.layout, loaded.next_id, Vec::new()).unwrap();
+    save(
+        &path,
+        &loaded.layout,
+        loaded.next_id,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     assert_eq!(damaged_files(&path), aside);
 }
 
@@ -69,8 +76,8 @@ fn a_damaged_file_without_a_backup_starts_empty_and_is_kept() {
 #[test]
 fn a_missing_file_loads_the_backup() {
     let (_dir, path) = fresh("missing-bak");
-    save(&path, &layout(&["s1"]), 5, Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 6, Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1", "s2"]), 6, Vec::new(), Vec::new()).unwrap();
     fs::remove_file(&path).unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
@@ -131,7 +138,14 @@ fn a_file_without_a_version_is_read_and_written_with_one() {
     fs::write(&path, r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}]}"#).unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
-    save(&path, &loaded.layout, loaded.next_id, Vec::new()).unwrap();
+    save(
+        &path,
+        &loaded.layout,
+        loaded.next_id,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     assert!(
         fs::read_to_string(&path)
             .unwrap()
@@ -142,9 +156,9 @@ fn a_file_without_a_version_is_read_and_written_with_one() {
 #[test]
 fn a_save_keeps_the_previous_file_as_backup() {
     let (_dir, path) = fresh("bak");
-    save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
     assert!(!backup_path(&path).exists());
-    save(&path, &layout(&["s2"]), 3, Vec::new()).unwrap();
+    save(&path, &layout(&["s2"]), 3, Vec::new(), Vec::new()).unwrap();
     assert_eq!(ids(&load(&path).unwrap()), ["s2"]);
     let previous = fs::read_to_string(backup_path(&path)).unwrap();
     assert!(previous.contains("\"s1\""), "{previous}");
@@ -156,8 +170,8 @@ fn a_save_keeps_the_previous_file_as_backup() {
 fn a_damaged_file_that_cannot_be_moved_aside_refuses_the_start_and_keeps_the_backup() {
     use std::os::unix::fs::PermissionsExt;
     let (_dir, path) = fresh("stuck");
-    save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 3, Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1", "s2"]), 3, Vec::new(), Vec::new()).unwrap();
     fs::write(&path, "{ nope").unwrap();
     let dir = path.parent().unwrap();
     fs::set_permissions(dir, fs::Permissions::from_mode(0o500)).unwrap();

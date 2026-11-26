@@ -1,6 +1,8 @@
 //! The TUI against an in-process poimen-server on a temporary socket (never the user's server),
 //! drawn on ratatui's test backend. Unix-only: the terminals run POSIX shell scripts.
 #![cfg(unix)]
+
+mod common;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -158,16 +160,7 @@ fn start(f: &Fixture, own_terminal: Option<String>) -> Running {
 
 impl Running {
     fn text(&self) -> String {
-        let buf = self.screen.lock().unwrap();
-        let a = buf.area;
-        (a.top()..a.bottom())
-            .map(|y| {
-                (a.left()..a.right())
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        common::screen_text(&self.screen)
     }
 
     /// The pane's part of the screen (right of the sidebar, above the status line).
@@ -215,7 +208,7 @@ impl Running {
 
     fn detach(self) -> Outcome {
         self.prefix(KeyCode::Char('d'));
-        self.handle.join().unwrap().unwrap()
+        common::join_within(self.handle, &self.screen).unwrap()
     }
 }
 

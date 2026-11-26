@@ -4,6 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SpacesStore, type BackendStatus } from "./spaces-store";
+import { Schedules } from "./schedules";
 import { ServerRestart, serverNotice } from "./server-restart";
 import { TauriBridge } from "./tauri";
 
@@ -20,6 +21,7 @@ function setup(
   status: BackendStatus | null,
   invoke = vi.fn(),
   terminals: Pane[] = [{ terminal_id: "t1", label: "build" }, { terminal_id: "t2" }],
+  schedules = 0,
 ) {
   const backend = signal<BackendStatus | null>(status);
   const ensureBackend = vi.fn(async () => backend.set({ state: "running", reason: null }));
@@ -33,6 +35,7 @@ function setup(
     providers: [
       { provide: TauriBridge, useValue: { invoke } },
       { provide: SpacesStore, useValue: store },
+      { provide: Schedules, useValue: { active: signal(Array.from({ length: schedules })) } },
     ],
   });
   return { restart: TestBed.inject(ServerRestart), invoke, ensureBackend, backend };
@@ -139,6 +142,25 @@ describe("ServerRestart", () => {
     expect(invoke).not.toHaveBeenCalled();
     await restart.confirm();
     expect(invoke).toHaveBeenCalledWith("quit_and_stop_server");
+  });
+
+  it("says on a quit how many schedules stop, not on a restart", () => {
+    const { restart } = setup(outdated, vi.fn(), [], 2);
+    restart.askQuit();
+    expect(restart.schedulesNote()).toBe(
+      "2 schedules stop until the server runs again; runs missed for more than 12 hours are not caught up.",
+    );
+    restart.askRestart();
+    expect(restart.schedulesNote()).toBeNull();
+    const one = setup(outdated, vi.fn(), [], 1).restart;
+    one.askQuit();
+    expect(one.schedulesNote()).toMatch(/^1 schedule stops until/);
+  });
+
+  it("says nothing about schedules without an active one", () => {
+    const { restart } = setup(outdated);
+    restart.askQuit();
+    expect(restart.schedulesNote()).toBeNull();
   });
 
   it("shows a rejected quit and stays open", async () => {

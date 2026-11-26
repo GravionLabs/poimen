@@ -168,8 +168,8 @@ fn text(err: ClientError) -> String {
 }
 
 /// The neutral snapshot of the server's spaces (#586): a server tab is a tab with its terminals in
-/// split-tree order and the tree as `root`. A terminal without a leaf (exited, or from a protocol 3
-/// server) is a tab of its own. Tabs follow the space's `tabs` order. Agent status is what the hooks
+/// split-tree order and the tree as `root`. A terminal without a leaf (most exited ones, or from a
+/// protocol 3 server) is a tab of its own. Tabs follow the space's `tabs` order. Agent status is what the hooks
 /// reported (`unknown` without an agent); a tab and a space show their most urgent terminal.
 pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
     let mut snapshot = Snapshot::default();
@@ -277,6 +277,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent: agent
             .and_then(|a| a.agent.clone())
             .filter(|a| !a.is_empty()),
+        hook_agent: terminal.hook_agent_kind().map(str::to_owned),
         agent_session: agent
             .and_then(|a| a.session_id.clone())
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
@@ -313,7 +314,6 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         // The name of a terminal is its label only once it was renamed: the default is the
         // directory name, which the sidebar already shows for a terminal without a label.
         label: (terminal.name != default_name(&terminal.cwd)).then(|| terminal.name.clone()),
-        // The `tokens` map the `$<name>` row tokens read.
         tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
         survives_restart: terminal.survives_restart,
