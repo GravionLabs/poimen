@@ -5,12 +5,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.38.0] — 2026-11-26
+
+### Bug Fixes
+- **server**: One space for runs due at once, the login-shell PATH for scheduled commands (#1000)
+- **server**: Read the login-shell PATH before the scheduler takes the lock (#1000)
+- **demo**: Answer schedules_list in the demo backend (#1310) (#1311)
+- **demo**: Answer schedules_alerts in the demo backend
+- **e2e**: Answer schedules_list and schedules_alerts in the fake backend (#1318) (#1319)
+- **server**: The tab of a scheduled run closes when its command ends (#1305) (#1307)
+- **server**: Keep the tab of a scheduled run after its command ends (#1305)
+- **console**: Keep the pane of an exited terminal when its stream ends (#1305)
+- **console**: Attach a resumed terminal anew in the TUI (#1305)
+- **tabs**: Monograms in capitals, a shell with a program status keeps the shell icon (#1314) (#1320)
+- **tabs**: Monograms in capitals, a shell with a program status keeps the shell icon (#1314)
+- **tabs**: Fit capital monograms in the badge, keep the demo's agent badges (#1314)
+- **console**: Detach while the palette is busy, so the palette task test no longer hangs (#1355) (#1356)
+
+
+### Documentation
+- **adr**: Triggered runs of agent scripts (#1095) (#1296)
+- **adr**: Record triggered runs of agent scripts (#1095)
+- **adr**: Tighten the limits and scope of triggered runs (#1095)
+- **adr**: Close the remaining review notes on triggered runs (#1095)
+- **notifications**: Correct the path of the schedule alerts
+- Schedule notes after the status bar hint (#1309)
+- **adr**: Accept ADR 0020 (#1095) (#1306)
+- **adr**: MCP 2026-07-28 and its extensions (#1299) (#1304)
+
+
+### Features
+- **server**: Scheduled task modes (#1000) (#1297)
+- **server**: Scheduled task modes (#1000)
+- **notifications**: Failed and skipped scheduled runs in the notification center (#1308) (#1312)
+- **notifications**: Failed and skipped scheduled runs in the notification center
+- **ui**: Status bar hint for active schedules and the stop-server warning (#1309) (#1313)
+- **ui**: Status bar hint for active schedules and the stop-server warning (#1309)
+
+
 ## [0.37.0] — 2026-11-25
 
 ### Bug Fixes
 - **tui**: Wait for gh on a channel, not a sleep loop (#1174)
 - Three test files still leave temp directories behind (#1282) (#1290)
 - **test**: Retry a fake server script that is briefly Text file busy (#1291)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.37.0 [skip ci]
 
 
 ### Features
