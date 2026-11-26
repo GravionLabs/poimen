@@ -277,6 +277,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent: agent
             .and_then(|a| a.agent.clone())
             .filter(|a| !a.is_empty()),
+        hook_agent: terminal.hook_agent_kind().map(str::to_owned),
         agent_session: agent
             .and_then(|a| a.session_id.clone())
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
@@ -313,7 +314,6 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         // The name of a terminal is its label only once it was renamed: the default is the
         // directory name, which the sidebar already shows for a terminal without a label.
         label: (terminal.name != default_name(&terminal.cwd)).then(|| terminal.name.clone()),
-        // The `tokens` map the `$<name>` row tokens read.
         tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
         survives_restart: terminal.survives_restart,

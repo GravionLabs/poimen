@@ -53,7 +53,12 @@ const STROKES = {
     "M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0z",
     "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   ],
-  terminal: ["M4 17l6-6-6-6", "M12 19h8"],
+  // A shell (#1314): a prompt in the frame of the agent badges (`icon.html`).
+  terminal: [
+    "M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z",
+    "M7 16l4-4-4-4",
+    "M13 16h4",
+  ],
   // Lucide "lock": a read-only pane.
   lock: [
     "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
@@ -70,7 +75,7 @@ const STROKES = {
   ],
 } as const;
 
-/** A monogram badge of an agent kind (#1215): `agent:Cc`, a rounded square with one or two letters. */
+/** A monogram badge of an agent kind (#1215): `agent:CC`, a rounded square with one or two letters. */
 export type AgentBadgeName = `agent:${string}`;
 
 export type IconName = keyof typeof PATHS | keyof typeof STROKES | AgentBadgeName;

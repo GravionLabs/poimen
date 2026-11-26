@@ -1,13 +1,31 @@
 //! Agent status events and the reset of a failed turn (#1110).
 
-use poimen_protocol::{AgentInfo, AgentStatus, Event};
+use poimen_protocol::{AgentInfo, AgentStatus, Event, TerminalStatus};
 
-use crate::{Inner, Shared, TerminalEntry, now_millis};
+use crate::{Inner, Shared, TerminalEntry, lock, now_millis};
 
 impl TerminalEntry {
+    /// `info.hook_agent` (#1314): the kind of the hook agent behind a program status; true when
+    /// it changed.
+    pub(crate) fn sync_hook_agent(&mut self) -> bool {
+        let hooks = self.osc.as_ref().and(self.hook_agent.as_ref());
+        let kind = hooks.and_then(|a| a.agent.clone());
+        let changed = kind != self.info.hook_agent;
+        self.info.hook_agent = kind;
+        changed
+    }
+
+    /// Whether `info.agent` is the program's own report, also once the process is gone and only
+    /// the history is left.
+    pub(crate) fn program_status(&self) -> bool {
+        let ended = self.host.is_none() && self.info.agent_source.as_deref() == Some("osc7501");
+        self.osc.is_some() || ended
+    }
+
     /// Keeps `info.agent_source` and the status history (#1153) in line with `info.agent`: a
     /// change of status or source adds a record (at most `MAX_STATUS_HISTORY`, oldest dropped).
     pub(crate) fn track_status(&mut self, now_ms: u64) {
+        self.sync_hook_agent();
         let source = self.info.agent.as_ref().map(|a| {
             if self.osc.is_some() {
                 "osc7501".to_string()
@@ -41,6 +59,53 @@ impl TerminalEntry {
             .len()
             .saturating_sub(poimen_protocol::MAX_STATUS_HISTORY);
         self.info.status_history.drain(..over);
+    }
+}
+
+impl Shared {
+    /// Keeps a hook report that arrives behind a program status. The visible status stays; the
+    /// event only goes out when the kind of the hook agent changed, so a client reads it again.
+    pub(crate) fn keep_hook_agent(&self, entry: &mut TerminalEntry, next: Option<AgentInfo>) {
+        entry.hook_agent = next;
+        if entry.sync_hook_agent() {
+            self.publish(agent_event(&entry.info.id, entry.info.agent.as_ref()));
+        }
+    }
+
+    /// Marks the agents silent that are `working` and sent no report for `minutes` (`0` is off,
+    /// #898). The mark is set once (one `agent.status_changed`, one write); only a report or
+    /// another status clears it. `now_ms` is a parameter so tests need no waiting.
+    pub(crate) fn mark_silent(&self, now_ms: u64, minutes: u64) {
+        if minutes == 0 {
+            return;
+        }
+        let limit = minutes.saturating_mul(60_000);
+        let mut inner = lock(&self.inner);
+        let mut changed = false;
+        for entry in &mut inner.terminals {
+            if entry.info.status == TerminalStatus::Exited {
+                continue;
+            }
+            let Some(agent) = entry.info.agent.as_mut() else {
+                continue;
+            };
+            let Some(reported) = agent.reported_at else {
+                continue;
+            };
+            if agent.status != AgentStatus::Working
+                || agent.silent_since.is_some()
+                || now_ms.saturating_sub(reported) < limit
+            {
+                continue;
+            }
+            agent.silent_since = Some(now_ms);
+            changed = true;
+            let event = agent_event(&entry.info.id, entry.info.agent.as_ref());
+            self.publish(event);
+        }
+        if changed {
+            self.persist(&inner);
+        }
     }
 }
 

@@ -98,9 +98,9 @@ export function protocolWarning(info: BackendInfo | null | undefined, backend = 
  * `transcripts`: whether Output and Flow can follow its session files.
  */
 export const HOOK_AGENTS = [
-  { kind: "claude", name: "Claude Code", transcripts: true, monogram: "Cc" },
-  { kind: "copilot", name: "GitHub Copilot CLI", transcripts: true, monogram: "Cp" },
-  { kind: "gemini", name: "Gemini CLI", transcripts: false, monogram: "Gm" },
+  { kind: "claude", name: "Claude Code", transcripts: true, monogram: "CC" },
+  { kind: "copilot", name: "GitHub Copilot CLI", transcripts: true, monogram: "CP" },
+  { kind: "gemini", name: "Gemini CLI", transcripts: false, monogram: "GM" },
 ] as const;
 
 /**
@@ -109,8 +109,8 @@ export const HOOK_AGENTS = [
  * `derivedMonogram` of its display name.
  */
 export const HARNESS_MONOGRAMS: Readonly<Record<string, string>> = {
-  codex: "Cx",
-  opencode: "Oc",
+  codex: "CX",
+  opencode: "OC",
 };
 
 export const HOOK_AGENT_KINDS: readonly string[] = HOOK_AGENTS.map((a) => a.kind);
@@ -120,13 +120,12 @@ export function agentName(kind: string): string {
   return HOOK_AGENTS.find((a) => a.kind === kind)?.name ?? kind;
 }
 
-/** One or two letters from a display name: the initials of two words, else its first two letters. */
+/** One or two capitals from a display name: the initials of two words, else its first two letters. */
 export function derivedMonogram(name: string): string {
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
   if (words.length === 0) return "?";
   if (words.length > 1) return (words[0][0] + words[1][0]).toUpperCase();
-  const w = words[0];
-  return w[0].toUpperCase() + w.slice(1, 2).toLowerCase();
+  return words[0].slice(0, 2).toUpperCase();
 }
 
 /**

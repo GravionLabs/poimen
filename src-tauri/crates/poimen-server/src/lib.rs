@@ -233,7 +233,7 @@ impl TerminalEntry {
             endpoint,
             seq,
             agent: self.info.agent.clone(),
-            osc: self.osc.is_some(),
+            osc: self.program_status(),
             hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
             records: self.records.raw().to_vec(),
@@ -609,42 +609,6 @@ impl Shared {
                     tokens: entry.info.tokens.clone(),
                 });
             }
-        }
-        if changed {
-            self.persist(&inner);
-        }
-    }
-
-    /// Marks the agents silent that are `working` and sent no report for `minutes` (`0` is off,
-    /// #898). The mark is set once (one `agent.status_changed`, one write); only a report or
-    /// another status clears it. `now_ms` is a parameter so tests need no waiting.
-    pub(crate) fn mark_silent(&self, now_ms: u64, minutes: u64) {
-        if minutes == 0 {
-            return;
-        }
-        let limit = minutes.saturating_mul(60_000);
-        let mut inner = lock(&self.inner);
-        let mut changed = false;
-        for entry in &mut inner.terminals {
-            if entry.info.status == TerminalStatus::Exited {
-                continue;
-            }
-            let Some(agent) = entry.info.agent.as_mut() else {
-                continue;
-            };
-            let Some(reported) = agent.reported_at else {
-                continue;
-            };
-            if agent.status != AgentStatus::Working
-                || agent.silent_since.is_some()
-                || now_ms.saturating_sub(reported) < limit
-            {
-                continue;
-            }
-            agent.silent_since = Some(now_ms);
-            changed = true;
-            let event = agent_event(&entry.info.id, entry.info.agent.as_ref());
-            self.publish(event);
         }
         if changed {
             self.persist(&inner);
@@ -1967,6 +1931,7 @@ fn spawn_terminal(
         task: p.task.clone(),
         report: None,
         agent_source: None,
+        hook_agent: None,
         status_history: Vec::new(),
         memory_bytes: None,
         from_history: false,
@@ -2102,7 +2067,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     let unchanged = same_but_time(&previous.cloned(), &next);
     if entry.osc.is_some() {
         // The program reports its own status (OSC 7501): the hook's is kept for when that ends.
-        entry.hook_agent = next;
+        shared.keep_hook_agent(entry, next);
     } else if !unchanged {
         entry.info.agent = next;
         entry.track_status(now_ms);
