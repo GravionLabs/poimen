@@ -3,6 +3,8 @@
 //! server. Unix-only: the commands are POSIX shell scripts.
 #![cfg(unix)]
 
+mod common;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -69,16 +71,7 @@ fn start(client: &Client) -> Running {
 
 impl Running {
     fn text(&self) -> String {
-        let buf = self.screen.lock().unwrap();
-        let a = buf.area;
-        (a.top()..a.bottom())
-            .map(|y| {
-                (a.left()..a.right())
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        common::screen_text(&self.screen)
     }
 
     fn wait_for(&self, needle: &str) {
@@ -105,7 +98,8 @@ impl Running {
             let key = KeyEvent::new(KeyCode::Char(code), mods);
             self.input.send(InputEvent::Key(key)).unwrap();
         }
-        assert_eq!(self.handle.join().unwrap().unwrap(), Outcome::Detached);
+        let outcome = common::join_within(self.handle, &self.screen).unwrap();
+        assert_eq!(outcome, Outcome::Detached);
     }
 }
 

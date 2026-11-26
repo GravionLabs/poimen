@@ -2,6 +2,8 @@
 //! a temporary home (never the user's server or config). Unix-only.
 #![cfg(unix)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender};
@@ -141,16 +143,7 @@ fn start(f: &Fixture, issues: Option<poimen_console::tui::actions::IssueSource>)
 
 impl Running {
     fn text(&self) -> String {
-        let buf = self.screen.lock().unwrap();
-        let a = buf.area;
-        (a.top()..a.bottom())
-            .map(|y| {
-                (a.left()..a.right())
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        common::screen_text(&self.screen)
     }
 
     fn wait_for(&self, needle: &str) {
@@ -211,7 +204,8 @@ impl Running {
             )))
             .unwrap();
         self.key(KeyCode::Char('d'));
-        assert_eq!(self.handle.join().unwrap().unwrap(), Outcome::Detached);
+        let outcome = common::join_within(self.handle, &self.screen).unwrap();
+        assert_eq!(outcome, Outcome::Detached);
     }
 }
 
@@ -591,5 +585,26 @@ fn a_task_in_a_trust_needing_repository_asks_then_starts_with_the_same_command()
     wait_until("the task space exists", || {
         f.space_names().contains(&"#12 Add picker".to_owned())
     });
+    r.wait_gone("Command palette");
     r.detach();
+}
+
+/// The server has a task's space before the TUI has the result of the start, so a detach can
+/// reach a palette that is still busy. The issue source here keeps it busy until the test ends.
+#[test]
+fn detach_works_while_the_palette_is_busy() {
+    let f = fixture("busy", TASK_CONFIG);
+    f.space_with_terminal("app", &f.dir.join("work").display().to_string());
+    let (release, held) = mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    let source: poimen_console::tui::actions::IssueSource = Arc::new(move |_| {
+        let _ = held.lock().unwrap().recv();
+        Ok(vec![])
+    });
+    let r = start(&f, Some(source));
+    r.wait_for("app");
+    r.pick("Task: Start");
+    r.wait_for("Reading the open issues");
+    r.detach();
+    drop(release);
 }

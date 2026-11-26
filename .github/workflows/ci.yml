@@ -7,7 +7,7 @@ name: CI
 # frontend build that the Rust jobs also run. The path rules are in scripts/changed-paths.json (also read by
 # `pnpm check:changed`). The `ci` job always runs
 # last and is the single check to require on a branch (green when the checks passed or were skipped for lack of
-# changes in their area).
+# changes in their area). Every job has `timeout-minutes` (about 3x its usual time), so a hang fails with a log.
 # Pushes to main run these checks through release.yml (workflow_call), so they run once per release.
 on:
   workflow_dispatch:
@@ -28,6 +28,7 @@ jobs:
   changes:
     name: changes (app files)
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       frontend: ${{ steps.diff.outputs.frontend }}
       rust: ${{ steps.diff.outputs.rust }}
@@ -53,6 +54,7 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
     name: frontend (check, lint, format, test, build)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
@@ -73,6 +75,7 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.frontend == 'true'
     name: e2e (Playwright, Chromium)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
@@ -94,6 +97,7 @@ jobs:
   ratchets:
     name: ratchets
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -108,6 +112,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     name: rust-server (fmt, clippy, test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -127,6 +132,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     name: cargo-deny (advisories, licenses, sources)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
@@ -143,6 +149,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     name: rust (app crate, clippy, test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -172,6 +179,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     name: windows (server crates test, app clippy)
     runs-on: windows-latest
+    timeout-minutes: 20
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -206,6 +214,7 @@ jobs:
     if: needs.changes.outputs.compat == 'true'
     name: previous-release (adopt host, talk to server)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -237,6 +246,7 @@ jobs:
     if: always()
     needs: [changes, ratchets, frontend, rust-server, cargo-deny, rust, windows, previous-release]
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
