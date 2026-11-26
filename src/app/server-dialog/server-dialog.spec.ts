@@ -8,11 +8,17 @@ import { ServerRestart, type ServerAction } from "../core/server-restart";
 import { ServerDialog } from "./server-dialog";
 import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
-function setup(action: ServerAction | null, terminals: string[] = ["build", "t2"], kept = 0) {
+function setup(
+  action: ServerAction | null,
+  terminals: string[] = ["build", "t2"],
+  kept = 0,
+  note: string | null = null,
+) {
   const restart = {
     action: signal(action),
     terminals: signal(terminals),
     kept: signal(kept),
+    schedulesNote: signal(note),
     busy: signal(false),
     error: signal<string | null>(null),
     confirm: vi.fn(),
@@ -62,6 +68,11 @@ describe("ServerDialog", () => {
     expect(root.textContent).toContain("Quit poimen and stop");
     expect(root.textContent).toContain("1 terminal ends");
     expect(root.querySelector(".confirm")?.textContent).toContain("Quit and stop server");
+  });
+
+  it("shows the sentence about the schedules when there is one", () => {
+    expect(setup("quit", [], 0, "1 schedule stops").root.textContent).toContain("1 schedule stops");
+    expect(setup("quit", []).root.querySelector(".schedules")).toBeNull();
   });
 
   it("says when no terminal is running", () => {

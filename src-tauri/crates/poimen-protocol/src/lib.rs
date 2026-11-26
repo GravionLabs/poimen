@@ -30,7 +30,7 @@ pub use grant::{
     GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace,
     GrantVerdict,
 };
-pub use schedule::{ScheduleInfo, ScheduleList, ScheduleOutcome, ScheduleResult, ScheduleRun};
+pub use schedule::*;
 pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version of the server and this crate, raised on incompatible changes (`ping`).

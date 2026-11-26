@@ -10,7 +10,7 @@ pub use poimen_protocol::files::state_file_path;
 use poimen_protocol::{AgentInfo, Space, Tab};
 use serde::{Deserialize, Serialize};
 
-use crate::scheduler::StoredSchedule;
+use crate::scheduler::{Alerts, Persisted, StoredSchedule};
 use crate::tabs::Layout;
 
 fn current_version() -> u64 {
@@ -37,6 +37,9 @@ struct File {
     /// The scheduler's state (#1000); absent without a schedule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     schedules: Vec<StoredSchedule>,
+    /// The unacknowledged alerts of the scheduler (#1308); absent while there never was one.
+    #[serde(default, skip_serializing_if = "Alerts::is_unused")]
+    schedule_alerts: Alerts,
 }
 
 /// A running terminal as the next server needs it to adopt the host: who it is, where its host
@@ -123,7 +126,7 @@ pub(crate) struct Stored {
     pub(crate) next_id: u64,
     /// The terminals that ran when the file was written.
     pub(crate) terminals: Vec<StoredTerminal>,
-    pub(crate) schedules: Vec<StoredSchedule>,
+    pub(crate) schedules: Persisted,
 }
 
 /// The version of the file this server writes and the highest it reads.
@@ -335,7 +338,10 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         layout,
         next_id,
         terminals: file.terminals,
-        schedules: file.schedules,
+        schedules: Persisted {
+            list: file.schedules,
+            alerts: file.schedule_alerts,
+        },
     })
 }
 
@@ -347,8 +353,9 @@ pub(crate) fn save(
     layout: &Layout,
     next_id: u64,
     terminals: Vec<StoredTerminal>,
-    schedules: Vec<StoredSchedule>,
+    schedules: impl Into<Persisted>,
 ) -> io::Result<()> {
+    let Persisted { list, alerts } = schedules.into();
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
     }
@@ -358,7 +365,8 @@ pub(crate) fn save(
         tabs: layout.tabs.clone(),
         next_id: Some(next_id),
         terminals,
-        schedules,
+        schedules: list,
+        schedule_alerts: alerts,
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");

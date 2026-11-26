@@ -16,6 +16,7 @@ export const STATUS_BAR_FIXTURES: Fixture[] = [
       appVersion: "0.29.0",
       info: { version: "0.29.0", protocol: 1, supported: 1 },
       waiting: 2,
+      schedules: { text: "Schedules · next 09:00", tooltip: "Next: nightly in ~/repo" },
     },
     viewport: VIEWPORT,
   },

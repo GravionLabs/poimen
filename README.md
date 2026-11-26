@@ -175,6 +175,8 @@ The **Milestones** section (`src-tauri/src/github_milestones.rs`, `src/app/githu
 
 ### Runs
 
+Failed and skipped scheduled runs are listed in the notification center, also those from while the app was closed: one entry per failed run, and one per schedule and reason for skips, with a count; there is no toast.
+
 "Scheduled runs" lists the runs `poimen-server` started for your `schedules` (see Settings), marked "schedule", newest first, with their outcome, exit code and "Show terminal" while the terminal exists.
 
 The Runs item of the activity bar (or "Open Runs" in the palette) opens a "Runs" tab with the agent runs (deliver loops and sessions) of the repositories behind the open spaces (`src-tauri/src/deliver.rs`, `src/app/deliver/`). A loop (GravionLabs/skills `deliver-loop`) writes `.agents/deliver-loop/status.json` in its repository, atomically and against the schema `deliver-loop-status.schema.json` of GravionLabs/skills (`schemaVersion: 1`, raw URL `https://raw.githubusercontent.com/GravionLabs/skills/main/skills/delivery/deliver/schema/deliver-loop-status.schema.json`). poimen watches that file with `notify` for the git toplevel of every directory a pane is in (`deliver_watch`, events `deliver`; no polling and no GitHub call), so a change shows within a second. Read-only: poimen never writes the file.

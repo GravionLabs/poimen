@@ -36,6 +36,9 @@
         poimen quits after the server stopped.
       }
     </p>
+    @if (restart.schedulesNote(); as note) {
+      <p class="hint schedules">{{ note }}</p>
+    }
     @if (restart.error(); as error) {
       <p class="error" role="alert">{{ error }}</p>
     }

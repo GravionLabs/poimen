@@ -1,6 +1,6 @@
 # ADR 0020: Triggered runs of agent scripts
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-25
 - Issues: #1095, Feature #1090
 - Builds on: [ADR 0008](0008-remote-machines-over-ssh.md), [ADR 0012](0012-mcp-server-for-agent-sessions.md), [ADR 0014](0014-hibernate-idle-agents.md), [ADR 0019](0019-agent-scripts-format-and-runner.md)

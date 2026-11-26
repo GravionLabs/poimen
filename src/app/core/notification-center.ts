@@ -1,5 +1,6 @@
 import { Injectable, computed, signal } from "@angular/core";
 import type { StatusChange } from "./attention";
+import { alertMessage, type ScheduleAlert } from "./schedules-model";
 
 /** How many entries the center keeps; older ones fall off. */
 export const MAX_NOTIFICATIONS = 100;
@@ -19,6 +20,8 @@ export interface NotificationEntry {
   deliver?: { root: string; machine?: string };
   /** Set for a write of an agent through `poimen mcp` (#615): what it typed. */
   detail?: string;
+  /** Set for collapsed skips of a schedule (#1308): what a later alert is added to. */
+  skips?: { key: string; reason?: string; alertId: number; count: number; earlier: number };
   /** Set for the result of the checks of a pull request (#995); a failed one offers `fix-checks`. */
   checks?: CheckResult;
 }
@@ -146,6 +149,53 @@ export class NotificationCenter {
       checks: r,
     }));
     this.entries.update((list) => prependCapped(list, added));
+  }
+
+  /** The `seq` and time of the alerts added, so a failed acknowledgement adds none twice. */
+  private readonly addedAlerts = new Set<string>();
+
+  /**
+   * Records the alerts of scheduled runs (#1308): one entry per failed run, and one per schedule
+   * and reason for skips, which counts up and moves to the front with every further alert.
+   */
+  recordSchedules(alerts: readonly ScheduleAlert[]): void {
+    for (const alert of [...alerts].sort((a, b) => a.seq - b.seq)) {
+      const mark = `${alert.seq}:${alert.at_ms}`;
+      if (this.addedAlerts.has(mark)) continue;
+      this.addedAlerts.add(mark);
+      this.entries.update((list) => this.withAlert(list, alert));
+    }
+  }
+
+  private withAlert(list: readonly NotificationEntry[], alert: ScheduleAlert): NotificationEntry[] {
+    const failed = alert.outcome === "failed";
+    const old = failed
+      ? undefined
+      : list.find((e) => e.skips?.key === alert.key && e.skips.reason === alert.reason);
+    // The same alert again already holds its earlier count; a new one adds to the entry's.
+    let earlier = 0;
+    if (old?.skips) {
+      earlier = old.skips.alertId === alert.id ? old.skips.earlier : old.skips.count;
+    }
+    const count = earlier + alert.count;
+    const entry: NotificationEntry = {
+      id: this.nextId++,
+      paneId: "",
+      label: `${alert.mode} · ${alert.dir}`,
+      status: failed ? "error" : "silent",
+      message: alertMessage(alert, count),
+      time: alert.at_ms,
+      read: false,
+      ...(failed
+        ? {}
+        : {
+            skips: { key: alert.key, reason: alert.reason, alertId: alert.id, count, earlier },
+          }),
+    };
+    return prependCapped(
+      list.filter((e) => e !== old),
+      [entry],
+    );
   }
 
   /** Records a write of an agent through `poimen mcp` (#615); `label` is the calling terminal. */

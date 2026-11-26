@@ -41,6 +41,8 @@ import { Presence } from "./core/presence";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { Schedules } from "./core/schedules";
+import { seedSpaceDefaults } from "./core/seed-defaults";
 import { tabMarks } from "./core/agent-priority";
 import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
@@ -268,6 +270,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  protected readonly schedules = inject(Schedules);
   private readonly tokenTotals = inject(TokenTotalsService);
   private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
@@ -443,24 +446,10 @@ export class App {
     void this.prefs.start();
     void this.userSchemes.start();
     void this.machines.start();
+    this.schedules.follow(this.store, destroyRef);
     void this.store.start().then(() => this.dropMissing());
     void this.remoteSpaces.start();
-    void this.seedDefaults();
-  }
-
-  /**
-   * The first start of this version writes the default layout and template into config.json when
-   * it has neither key (`seed_space_defaults`). The UI state remembers that it ran; a failure is
-   * retried at the next start.
-   */
-  private async seedDefaults(): Promise<void> {
-    if (this.ui.defaultsSeeded()) return;
-    try {
-      await this.bridge.invoke("seed_space_defaults");
-      this.ui.markDefaultsSeeded();
-    } catch {
-      // retried at the next start
-    }
+    void seedSpaceDefaults(this.bridge, this.ui);
   }
 
   /**

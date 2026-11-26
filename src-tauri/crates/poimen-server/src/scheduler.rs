@@ -19,14 +19,18 @@ use poimen_core::settings::config_path;
 use poimen_core::tasks::{self, Cmd, TaskVars};
 use poimen_core::{git, gui_path};
 use poimen_protocol::{
-    ScheduleInfo, ScheduleList, ScheduleOutcome, ScheduleResult, ScheduleRun, TerminalCreate,
-    TerminalStatus, TrustAnswer,
+    ErrorCode, Request, ScheduleAckAlerts, ScheduleAlerts, ScheduleInfo, ScheduleList,
+    ScheduleOutcome, ScheduleResult, ScheduleRun, TerminalCreate, TerminalStatus, TrustAnswer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod alerts;
+pub(crate) use alerts::Alerts;
+use alerts::Subject;
+
 use crate::{
-    ApiResult, Inner, Server, Shared, build_space, create, lock, program_available, pty,
+    ApiResult, Inner, Server, Shared, build_space, create, lock, parsed, program_available, pty,
     spawn_terminal, type_commands,
 };
 
@@ -69,16 +73,47 @@ impl StoredSchedule {
             .any(|r| r.outcome == ScheduleOutcome::Running)
     }
 
-    fn skipped(&mut self, now: u64, reason: &str) {
-        self.record(ScheduleOutcome::Skipped, now, Some(reason.to_owned()));
+    fn skipped(&mut self, alerts: &mut Alerts, now: u64, reason: &str) {
+        let reason = Some(reason.to_owned());
+        self.record(alerts, ScheduleOutcome::Skipped, now, reason);
     }
 
-    fn record(&mut self, outcome: ScheduleOutcome, at_ms: u64, reason: Option<String>) {
+    /// Sets the last result; a failure and a skip also give an alert (#1308).
+    fn record(
+        &mut self,
+        alerts: &mut Alerts,
+        outcome: ScheduleOutcome,
+        at_ms: u64,
+        reason: Option<String>,
+    ) {
+        let subject = Subject {
+            key: &self.key,
+            dir: &self.dir,
+            mode: &self.mode,
+        };
+        alerts.add(subject, outcome, reason.as_deref(), at_ms);
         self.last = Some(ScheduleResult {
             outcome,
             at_ms,
             reason,
         });
+    }
+}
+
+/// What `server.json` keeps of the scheduler.
+#[derive(Debug, Default)]
+pub(crate) struct Persisted {
+    pub(crate) list: Vec<StoredSchedule>,
+    pub(crate) alerts: Alerts,
+}
+
+/// Schedules without alerts.
+impl From<Vec<StoredSchedule>> for Persisted {
+    fn from(list: Vec<StoredSchedule>) -> Self {
+        Self {
+            list,
+            alerts: Alerts::default(),
+        }
     }
 }
 
@@ -91,14 +126,18 @@ pub(crate) struct State {
     starting: HashSet<String>,
     /// `server.shutdown` began: nothing starts any more.
     halted: bool,
+    /// What no app has acknowledged yet.
+    alerts: Alerts,
 }
 
 impl State {
-    pub(crate) fn load(stored: Vec<StoredSchedule>) -> Self {
+    pub(crate) fn load(stored: Persisted) -> Self {
+        let Persisted { list, alerts } = stored;
         Self {
-            entries: stored.into_iter().map(|s| (s.key.clone(), s)).collect(),
+            entries: list.into_iter().map(|s| (s.key.clone(), s)).collect(),
             starting: HashSet::new(),
             halted: false,
+            alerts,
         }
     }
 
@@ -106,8 +145,11 @@ impl State {
         self.halted = true;
     }
 
-    pub(crate) fn stored(&self) -> Vec<StoredSchedule> {
-        self.entries.values().cloned().collect()
+    pub(crate) fn stored(&self) -> Persisted {
+        Persisted {
+            list: self.entries.values().cloned().collect(),
+            alerts: self.alerts.clone(),
+        }
     }
 
     /// Records the end of the run in `terminal_id`; `false` when no run is in it.
@@ -131,7 +173,7 @@ impl State {
             run.outcome = outcome;
             run.exit_code = exit_code;
             run.ended_ms = Some(now);
-            entry.record(outcome, now, reason);
+            entry.record(&mut self.alerts, outcome, now, reason);
             return true;
         }
         false
@@ -304,6 +346,7 @@ impl Shared {
                     {
                         entry.handled_ms = oldest;
                         entry.skipped(
+                            &mut state.alerts,
                             now,
                             if config.paused {
                                 "paused"
@@ -320,11 +363,15 @@ impl Shared {
                 let day = now.saturating_sub(DAY_MS);
                 let today = entry.runs.iter().filter(|r| r.started_ms > day).count();
                 if config.paused {
-                    entry.skipped(now, "paused");
+                    entry.skipped(&mut state.alerts, now, "paused");
                 } else if busy {
-                    entry.skipped(now, "the last run is still running");
+                    entry.skipped(&mut state.alerts, now, "the last run is still running");
                 } else if today >= config.max_runs_per_day as usize {
-                    entry.skipped(now, "the limit of runs per day is reached");
+                    entry.skipped(
+                        &mut state.alerts,
+                        now,
+                        "the limit of runs per day is reached",
+                    );
                 } else {
                     state.starting.insert(s.key.clone());
                     due.push(Due {
@@ -337,8 +384,10 @@ impl Shared {
             if changed && !self.persist(inner) {
                 for d in due.drain(..) {
                     inner.schedules.starting.remove(&d.schedule.key);
-                    if let Some(entry) = inner.schedules.entries.get_mut(&d.schedule.key) {
-                        entry.skipped(now, "server.json could not be written");
+                    let state = &mut inner.schedules;
+                    if let Some(entry) = state.entries.get_mut(&d.schedule.key) {
+                        let reason = "server.json could not be written";
+                        entry.skipped(&mut state.alerts, now, reason);
                     }
                 }
             }
@@ -383,8 +432,9 @@ impl Shared {
             let now = self.clock_ms();
             let mut inner = lock(&self.inner);
             inner.schedules.starting.remove(&s.key);
-            if let Some(entry) = inner.schedules.entries.get_mut(&s.key) {
-                entry.record(outcome, now, Some(reason));
+            let state = &mut inner.schedules;
+            if let Some(entry) = state.entries.get_mut(&s.key) {
+                entry.record(&mut state.alerts, outcome, now, Some(reason));
             }
             self.persist(&inner);
         }
@@ -457,7 +507,8 @@ impl Shared {
         )
         .map_err(|(_, message)| message)?;
         inner.schedules.starting.remove(&s.key);
-        if let Some(entry) = inner.schedules.entries.get_mut(&s.key) {
+        let state = &mut inner.schedules;
+        if let Some(entry) = state.entries.get_mut(&s.key) {
             entry.runs.push(ScheduleRun {
                 terminal_id: terminal.id.clone(),
                 due_ms: due.due_ms,
@@ -468,7 +519,7 @@ impl Shared {
             });
             let over = entry.runs.len().saturating_sub(KEEP_RUNS);
             entry.runs.drain(..over);
-            entry.record(ScheduleOutcome::Running, now, None);
+            entry.record(&mut state.alerts, ScheduleOutcome::Running, now, None);
         }
         let events = inner
             .layout
@@ -507,7 +558,7 @@ fn end_lost_runs(inner: &mut Inner, now: u64) -> bool {
 }
 
 /// `schedule.list`: the schedules of the user config with what the server keeps of them.
-pub(crate) fn list(shared: &Shared) -> ApiResult {
+fn list(shared: &Shared) -> ApiResult {
     let config = configured(shared.home.as_deref()).unwrap_or_default();
     let now = shared.clock_ms();
     let inner = lock(&shared.inner);
@@ -536,6 +587,33 @@ pub(crate) fn list(shared: &Shared) -> ApiResult {
         paused: config.paused,
         schedules,
     }))
+}
+
+/// The `schedule.*` methods.
+pub(crate) fn dispatch(shared: &Shared, request: &Request) -> ApiResult {
+    match request.method.as_str() {
+        "schedule.list" => list(shared),
+        "schedule.alerts" => alerts(shared),
+        "schedule.ack_alerts" => ack_alerts(shared, parsed(request)?),
+        other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
+    }
+}
+
+/// `schedule.alerts`: what no app has acknowledged yet.
+fn alerts(shared: &Shared) -> ApiResult {
+    let inner = lock(&shared.inner);
+    Ok(json!(ScheduleAlerts {
+        alerts: inner.schedules.alerts.list().to_vec(),
+    }))
+}
+
+/// `schedule.ack_alerts`: removes the alerts an app has shown.
+fn ack_alerts(shared: &Shared, params: ScheduleAckAlerts) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    if inner.schedules.alerts.ack(params.up_to) {
+        shared.persist(&inner);
+    }
+    Ok(json!({}))
 }
 
 impl Server {
