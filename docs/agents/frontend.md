@@ -99,3 +99,7 @@ An ended terminal (host gone, #1195) arrives as a snapshot and a `closed` record
 ## Context menus (#851, moved from AGENTS.md)
 
 - Context menus (#851): `app-context-menu` (`src/app/ui/context-menu/`). The component owns the backdrop, the focus (taken on open, returned to the opener), Arrow/Home/End/first-letter/Enter/Escape, group separators and headings, the clamping inside the window (`clampMenu`, `alignRight`) and disabled entries (`disabled: "reason"` is the tooltip, dimmed, focusable, picks nothing).
+
+## Dialogs (#848, moved from AGENTS.md)
+
+- Focus and keys of `app-dialog-shell` (`src/app/ui/dialog-shell/`): the shell moves the focus into the dialog (first field, else the confirming button; `[cancelDefault]="true"` for a destructive or risky confirmation puts it on Cancel and Enter does not confirm), keeps Tab inside, emits `cancelled` for Escape, backdrop and the close icon, `confirmed` for Enter outside a form, a button and a list, and returns the focus to the opener.
