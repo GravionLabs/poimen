@@ -75,11 +75,11 @@
             </span>
             <span class="hint">{{ dueText(m.dueOn) }}</span>
             <span class="hint" data-testid="counts">{{ m.open }} open / {{ m.closed }} closed</span>
-            <progress
-              max="100"
+            <hx-progress-bar
               [value]="percent(m)"
-              [attr.aria-label]="'Progress of ' + m.title"
-            ></progress>
+              [showValue]="false"
+              [ariaLabel]="'Progress of ' + m.title"
+            />
             <span class="hint pct">{{ percent(m) }}%</span>
           </button>
           <button

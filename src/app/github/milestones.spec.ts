@@ -143,7 +143,10 @@ describe("MilestonesSection", () => {
     expect(items(el)[1].querySelector("[data-testid=current]")).toBeNull();
     expect(first.textContent).toContain("Due 2026-11-20");
     expect(first.querySelector("[data-testid=counts]")!.textContent).toContain("1 open / 3 closed");
-    expect(first.querySelector("progress")!.value).toBe(75);
+    const bar = first.querySelector("hx-progress-bar")!;
+    expect(bar.getAttribute("aria-valuenow")).toBe("75");
+    expect(bar.getAttribute("aria-label")).toMatch(/^Progress of /);
+    expect(bar.textContent?.trim()).toBe("");
     expect(first.classList.contains("current")).toBe(true);
     expect(first.querySelector("[data-testid=ready]")).toBeNull();
     // 1.2.0 has open issues; Backlog has none open and some closed: dimmed with the hint.
