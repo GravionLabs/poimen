@@ -34,6 +34,7 @@ pub mod config;
 pub mod grid;
 pub mod input;
 pub mod palette;
+mod palette_input;
 mod record;
 mod reload;
 pub mod screen;
@@ -663,25 +664,8 @@ fn on_input<B: Backend>(
     terminal: &Terminal<B>,
     ev: &InputEvent,
 ) -> Result<Option<Outcome>, Error> {
-    // The palette takes every key while it is open.
     if app.command_palette.is_some() {
-        match ev {
-            InputEvent::Key(key) => {
-                let out = app.command_palette.as_mut().and_then(|p| p.key(key));
-                match out {
-                    Some(palette::Out::Close) => app.command_palette = None,
-                    Some(palette::Out::Run(command)) => run_command(app, client, tx, command),
-                    None => {}
-                }
-            }
-            InputEvent::Paste(text) => {
-                if let Some(p) = app.command_palette.as_mut() {
-                    p.paste(text);
-                }
-            }
-            _ => {}
-        }
-        return Ok(None);
+        return Ok(palette_input::on_input(app, router, client, tx, ev));
     }
     if app.list.is_some() {
         return Ok(on_list_input(app, client, tx, ev));

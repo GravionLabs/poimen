@@ -28,6 +28,10 @@ A test that needs a directory under `temp_dir()` creates it with `tempfile::Temp
 
 A directory made by hand (`temp_dir().join(..)` and `create_dir_all`) and never removed stays on every run. On Linux `/tmp` is often a tmpfs with a fixed number of inodes: it ran out at about a million leftover files and the desktop stopped (icons gone, apps frozen). The `test-temp-dirs` ratchet (`pnpm ratchets`, no baseline) fails for a Rust test file that creates files under `temp_dir()` and has no `TempDir`, `TestDir`, `tempdir(` or `remove_dir_all`.
 
+## TUI tests
+
+A TUI test joins the TUI thread with `join_within` (`src-tauri/crates/poimen-console/tests/common/mod.rs`), never `handle.join()` alone in a detach helper: a TUI that does not end fails with its screen text instead of hanging CI.
+
 ## Review checklist
 
 Ask these of every diff, in this order. A "no" on the first one is blocking.
