@@ -38,24 +38,19 @@
         (keydown)="move($event, 'field')"
     /></hx-field>
     @if (query().trim()) {
-      <ul class="options" [attr.aria-label]="label + ' options'">
+      <hx-list class="options" [attr.aria-label]="label + ' options'">
         @for (o of matches(); track o) {
-          <li>
-            <button
-              type="button"
-              hx-button
-              variant="text"
-              severity="secondary"
-              size="small"
-              data-testid="chip-option"
-              (click)="pick(o)"
-              (keydown)="move($event, $any($event.currentTarget))"
-            >
-              {{ o }}
-            </button>
-          </li>
+          <button
+            hx-list-row
+            type="button"
+            data-testid="chip-option"
+            (click)="pick(o)"
+            (keydown)="move($event, $any($event.currentTarget))"
+          >
+            <span class="hx-list-row-label">{{ o }}</span>
+          </button>
         }
-      </ul>
+      </hx-list>
     }
   }
 </div>

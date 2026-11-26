@@ -12,6 +12,12 @@
   --h-warn-color: #b45309;
   --h-error-color: #b91c1c;
   /*
+   * helix-ui colors a selected list row from the accent ramp, which misses AA on light schemes: the
+   * label reads the text color instead (list-row-contrast.spec.ts).
+   */
+  --h-list-row-selected-color: var(--h-text-color);
+  --h-list-row-selected-hover-color: var(--h-text-color);
+  /*
    * helix-ui's secondary and danger buttons miss AA on the derived chrome, so the ones the app uses
    * read the text color (secondary) or a deep red (danger). button-contrast.spec.ts checks every
    * state in every bundled scheme.

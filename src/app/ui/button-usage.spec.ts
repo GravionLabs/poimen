@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Buttons are `button[hx-button]` (AGENTS.md "Buttons, tags and fields"). A new plain `<button>` fails
- * here. Not counted: the files whose buttons are rows or tabs, not actions (tab bar, context menu, palette
+ * here (a `button[hx-list-row]` is a row, not an action). Not counted: the files whose buttons are rows or tabs, not actions (tab bar, context menu, palette
  * items). `LEGACY` is the number of plain buttons each other file still has; it only goes down. When you
  * convert buttons, lower the number (delete the line at 0).
  */
@@ -16,7 +16,7 @@ const ROW_FILES = [
 ];
 
 const LEGACY: Record<string, number> = {
-  "src/app/agent-picker/agent-picker.html": 3,
+  "src/app/agent-picker/agent-picker.html": 1,
   "src/app/explorer/explorer.html": 1,
   "src/app/notifications/notifications.html": 1,
   "src/app/terminal-view/terminal-view.html": 5,
@@ -35,7 +35,8 @@ function sources(dir: string): string[] {
 }
 
 const plain = (text: string): number =>
-  (text.match(/<button\b[^>]*>/g) ?? []).filter((tag) => !/\bhx-button\b/.test(tag)).length;
+  (text.match(/<button\b[^>]*>/g) ?? []).filter((tag) => !/\bhx-(button|list-row)\b/.test(tag))
+    .length;
 
 describe("buttons", () => {
   const counts = new Map(

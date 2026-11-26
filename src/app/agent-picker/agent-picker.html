@@ -14,15 +14,24 @@
     (keydown.escape)="state.answer(null)"
   >
     <h2>Send to which agent?</h2>
-    <ul>
+    <hx-list aria-label="Agents">
       @for (c of choices; track c.paneId) {
-        <li>
-          <button type="button" (click)="state.answer(c.paneId)">{{ c.label }}</button>
-        </li>
+        <button hx-list-row type="button" (click)="state.answer(c.paneId)">
+          <span class="hx-list-row-label">{{ c.label }}</span>
+        </button>
       }
-    </ul>
+    </hx-list>
     <div class="buttons">
-      <button type="button" (click)="state.answer(null)">Cancel</button>
+      <button
+        hx-button
+        type="button"
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        (click)="state.answer(null)"
+      >
+        Cancel
+      </button>
     </div>
   </div>
 }

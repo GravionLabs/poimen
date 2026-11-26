@@ -50,24 +50,22 @@
         </button>
       }
     </div>
-    <ul id="palette-list" role="listbox">
+    <hx-list id="palette-list" class="rows" role="listbox" aria-label="Commands">
       @for (row of palette.rows(); track row.key) {
         @if (row.type === "heading") {
-          <li class="heading" role="presentation">{{ row.label }}</li>
+          <div class="heading" role="presentation">{{ row.label }}</div>
         } @else {
-          <li
-            role="option"
-            [class.selected]="row.index === palette.selected()"
-            [attr.aria-selected]="row.index === palette.selected()"
-          >
+          <div class="item" role="presentation">
             <button
+              hx-list-row
               type="button"
               class="row"
               tabindex="-1"
+              [selected]="row.index === palette.selected()"
               (click)="run(row.item)"
               (mousemove)="palette.hover(row.index)"
             >
-              <span class="title">
+              <span class="hx-list-row-label title">
                 @for (part of parts(row.item.title, row.positions); track $index) {
                   @if (part.hit) {
                     <mark>{{ part.text }}</mark>
@@ -77,7 +75,7 @@
                 }
               </span>
               @if (row.item.description) {
-                <span class="description">{{ row.item.description }}</span>
+                <span class="hx-list-row-meta description">{{ row.item.description }}</span>
               }
               @if (palette.tab() === "all" && palette.query().trim() !== "") {
                 <hx-tag class="source">{{ palette.sourceLabel(row.item) }}</hx-tag>
@@ -89,7 +87,7 @@
                 </svg>
               }
               @if (row.item.shortcut) {
-                <kbd class="shortcut">{{ row.item.shortcut }}</kbd>
+                <kbd class="hx-list-row-meta shortcut">{{ row.item.shortcut }}</kbd>
               }
             </button>
             @if (row.item.detected) {
@@ -107,12 +105,12 @@
                 Hide
               </button>
             }
-          </li>
+          </div>
         }
       } @empty {
-        <li class="empty" role="presentation">No matching command</li>
+        <div class="empty" role="presentation">No matching command</div>
       }
-    </ul>
+    </hx-list>
     <p class="footer">↑↓ navigate · ↵ run · Esc close</p>
   </div>
 }
