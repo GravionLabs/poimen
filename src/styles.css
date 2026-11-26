@@ -6,7 +6,7 @@
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
   --app-ground: var(--h-surface-50);
-  /* One height for buttons, inputs and selects in a row (AGENTS.md "Buttons, tags and fields"). */
+  /* One height for buttons, inputs and selects in a row (docs/STYLEGUIDE.md). */
   --control-height: 28px;
   /* The status bar tones of helix-desktop 22.6; 22.9 falls back to its muted palette (#1360). */
   --h-warn-color: #b45309;
