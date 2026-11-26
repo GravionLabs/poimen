@@ -82,7 +82,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       flex-direction: column;
       min-height: 0;
       min-width: 0;
-      font-size: 12px;
+      font-size: var(--h-font-size-xs);
       background: var(--h-content-background);
       color: var(--h-text-color);
     }
@@ -90,8 +90,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
-      padding: 8px 12px;
+      gap: var(--h-space-3);
+      padding: var(--h-space-2) var(--h-space-3);
       border-bottom: 1px solid var(--h-content-border-color);
     }
     .label,
@@ -112,7 +112,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .totals {
       display: inline-flex;
-      gap: 6px;
+      gap: calc(var(--h-space-1) * 1.5);
     }
     .body {
       flex: 1;
@@ -130,8 +130,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .section-head {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 2px 4px;
+      gap: calc(var(--h-space-1) * 1.5);
+      padding: calc(var(--h-space-1) * 0.5) var(--h-space-1);
       position: sticky;
       top: 0;
       background: var(--h-content-background);
@@ -143,8 +143,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .file {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 3px 8px;
+      gap: calc(var(--h-space-1) * 1.5);
+      padding: calc(var(--h-space-1) * 0.75) var(--h-space-2);
       cursor: pointer;
     }
     .file.selected {
@@ -157,7 +157,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .actions {
       display: none;
-      gap: 2px;
+      gap: calc(var(--h-space-1) * 0.5);
     }
     .file:hover .actions,
     .file:focus-within .actions,
@@ -171,8 +171,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .discard-list {
       max-height: 160px;
       overflow: auto;
-      margin: 0 0 8px;
-      padding-left: 18px;
+      margin: 0 0 var(--h-space-2);
+      padding-left: calc(var(--h-space-1) * 4.5);
       font-family: var(--font-mono);
     }
     .status {
@@ -198,7 +198,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       flex: 1;
       min-width: 0;
       display: flex;
-      gap: 6px;
+      gap: calc(var(--h-space-1) * 1.5);
       white-space: nowrap;
     }
     .name {
@@ -216,7 +216,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .stat {
       display: inline-flex;
-      gap: 4px;
+      gap: var(--h-space-1);
       font-family: var(--font-mono);
       color: var(--h-text-muted-color);
     }
@@ -233,8 +233,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .git {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
+      gap: var(--h-space-2);
+      padding: calc(var(--h-space-1) * 1.5) var(--h-space-3);
       border-bottom: 1px solid var(--h-content-border-color);
     }
     .git hx-field {
@@ -246,7 +246,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .result {
       margin: 0;
-      padding: 4px 12px;
+      padding: var(--h-space-1) var(--h-space-3);
       max-height: 120px;
       overflow: auto;
       white-space: pre-wrap;
@@ -258,7 +258,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .findings-note {
       margin: 0;
-      padding: 4px 12px;
+      padding: var(--h-space-1) var(--h-space-3);
       color: var(--term-ansi-3);
       border-bottom: 1px solid var(--h-content-border-color);
     }
@@ -269,7 +269,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: var(--h-space-2);
     }
     .note,
     .empty,

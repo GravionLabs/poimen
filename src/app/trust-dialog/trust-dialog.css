@@ -1,6 +1,6 @@
 .commands {
   max-height: 40vh;
-  margin: 10px 0 0;
+  margin: calc(var(--h-space-1) * 2.5) 0 0;
   padding: 0;
   overflow: auto;
   list-style: none;
@@ -9,14 +9,14 @@
 .commands li {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
+  gap: calc(var(--h-space-1) * 0.5);
+  padding: var(--h-space-1) 0;
   border-top: 1px solid var(--h-content-border-color);
 }
 
 .what {
   opacity: 0.7;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 
 code {

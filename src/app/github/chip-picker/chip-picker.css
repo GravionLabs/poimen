@@ -3,7 +3,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: calc(var(--h-space-1) * 1.6);
   position: relative;
 }
 .name {
@@ -19,20 +19,19 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding-right: 2px;
+  gap: var(--h-space-1);
+  padding-right: calc(var(--h-space-1) * 0.5);
+  /* The remove button is as high as the chip's line. */
+  --control-height: 18px;
+  --h-button-sm-padding-x: var(--h-space-1);
 }
-.chip button {
-  min-height: 18px;
-  width: 18px;
-  padding: 0;
-}
+
 .none {
   opacity: 0.6;
 }
 .options {
   flex-basis: 100%;
 }
-input {
+hx-field {
   min-width: 8rem;
 }

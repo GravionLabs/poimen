@@ -42,9 +42,9 @@ describe("icon buttons and badge buttons have states", () => {
   });
 
   it("the run badge has pointer, hover and focus styles and inherits the font", () => {
-    expect(css).toMatch(/button\.badge \{[^}]*font: inherit;[^}]*cursor: pointer;/);
-    expect(css).toContain("button.badge:hover");
-    expect(css).toContain("button.badge:focus-visible");
+    expect(css).toMatch(/\.badge\.hx-button \{[^}]*font: inherit;[^}]*cursor: pointer;/);
+    expect(css).toContain(".badge.hx-button:hover");
+    expect(css).toContain(".badge.hx-button:focus-visible");
   });
 });
 

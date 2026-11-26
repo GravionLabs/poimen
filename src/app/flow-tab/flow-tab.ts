@@ -31,7 +31,7 @@ import { Subagents } from "../core/transcripts";
       display: flex;
       flex-direction: column;
       min-height: 0;
-      font-size: 12px;
+      font-size: var(--h-font-size-xs);
       background: var(--h-content-background);
     }
 

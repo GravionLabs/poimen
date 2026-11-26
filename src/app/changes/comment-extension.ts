@@ -271,15 +271,15 @@ export function commentExtension(handlers: CommentHandlers): Extension {
       ".cm-finding-title": { fontWeight: "600" },
       ".cm-finding-send:disabled": { opacity: "0.6", cursor: "default" },
       ".cm-comment-box": {
-        margin: "4px 8px 4px 48px",
-        padding: "6px 8px",
+        margin: "var(--h-space-1) var(--h-space-2) var(--h-space-1) calc(var(--h-space-1) * 12)",
+        padding: "calc(var(--h-space-1) * 1.5) var(--h-space-2)",
         border: "1px solid var(--term-ansi-4)",
         borderRadius: "4px",
         backgroundColor: "var(--term-bg)",
         color: "var(--term-fg)",
         fontFamily: "inherit",
       },
-      ".cm-comment-range": { color: "var(--term-ansi-8)", fontSize: "11px" },
+      ".cm-comment-range": { color: "var(--term-ansi-8)", fontSize: "var(--h-font-size-xs)" },
       ".cm-comment-text": { whiteSpace: "pre-wrap" },
       ".cm-comment-input": {
         display: "block",
@@ -291,7 +291,11 @@ export function commentExtension(handlers: CommentHandlers): Extension {
         border: "1px solid var(--term-ansi-8)",
         resize: "vertical",
       },
-      ".cm-comment-actions": { display: "flex", gap: "6px", marginTop: "6px" },
+      ".cm-comment-actions": {
+        display: "flex",
+        gap: "calc(var(--h-space-1) * 1.5)",
+        marginTop: "calc(var(--h-space-1) * 1.5)",
+      },
       ".cm-comment-actions button": {
         font: "inherit",
         color: "inherit",
@@ -299,7 +303,7 @@ export function commentExtension(handlers: CommentHandlers): Extension {
         border: "1px solid var(--h-content-border-color, var(--term-ansi-8))",
         borderRadius: "var(--h-border-radius-sm)",
         minHeight: "var(--control-height)",
-        padding: "0 10px",
+        padding: "0 calc(var(--h-space-1) * 2.5)",
         cursor: "pointer",
       },
       ".cm-comment-actions button:focus-visible": {

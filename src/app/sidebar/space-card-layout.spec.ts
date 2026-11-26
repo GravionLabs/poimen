@@ -55,7 +55,7 @@ describe("space card layout styles (#1085)", () => {
     expect(card).toMatch(/background:\s*color-mix/);
     expect(card).toMatch(/border:\s*1px solid color-mix/);
     expect(card).toMatch(/box-shadow:/);
-    expect(/\.cards \{[^}]*gap:\s*(\d+)px/.exec(sidebar)?.[1]).toBe("8");
+    expect(sidebar).toMatch(/\.cards \{[^}]*gap:\s*var\(--h-space-2\)/);
   });
 
   it("ringing is a bar at the left edge, not a frame around the card", () => {
@@ -91,7 +91,7 @@ describe("space card layout styles (#1085)", () => {
 
   it("sets the filter text as small as the rows", () => {
     const filter = /^\.filter \{([^}]*)\}/m.exec(sidebar)?.[1] ?? "";
-    expect(filter).toMatch(/font-size:\s*12px/);
+    expect(filter).toMatch(/font-size:\s*var\(--h-font-size-xs\)/);
     expect(filter).toMatch(/height:\s*var\(--control-height\)/);
   });
 
@@ -102,7 +102,9 @@ describe("space card layout styles (#1085)", () => {
   });
 
   it("keeps room between the origin icon and the status dot", () => {
-    expect(block(".origin-mark")).toMatch(/margin:\s*0 6px 0 4px/);
+    expect(block(".origin-mark")).toMatch(
+      /margin:\s*0 calc\(var\(--h-space-1\) \* 1\.5\) 0 var\(--h-space-1\)/,
+    );
   });
 
   it("has the origin icon first and the fold chevron last in the header", () => {

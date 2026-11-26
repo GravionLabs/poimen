@@ -3,12 +3,12 @@
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
 }
 dl.facts {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
+  gap: var(--h-space-1) var(--h-space-3);
   margin: 0;
 }
 dl.facts dt {
@@ -20,21 +20,21 @@ dl.facts dd {
 .people {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: var(--h-space-2);
+  margin-bottom: calc(var(--h-space-1) * 2.5);
 }
 .title-edit {
   display: flex;
   flex: 1;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
 }
 .title-edit hx-field {
   flex: 1;
   min-width: 0;
 }
-.body-edit textarea {
+.markdown-source {
   font-family: monospace;
 }
 .body-edit .tabs {
-  margin-bottom: 6px;
+  margin-bottom: calc(var(--h-space-1) * 1.5);
 }

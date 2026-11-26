@@ -1,25 +1,25 @@
 /* The toolbar is 26px high and has the colors of the window chrome, so these buttons are lower than
    --control-height and inherit the text color. */
-button.item.hx-button {
-  gap: 5px;
+.item.hx-button {
+  gap: calc(var(--h-space-1) * 1.25);
   min-height: 0;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 calc(var(--h-space-1) * 1.25);
   border: 0;
   border-radius: 3px;
   font: inherit;
   color: inherit;
 }
 
-button.item.hx-button:disabled {
+.item.hx-button:disabled {
   opacity: 0.5;
 }
 
-button.item.hx-button:hover:not(:disabled) {
+.item.hx-button:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
-button.item.hx-button:focus-visible {
+.item.hx-button:focus-visible {
   outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }

@@ -3,13 +3,13 @@
 }
 
 .output {
-  margin: 10px 0 0;
-  padding: 8px;
+  margin: calc(var(--h-space-1) * 2.5) 0 0;
+  padding: var(--h-space-2);
   max-height: 40vh;
   overflow: auto;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   white-space: pre-wrap;
   word-break: break-all;
 }

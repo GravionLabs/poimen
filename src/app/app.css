@@ -22,18 +22,6 @@
   overflow: hidden;
 }
 
-.mode-switch {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--h-text-muted-color);
-}
-
-.mode-switch input {
-  font-size: 11px;
-}
-
 .empty {
   margin: auto;
   max-width: 360px;
@@ -42,7 +30,7 @@
 }
 
 .empty .hint {
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
 }
 
 /* The view of the sidebar slot; the shell frames and sizes the slot. */

@@ -1,5 +1,5 @@
 /* Snippets page: the text area of the edit form and the one-line text of a row. */
-.snippet-form textarea {
+.snippet-text {
   min-height: 5rem;
   font-family: monospace;
   resize: vertical;
@@ -7,7 +7,7 @@
 
 .snippet-form .field + .field,
 .snippet-form .check {
-  margin-top: 8px;
+  margin-top: var(--h-space-2);
 }
 
 .snippet-text {
@@ -17,6 +17,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   color: var(--h-text-muted-color);
 }

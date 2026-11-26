@@ -5,9 +5,9 @@
 .sessions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(var(--h-space-1) * 0.5);
   max-height: 50vh;
-  margin: 0 0 12px;
+  margin: 0 0 var(--h-space-3);
   padding: 0;
   overflow-y: auto;
   list-style: none;
@@ -17,11 +17,11 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: calc(var(--h-space-1) * 0.5);
   width: 100%;
   height: auto;
   min-height: var(--control-height);
-  padding-block: 4px;
+  padding-block: var(--h-space-1);
   text-align: left;
 }
 
@@ -34,5 +34,5 @@
 
 .meta {
   color: var(--h-text-muted-color);
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
 }

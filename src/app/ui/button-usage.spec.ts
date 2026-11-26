@@ -9,18 +9,14 @@ import { describe, expect, it } from "vitest";
  * convert one, lower it (delete the entry at 0).
  */
 const ALLOWED: Record<string, { count: number; reason: string }> = {
-  "src/app/agent-picker/agent-picker.html": {
-    count: 1,
-    reason: "the backdrop: a full-window dismiss surface, not a visible action",
-  },
   "src/app/changes/comment-extension.ts": {
     count: 3,
     reason:
       "built with createElement inside CodeMirror widgets, where the hx-button directive cannot run",
   },
   "src/app/command-palette/command-palette.html": {
-    count: 2,
-    reason: "the backdrop (a dismiss surface) and the source tabs (`role=tab`, not actions)",
+    count: 1,
+    reason: "the backdrop: a full-window dismiss surface, not a visible action",
   },
   "src/app/jump-palette/jump-palette.html": {
     count: 1,

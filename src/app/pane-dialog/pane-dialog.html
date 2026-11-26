@@ -5,7 +5,7 @@
         <fieldset class="types">
           <legend class="sr-only">Type</legend>
           <label class="type" (dblclick)="submit($event)">
-            <input type="radio" name="type" value="terminal" checked />
+            <input class="sr-only" type="radio" name="type" value="terminal" checked />
             <app-icon name="terminal" />
             <span class="text">
               <span class="name">Terminal</span>
@@ -14,7 +14,7 @@
           </label>
           @for (agent of agents(); track agent.id) {
             <label class="type" (dblclick)="submit($event)">
-              <input type="radio" name="type" [value]="agent.id" />
+              <input class="sr-only" type="radio" name="type" [value]="agent.id" />
               <app-icon name="agent" />
               <span class="text">
                 <span class="name">{{ agent.id }}</span>

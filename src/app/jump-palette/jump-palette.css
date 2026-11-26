@@ -21,8 +21,8 @@
   border-radius: 6px;
   background: var(--h-content-background);
   color: var(--h-text-color);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
-  font-size: 12px;
+  box-shadow: var(--h-overlay-popover-shadow);
+  font-size: var(--h-font-size-xs);
   overflow: hidden;
 }
 
@@ -30,9 +30,9 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--h-space-1) * 1.5);
   height: 28px;
-  padding: 0 8px;
+  padding: 0 var(--h-space-2);
   border-bottom: 1px solid var(--h-content-border-color);
 }
 
@@ -71,9 +71,9 @@
   --h-list-row-gap: 8px;
   --h-list-row-padding-x: 10px;
   --h-list-row-padding-y: 0;
-  --h-list-row-font-size: 12px;
-  --h-list-row-meta-font-size: 11px;
-  padding: 2px 0;
+  --h-list-row-font-size: var(--h-font-size-xs);
+  --h-list-row-meta-font-size: var(--h-font-size-xs);
+  padding: calc(var(--h-space-1) * 0.5) 0;
   /* 10 rows of 24px (a row with a context line is taller); in the grouped view (no query) the group headings take space from those 10 rows */
   max-height: 240px;
   overflow-y: auto;
@@ -100,10 +100,10 @@
 .context {
   flex: 0 0 100%;
   box-sizing: border-box;
-  padding: 0 0 3px 24px;
+  padding: 0 0 calc(var(--h-space-1) * 0.75) var(--h-space-6);
   overflow: hidden;
   color: var(--h-text-muted-color);
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
   text-overflow: ellipsis;
   white-space: pre;
 }
@@ -112,7 +112,7 @@
   position: absolute;
   width: 1px;
   height: 1px;
-  margin: -1px;
+  margin: calc(var(--h-space-1) * -0.25);
   padding: 0;
   overflow: hidden;
   clip-path: inset(50%);
@@ -120,9 +120,9 @@
 }
 
 .heading {
-  padding: 6px 10px 2px;
+  padding: calc(var(--h-space-1) * 1.5) calc(var(--h-space-1) * 2.5) calc(var(--h-space-1) * 0.5);
   color: var(--h-text-muted-color);
-  font-size: 10px;
+  font-size: var(--h-font-size-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -130,7 +130,7 @@
 }
 
 .empty {
-  padding: 4px 10px;
+  padding: var(--h-space-1) calc(var(--h-space-1) * 2.5);
   color: var(--h-text-muted-color);
   cursor: default;
 }
@@ -154,10 +154,10 @@ mark {
 .footer {
   flex: none;
   margin: 0;
-  padding: 3px 10px;
+  padding: calc(var(--h-space-1) * 0.75) calc(var(--h-space-1) * 2.5);
   border-top: 1px solid var(--h-content-border-color);
   color: var(--h-text-muted-color);
-  font-size: 11px;
+  font-size: var(--h-font-size-xs);
 }
 
 .detail {

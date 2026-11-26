@@ -4,7 +4,7 @@
 .compose {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--h-space-2);
   align-items: center;
 }
 .compose hx-field {
@@ -13,7 +13,7 @@
 .people {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: calc(var(--h-space-1) * 1.6);
 }
 .list li:has(.check-log, .check-log-note) {
   flex-wrap: wrap;
@@ -26,9 +26,9 @@
 .check-log {
   max-height: 20rem;
   overflow: auto;
-  padding: 0.5rem;
+  padding: var(--h-space-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--h-font-size-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   border: 1px solid var(--h-content-border-color);

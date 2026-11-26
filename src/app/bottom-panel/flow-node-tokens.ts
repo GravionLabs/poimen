@@ -8,8 +8,8 @@ import { flowContextLine, flowTokenLine, type FlowNode } from "../core/flow-grap
   styles: `
     .meta {
       display: flex;
-      gap: 8px;
-      font-size: 11px;
+      gap: var(--h-space-2);
+      font-size: var(--h-font-size-xs);
       color: var(--h-text-muted-color);
       white-space: nowrap;
       overflow: hidden;
