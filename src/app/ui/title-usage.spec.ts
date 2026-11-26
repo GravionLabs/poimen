@@ -14,7 +14,7 @@ const LEGACY: Record<string, number> = {
   "src/app/changes/changes-view.html": 7,
   "src/app/changes/comments-panel.html": 1,
   "src/app/deliver/deliver-view.html": 3,
-  "src/app/explorer/explorer.html": 2,
+  "src/app/explorer/explorer.html": 1,
   "src/app/github/chip-picker/chip-picker.html": 1,
   "src/app/github/github-view.html": 6,
   "src/app/github/inbox-section.html": 1,

@@ -67,7 +67,7 @@ Look at a presentational component without Tauri: `pnpm fixtures:list` prints th
 
 ## Buttons: colors and usage (#844, moved from AGENTS.md)
 
-Colors come from the tokens only. `src/styles.css` maps helix's button tokens onto the derived chrome (`--app-action*`, `--app-danger-text` from `deriveTokens`); `src/app/ui/button-contrast.spec.ts` checks every variant and state in every bundled scheme. `src/app/ui/button-usage.spec.ts` fails on a new `<button>` without `hx-button`; the tab bar, the context menu and palette items are allow-listed, an `hx-list-row` button is a row and not counted, other files have a legacy count that only goes down (lower it when you convert). Reference surfaces: settings Appearance and the hooks dialog.
+Colors come from the tokens only. `src/styles.css` maps helix's button tokens onto the derived chrome (`--app-action*`, `--app-danger-text` from `deriveTokens`); `src/app/ui/button-contrast.spec.ts` checks every variant and state in every bundled scheme. `src/app/ui/button-usage.spec.ts` fails on a new `<button>` without `hx-button`; an `hx-list-row` button is a row and not counted; every other plain button (also one built with `createElement`) is in its `ALLOWED` list with the count per file and the reason (backdrops, tabs, menu items, the notification row, the tab strip, CodeMirror widgets), and the count only goes down. Buttons on special surfaces (toolbar, terminal search bar, explorer tree row) are `hx-button` with the surface's colors and height set in the component CSS. A progress bar is `hx-progress-bar` with `[showValue]="false"` and an `[ariaLabel]`; its height is `--h-progressbar-height`. Reference surfaces: settings Appearance and the hooks dialog.
 
 ## Forms, rows and text sizes (#1360, helix-ui 22.9)
 

@@ -4,6 +4,7 @@ import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { HxAppToolbar } from "@gravionlabs/helix-desktop";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { beforeAll, describe, expect, it } from "vitest";
 import { nextTheme, type ThemeSetting } from "../core/settings";
 import { fixedLabel, themeLabel } from "./toolbar";
@@ -29,7 +30,7 @@ describe("theme button", () => {
     const emitted: ThemeSetting[] = [];
     @Component({
       selector: "app-host",
-      imports: [HxAppToolbar],
+      imports: [HxAppToolbar, HxButton],
       template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
     })
     class Host {
@@ -80,7 +81,7 @@ describe("output button", () => {
     let toggled = 0;
     @Component({
       selector: "app-host",
-      imports: [HxAppToolbar],
+      imports: [HxAppToolbar, HxButton],
       template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
     })
     class Host {

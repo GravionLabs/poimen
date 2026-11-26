@@ -3,28 +3,50 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Buttons are `button[hx-button]` (AGENTS.md "Buttons, tags and fields"). A new plain `<button>` fails
- * here (a `button[hx-list-row]` is a row, not an action). Not counted: the files whose buttons are rows or tabs, not actions (tab bar, context menu, palette
- * items). `LEGACY` is the number of plain buttons each other file still has; it only goes down. When you
- * convert buttons, lower the number (delete the line at 0).
+ * Buttons are `button[hx-button]` (AGENTS.md "Buttons, tags and fields"); a `button[hx-list-row]` is a
+ * row, not an action. Any other `<button>` (in a template or built with `createElement`) fails here
+ * unless `ALLOWED` has it, with the number per file and the reason. The numbers only go down: when you
+ * convert one, lower it (delete the entry at 0).
  */
-const ROW_FILES = [
-  "src/app/ui/helix-candidates/tab-bar/tab-bar.html",
-  "src/app/ui/context-menu/context-menu.html",
-  "src/app/command-palette/command-palette.html",
-  "src/app/jump-palette/jump-palette.html",
-];
-
-const LEGACY: Record<string, number> = {
-  "src/app/agent-picker/agent-picker.html": 1,
-  "src/app/explorer/explorer.html": 1,
-  "src/app/notifications/notifications.html": 1,
-  "src/app/terminal-view/terminal-view.html": 5,
-  "src/app/toolbar/toolbar.html": 2,
+const ALLOWED: Record<string, { count: number; reason: string }> = {
+  "src/app/agent-picker/agent-picker.html": {
+    count: 1,
+    reason: "the backdrop: a full-window dismiss surface, not a visible action",
+  },
+  "src/app/changes/comment-extension.ts": {
+    count: 3,
+    reason:
+      "built with createElement inside CodeMirror widgets, where the hx-button directive cannot run",
+  },
+  "src/app/command-palette/command-palette.html": {
+    count: 2,
+    reason: "the backdrop (a dismiss surface) and the source tabs (`role=tab`, not actions)",
+  },
+  "src/app/jump-palette/jump-palette.html": {
+    count: 1,
+    reason: "the backdrop: a full-window dismiss surface, not a visible action",
+  },
+  "src/app/notifications/notifications.html": {
+    count: 1,
+    reason:
+      "a notification entry is a multi-line row (status dot, message, label, time), not an action; " +
+      "hx-button would center it and impose the button look",
+  },
+  "src/app/ui/context-menu/context-menu.html": {
+    count: 2,
+    reason: "the backdrop and the menu items (`role=menuitem`), which the menu styles itself",
+  },
+  "src/app/ui/dialog-shell/dialog-contract.ts": {
+    count: 1,
+    reason: "test helper: the plain opener button of the dialog contract, not part of the app",
+  },
+  "src/app/ui/helix-candidates/tab-bar/tab-bar.html": {
+    count: 4,
+    reason:
+      "tab strip chrome (scroll, close, all tabs) with the tab bar's own styles, to move to Helix " +
+      "with the component",
+  },
 };
-
-/** Reference surfaces (#844): only buttons that are not actions stay plain. */
-const REFERENCE_MAX: Record<string, number> = {};
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -36,12 +58,11 @@ function sources(dir: string): string[] {
 
 const plain = (text: string): number =>
   (text.match(/<button\b[^>]*>/g) ?? []).filter((tag) => !/\bhx-(button|list-row)\b/.test(tag))
-    .length;
+    .length + (text.match(/createElement\(["']button["']\)/g) ?? []).length;
 
 describe("buttons", () => {
   const counts = new Map(
     sources("src/app")
-      .filter((file) => !ROW_FILES.includes(file))
       .map((file) => [file, plain(readFileSync(file, "utf8"))] as const)
       .filter(([, n]) => n > 0),
   );
@@ -50,21 +71,13 @@ describe("buttons", () => {
     expect(
       n,
       `${file}: use <button hx-button> (AGENTS.md "Buttons, tags and fields")`,
-    ).toBeLessThanOrEqual(LEGACY[file] ?? 0);
+    ).toBeLessThanOrEqual(ALLOWED[file]?.count ?? 0);
   });
 
-  it("lists no file that is clean now", () => {
-    const stale = Object.keys(LEGACY).filter((file) => !counts.has(file));
-    expect(stale).toEqual([]);
-  });
-
-  it("keeps the reference surfaces converted", () => {
-    for (const [file, max] of Object.entries(REFERENCE_MAX)) {
-      expect(counts.get(file) ?? 0).toBeLessThanOrEqual(max);
-    }
-  });
-
-  it("keeps the row files in the allow list", () => {
-    for (const file of ROW_FILES) expect(statSync(file).isFile()).toBe(true);
+  it("has an exact allowlist entry with a reason for every plain button", () => {
+    expect(Object.fromEntries(counts)).toEqual(
+      Object.fromEntries(Object.entries(ALLOWED).map(([file, { count }]) => [file, count])),
+    );
+    for (const { reason } of Object.values(ALLOWED)) expect(reason).not.toBe("");
   });
 });

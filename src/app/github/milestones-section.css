@@ -71,7 +71,7 @@ h3 {
   .pick > :nth-child(4) {
     display: none;
   }
-  .pick progress {
+  .pick hx-progress-bar {
     grid-column: 1 / -1;
     grid-row: 2;
   }
@@ -87,10 +87,9 @@ h3 {
 .pick[aria-pressed="true"] {
   background: var(--h-content-hover-background);
 }
-progress {
+hx-progress-bar {
+  --h-progressbar-height: 8px;
   width: 100%;
-  height: 8px;
-  accent-color: var(--h-primary-color);
 }
 .pct {
   text-align: right;

@@ -77,10 +77,9 @@ button.badge:focus-visible {
 .check > [aria-hidden] {
   color: color-mix(in srgb, var(--check-tone) 50%, var(--h-text-color));
 }
-progress {
+hx-progress-bar {
+  --h-progressbar-height: 6px;
   width: 64px;
-  height: 6px;
-  accent-color: var(--h-primary-color);
 }
 /* Icon buttons are always visible (muted); only inside list rows they wait for hover, focus or the cursor. */
 .icon-btn {

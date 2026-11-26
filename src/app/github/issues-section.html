@@ -236,11 +236,11 @@
             @if (progress(row.node.level, i); as p) {
               <span class="progress" data-testid="progress" [title]="p.percent + '% done'">
                 <span class="hint">{{ p.done }}/{{ p.total }}</span>
-                <progress
-                  max="100"
+                <hx-progress-bar
                   [value]="p.percent"
-                  [attr.aria-label]="'Sub-issues of #' + i.number"
-                ></progress>
+                  [showValue]="false"
+                  [ariaLabel]="'Sub-issues of #' + i.number"
+                />
               </span>
             }
             @for (pr of i.prs; track pr.number) {

@@ -310,7 +310,7 @@ describe("IssuesSection", () => {
     ).toEqual(["3 passed", "1 failed"]);
     const bar = items(el)[0].querySelector("[data-testid=progress]")!;
     expect(bar.textContent).toContain("1/4");
-    expect(bar.querySelector("progress")!.value).toBe(25);
+    expect(bar.querySelector("hx-progress-bar")!.getAttribute("aria-valuenow")).toBe("25");
     expect(el.querySelector("[data-testid=issue-error]")!.textContent).toContain("o/m");
   });
 

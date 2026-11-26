@@ -65,23 +65,22 @@ app-prompt-bar[hidden] {
   box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
 }
 
-.search-bar button {
+/* The bar sits on the terminal, so its buttons take the terminal colors, not the app tokens. */
+.search-bar button.hx-button {
   min-width: 22px;
-  padding: 1px 4px;
+  padding-inline: 4px;
   font: inherit;
   color: inherit;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  cursor: pointer;
+  border-color: transparent;
 }
 
-.search-bar button:hover,
-.search-bar button:focus-visible {
+.search-bar button.hx-button:hover,
+.search-bar button.hx-button:focus-visible {
   border-color: var(--term-ansi-8, currentColor);
 }
 
-.search-bar button[aria-pressed="true"] {
+.search-bar button.hx-button[aria-pressed="true"] {
   background: var(--term-selection-bg);
   border-color: var(--term-ansi-8, currentColor);
 }

@@ -14,7 +14,15 @@ import {
 } from "./issues";
 import { IssueFormPane } from "./issue-form/issue-form";
 import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
-import { HxButton, HxField, HxSelect, HxCheckbox, HxInput, HxMessage } from "@gravionlabs/helix-ui";
+import {
+  HxButton,
+  HxField,
+  HxSelect,
+  HxCheckbox,
+  HxInput,
+  HxMessage,
+  HxProgressBar,
+} from "@gravionlabs/helix-ui";
 import { LoadingRows } from "../ui/loading/loading-rows";
 import { selectOptions } from "../ui/select/select-options";
 
@@ -31,6 +39,7 @@ import { selectOptions } from "../ui/select/select-options";
     HxCheckbox,
     HxInput,
     HxMessage,
+    HxProgressBar,
   ],
   styleUrl: "./issues-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

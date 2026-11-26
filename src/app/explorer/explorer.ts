@@ -9,7 +9,14 @@ import {
   ElementRef,
   HostListener,
 } from "@angular/core";
-import { HxTree, HxTreeNodeTemplate, HxField, HxInput } from "@gravionlabs/helix-ui";
+import {
+  HxTree,
+  HxTreeNodeTemplate,
+  HxField,
+  HxInput,
+  HxButton,
+  HxTooltip,
+} from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
 import { ExternalEditor } from "../core/external-editor";
 import { EditorTabs } from "../core/editor-tabs";
@@ -101,7 +108,16 @@ export function spaceDirs(
 /** Directory tree of the configured roots, directories only, loaded when a folder expands. */
 @Component({
   selector: "app-explorer",
-  imports: [LoadingRows, ContextMenu, HxTree, HxTreeNodeTemplate, HxField, HxInput],
+  imports: [
+    LoadingRows,
+    ContextMenu,
+    HxTree,
+    HxTreeNodeTemplate,
+    HxField,
+    HxInput,
+    HxButton,
+    HxTooltip,
+  ],
   templateUrl: "./explorer.html",
   styleUrl: "./explorer.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
