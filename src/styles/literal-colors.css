@@ -1,0 +1,55 @@
+/*
+ * The literal colors the app defines because Helix has no token for them (#1367): the status bar tones
+ * of helix-desktop 22.6 (22.9 falls back to its muted palette, #1360) and the terminal palette of
+ * xterm.js (light and dark; a terminal color scheme is data, not themed chrome). The only file of
+ * the app styles that scripts/lint/helix-allow.json lets use hex colors; `src/styles.css` is linted.
+ */
+:root {
+  --h-warn-color: #b45309;
+  --h-error-color: #b91c1c;
+  --term-bg: #fbfbf9;
+  --term-fg: #26272a;
+  --term-ansi-0: #26272a;
+  --term-ansi-1: #b4232a;
+  --term-ansi-2: #1f7a3a;
+  --term-ansi-3: #8a5a00;
+  --term-ansi-4: #1f5fbf;
+  --term-ansi-5: #8e3fa8;
+  --term-ansi-6: #0f7a85;
+  --term-ansi-7: #5c5f66;
+  --term-ansi-8: #4a4d55;
+  --term-ansi-9: #d6343c;
+  --term-ansi-10: #2a9a4c;
+  --term-ansi-11: #a86f00;
+  --term-ansi-12: #3a7ae0;
+  --term-ansi-13: #a855c4;
+  --term-ansi-14: #1493a0;
+  --term-ansi-15: #8a8d95;
+  --term-cursor: #26272a;
+  --term-selection-bg: #cfe0fa;
+  --term-selection-fg: #26272a;
+}
+
+:root.app-dark {
+  --term-bg: #111214;
+  --term-fg: #e4e4e0;
+  --term-ansi-0: #2a2c31;
+  --term-ansi-1: #f06a6a;
+  --term-ansi-2: #6bcf7f;
+  --term-ansi-3: #e0b94f;
+  --term-ansi-4: #6ea8fe;
+  --term-ansi-5: #c792ea;
+  --term-ansi-6: #5fd0d6;
+  --term-ansi-7: #c9cac5;
+  --term-ansi-8: #6b6e76;
+  --term-ansi-9: #ff8585;
+  --term-ansi-10: #8ae59b;
+  --term-ansi-11: #f0cc6c;
+  --term-ansi-12: #8dbcff;
+  --term-ansi-13: #d9a9f5;
+  --term-ansi-14: #86e3e8;
+  --term-ansi-15: #f4f4f0;
+  --term-cursor: #e4e4e0;
+  --term-selection-bg: #2f4a73;
+  --term-selection-fg: #f4f4f0;
+}

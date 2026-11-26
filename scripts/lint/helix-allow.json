@@ -2,9 +2,9 @@
   "comment": "Exceptions to the helix-lint preset (#1367). Every entry needs `files` (globs), `rules` and a `reason`; helixAllow throws without one and so fails `pnpm lint`. Remove an entry when its files migrate. Stylelint rules and `helix/no-raw-control` are listed under their own key.",
   "stylelint": [
     {
-      "files": ["src/styles.css"],
+      "files": ["src/styles/literal-colors.css"],
       "rules": ["color-no-hex"],
-      "reason": "The --term-* and --term-ansi-* tokens define the terminal palette of xterm.js (light and dark); a terminal color scheme is data, not themed chrome, so it has no Helix token"
+      "reason": "Terminal palette (--term-*, xterm.js light and dark) and the status bar tones --h-warn-color/--h-error-color: literal colors with no Helix token; only this file may use hex"
     }
   ],
   "eslint": [

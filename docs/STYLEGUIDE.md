@@ -64,7 +64,6 @@ Binding for every UI change. Read the base guide named above first (installed by
 | components.md: no app component that redraws a Helix one (`hx-menu`) | `app-context-menu` | Open: why not `hx-menu`? |
 | dialogs.md: `hx-dialog`, `hxDialogFooter` without a wrapper, `HxConfirmationService`, no own focus or Enter handling | `app-dialog-shell` with `.dialog-buttons`, which moves the focus and handles Enter; confirmations use it too | Open: why not `hx-dialog`? |
 | ux-rules.md: a toast never carries an error the user has to act on | The reason of a failed write is a toast (a failed settings write is also inline) | Open: should every failed write be inline? |
-| STYLEGUIDE.md: `@gravionlabs/helix-lint` blocks in CI | Installed (#1367): `pnpm lint` and CI block; the specs above stay as well | Exceptions are the allowlist entries, each with a reason |
 
 ## When this guide is silent
 
