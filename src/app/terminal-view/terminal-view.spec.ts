@@ -222,7 +222,7 @@ const GHOSTTY = {
 };
 
 describe("TerminalView theme", () => {
-  const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles/literal-colors.css", "utf8");
   const block = (selector: string) =>
     new RegExp(`${selector.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)![1];
   const token = (selector: string, name: string) =>
