@@ -1,5 +1,5 @@
 @if (actions.open()) {
-  <app-dialog-shell heading="New space" (cancelled)="cancel()">
+  <app-dialog-shell size="md" heading="New space" (cancelled)="cancel()">
     <form (submit)="$event.preventDefault(); submit()">
       <hx-field label="Directory" hint="An existing space for the directory is focused instead."
         ><hx-input-group
@@ -83,6 +83,7 @@
 }
 @if (actions.closing(); as c) {
   <app-dialog-shell
+    size="sm"
     [heading]="'Close space ' + c.label + '?'"
     label="Close space"
     [alert]="true"
@@ -108,7 +109,7 @@
   </app-dialog-shell>
 }
 @if (actions.renaming(); as r) {
-  <app-dialog-shell heading="Rename space" (cancelled)="actions.cancelRename()">
+  <app-dialog-shell size="md" heading="Rename space" (cancelled)="actions.cancelRename()">
     <form (submit)="$event.preventDefault(); rename($any($event.target))">
       <hx-field label="Name" [error]="actions.renameError()">
         <input

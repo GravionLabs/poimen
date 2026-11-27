@@ -1,8 +1,8 @@
 @if (actions.trust(); as pending) {
   <app-dialog-shell
+    size="lg"
     heading="Trust this project?"
     label="Trust project"
-    width="640px"
     [alert]="true"
     [cancelDefault]="true"
     (cancelled)="answer('cancel')"

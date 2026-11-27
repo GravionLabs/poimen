@@ -1,10 +1,10 @@
 @if (install.state(); as s) {
   <app-dialog-shell
+    size="lg"
     [heading]="
       (s.kind === 'update' ? 'Update' : 'Install') + ' poimen-server on ' + s.machine + '?'
     "
     label="Install poimen-server"
-    width="640px"
     [cancelDefault]="true"
     (cancelled)="install.cancel()"
   >

@@ -3,7 +3,7 @@
   class="dialog"
   [attr.role]="alert ? 'alertdialog' : 'dialog'"
   [attr.aria-label]="label ?? heading"
-  [style.width]="'min(' + width + ', 92vw)'"
+  [style.width]="cssWidth"
 >
   <div class="inner">
     <div class="head">

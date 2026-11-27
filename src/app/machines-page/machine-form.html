@@ -1,6 +1,6 @@
 <app-dialog-shell
+  size="md"
   [heading]="original ? 'Edit machine' : 'Add machine'"
-  width="520px"
   (cancelled)="machines.closeForm()"
 >
   <form (submit)="submit($event)" novalidate>
