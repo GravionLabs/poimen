@@ -3,7 +3,7 @@ import { Component, signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { DialogShell } from "./dialog-shell";
+import { DialogShell, type DialogSize } from "./dialog-shell";
 import { dialogOf, expectFocusInside, focusOpener, press } from "./dialog-contract";
 
 @Component({
@@ -12,6 +12,8 @@ import { dialogOf, expectFocusInside, focusOpener, press } from "./dialog-contra
     @if (open()) {
       <app-dialog-shell
         heading="Sample"
+        [size]="size()"
+        [width]="width()"
         [cancelDefault]="cancelDefault()"
         (cancelled)="cancelled()"
         (confirmed)="confirmed()"
@@ -29,6 +31,8 @@ import { dialogOf, expectFocusInside, focusOpener, press } from "./dialog-contra
 })
 class Host {
   readonly open = signal(true);
+  readonly size = signal<DialogSize>("md");
+  readonly width = signal<string | null>(null);
   readonly field = signal(true);
   readonly cancelDefault = signal(false);
   readonly cancelled = vi.fn();
@@ -72,6 +76,30 @@ describe("DialogShell", () => {
     const close = root.querySelectorAll<HTMLButtonElement>("button.dialog-close");
     expect(close).toHaveLength(1);
     expect(close[0].getAttribute("aria-label")).toBe("Close");
+  });
+
+  it.each(["sm", "md", "lg"] as const)("takes the width of the %s token", async (size) => {
+    const { root } = await mount((h) => h.size.set(size));
+    expect(dialogOf(root).style.width).toBe(`min(var(--h-dialog-${size}-width), 92vw)`);
+  });
+
+  it("is md without a size", async () => {
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(DialogShell);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(dialogOf(fixture.nativeElement).style.width).toBe("min(var(--h-dialog-md-width), 92vw)");
+  });
+
+  it("lets width override the size class, and returns to it", async () => {
+    const { root, host, settle } = await mount((h) => {
+      h.size.set("lg");
+      h.width.set("360px");
+    });
+    expect(dialogOf(root).style.width).toBe("min(360px, 92vw)");
+    host.width.set(null);
+    await settle();
+    expect(dialogOf(root).style.width).toBe("min(var(--h-dialog-lg-width), 92vw)");
   });
 
   it("moves the focus to the first field", async () => {

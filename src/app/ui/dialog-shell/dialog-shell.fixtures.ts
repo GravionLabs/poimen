@@ -7,7 +7,7 @@ import { DialogShell } from "./dialog-shell";
   selector: "app-fixture-dialog-confirm",
   imports: [DialogShell, HxButton, HxField, HxInput],
   template: `
-    <app-dialog-shell heading="Save layout">
+    <app-dialog-shell size="md" heading="Save layout">
       <p class="hint">The layout is stored in your settings and offered to new spaces.</p>
       <hx-field label="Name"><input hx-input size="small" value="review" /></hx-field>
       <div class="dialog-buttons">
@@ -23,7 +23,7 @@ class ConfirmHost {}
   selector: "app-fixture-dialog-danger",
   imports: [DialogShell, HxButton, HxMessage],
   template: `
-    <app-dialog-shell heading="Remove space" [alert]="true" [cancelDefault]="true">
+    <app-dialog-shell size="sm" heading="Remove space" [alert]="true" [cancelDefault]="true">
       <p>Closing the space does not end its terminals.</p>
       <hx-message severity="error" size="small">The server could not be reached.</hx-message>
       <div class="dialog-buttons">

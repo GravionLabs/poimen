@@ -1,6 +1,7 @@
 @let d = actions.dialog();
 @if (d) {
   <app-dialog-shell
+    size="md"
     [heading]="d.action.label + ' ' + targetsText()"
     [label]="d.action.label"
     data-testid="agent-action-dialog"

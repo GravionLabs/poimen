@@ -35,6 +35,15 @@ Binding for every UI change. Read the base guide named above first (installed by
 ### Dialogs (#848)
 
 - Every dialog is an `app-dialog-shell` (`src/app/ui/dialog-shell/`): a native modal `<dialog>` with the heading, the one close icon button and the content projected.
+- Every dialog sets `size`, the Helix dialog size class (`--h-dialog-<size>-width`, ADR 0013 of Helix), by its content:
+
+  | Dialog type | `size` |
+  | --- | --- |
+  | Confirmation or short question (close, discard, remove, restart, install hooks), a short pick list | `sm` |
+  | A few fields (new space, rename, machine, pull request), a list, or an approval that shows the text to approve | `md` |
+  | Wide form or table (issue picker, project commands to trust, server install plan) | `lg` |
+
+  `width` (a CSS length) replaces the class only for content that fits none, and the PR says why. The shell never gets wider than 92vw.
 - Buttons go in a `.dialog-buttons` element: Cancel first, the confirming action last. Shared rules for `.hint`, `.error`, labels and fields are under `dialog.dialog` in `src/styles.css`.
 - The shell owns focus, Tab, Escape and Enter. `[cancelDefault]="true"` puts the focus on Cancel for a destructive or risky confirmation.
 - A dialog spec checks focus on open, Escape and focus return with `ui/dialog-shell/dialog-contract.ts`.
