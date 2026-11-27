@@ -1,0 +1,7 @@
+{"v":1,"seq":1,"ts":"2026-11-08T10:00:01.000Z","run":"r9","type":"run.started","tone":"neutral","profiles":[]}
+{"v":1,"seq":2,"ts":"2026-11-08T10:00:02.000Z","run":"r9","type":"task.started","tone":"neutral","task":"t1","subject":{"kind":"github.issue","id":"GravionLabs/demo#1","title":"One"}}
+{"v":1,"seq":3,"ts":"2026-11-08T10:00:03.000Z","run":"r9","type":"task.started","tone":"neutral","task":"t2","parent":"t1","subject":{"kind":"github.issue","id":"GravionLabs/demo#2","title":"Two"}}
+{"v":1,"seq":4,"ts":"2026-11-08T10:00:04.000Z","run":"r9","type":"task.started","tone":"neutral","task":"t3","subject":{"kind":"github.issue","id":"GravionLabs/demo#3","title":"Three"}}
+{"v":1,"seq":5,"ts":"2026-11-08T10:00:05.000Z","run":"r9","type":"step.started","tone":"neutral","task":"t2","step":"build"}
+{"v":1,"seq":6,"ts":"2026-11-08T10:00:06.000Z","run":"r9","type":"task.finished","tone":"success","task":"t3","outcome":"succeeded"}
+{"v":1,"seq":7,"ts":"2026-11-08T10:00:07.000Z","run":"r9","type":"run.finished","tone":"danger","outcome":"failed","reason":"stopped","text":"stopped"}

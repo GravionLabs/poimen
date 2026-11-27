@@ -1,19 +1,19 @@
 //! `record_run` and `read_run` (#1212, ADR 0018): the state of a lead run lives in an
-//! agent-events run `lead-<secs>` in the repository of the lead's space, not in the session. The
-//! lead writes the plan, its members, the grant and its decisions; a new lead session reads them
+//! agent-events run `lead-<uuid>` of the repository of the lead's space (in the user's shared
+//! event directory, `origin` names the repository), not in the session. The lead writes the plan, its members, the grant and its decisions; a new lead session reads them
 //! back and resumes. Core events (`run.*`, `task.*`, `attention*`, `progress`) show the run in the
 //! Runs view; the records of the profile `orchestrate@1` (`poimen_protocol::lead`) carry the rest.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use poimen_client::Client;
-use poimen_core::agent_events::{self, Reducer};
+use poimen_core::agent_events::{self, RepoRef};
 use poimen_protocol::files::{now_secs, utc};
 use poimen_protocol::lead::{LEAD_PROFILE, LEAD_RUN_PREFIX, LeadRecord};
 use serde_json::{Value, json};
 
-use super::{Env, Fail, report, runs, server_error, text_arg};
+use super::{Env, Fail, run_files, run_writer, runs, server_error, text_arg};
 
 const PLAN_MAX_BYTES: usize = 64 * 1024;
 const OUTCOMES: [&str; 4] = ["succeeded", "failed", "cancelled", "skipped"];
@@ -40,7 +40,7 @@ const KEYS: [&str; 16] = [
 pub(super) fn record_tool() -> Value {
     json!({
         "name": "record_run",
-        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<secs>` in the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started loop: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run`, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
+        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<uuid>` of the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started loop: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run`, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
         "inputSchema": {"type": "object", "properties": {
             "event": {"type": "string", "enum": ["start", "plan", "member", "member_done", "dependency", "grant", "decision", "attention", "resolved", "note", "resume", "finish"]},
             "repository": {"type": "string", "description": "A directory in the repository that holds the run; default: the directory of your terminal."},
@@ -83,17 +83,17 @@ struct Scan {
     tasks: BTreeSet<String>,
     records: Vec<LeadRecord>,
     title: Option<String>,
+    /// `ts` of `run.started`.
+    started: String,
 }
 
-fn scan(text: &str) -> Scan {
+fn scan(events: &[Value]) -> Scan {
     let mut s = Scan::default();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let Ok(e) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
+    for e in events {
         s.last_seq = s.last_seq.max(e["seq"].as_i64().unwrap_or(0));
         match e["type"].as_str() {
             Some("run.started") => {
+                s.started = e["ts"].as_str().unwrap_or_default().to_owned();
                 s.terminal = e["host"]["poimen.terminal"].as_str().map(str::to_owned);
                 s.title = e["subject"]["title"].as_str().map(str::to_owned);
             }
@@ -105,7 +105,7 @@ fn scan(text: &str) -> Scan {
             }
             _ => {}
         }
-        if let Some(r) = LeadRecord::from_line(line) {
+        if let Some(r) = LeadRecord::from_line(&e.to_string()) {
             if let LeadRecord::Resume { terminal } = &r {
                 s.terminal = Some(terminal.clone());
             }
@@ -115,63 +115,57 @@ fn scan(text: &str) -> Scan {
     s
 }
 
-fn lead_files(dir: &Path) -> Vec<(String, PathBuf)> {
-    let mut files: Vec<_> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| agent_events::is_run_file(p))
-        .filter_map(|p| {
-            let run = agent_events::run_of(&p)?.to_owned();
-            run.starts_with(LEAD_RUN_PREFIX).then_some((run, p))
-        })
-        .collect();
-    files.sort();
-    files
+/// One lead run of the repository: its merged events and what they say.
+struct Lead {
+    run: String,
+    events: Vec<Value>,
+    scan: Scan,
 }
 
-fn load(path: &Path) -> Option<(String, Scan)> {
-    let text = runs::read_complete(path)?;
-    let s = scan(&text);
-    Some((text, s))
-}
-
-/// The open lead runs of the directory, newest first, with their scan.
-fn open_runs(dir: &Path) -> Vec<(String, Scan)> {
-    let mut v: Vec<_> = lead_files(dir)
-        .into_iter()
-        .rev()
-        .filter_map(|(run, p)| load(&p).map(|(_, s)| (run, s)))
-        .filter(|(_, s)| !s.finished)
-        .collect();
-    v.sort_by_key(|(r, _)| std::cmp::Reverse(r.clone()));
+/// The lead runs of the repository, newest first.
+fn lead_runs(at: &Where) -> Vec<Lead> {
+    let mut attribution = run_files::Attribution::default();
+    let mut v: Vec<Lead> =
+        run_files::of_repository(at.shared.as_deref(), &at.repo, &mut attribution)
+            .into_iter()
+            .filter(|(run, _)| run.starts_with(LEAD_RUN_PREFIX))
+            .map(|(run, files)| {
+                let events = run_files::events(&files);
+                let scan = scan(&events);
+                Lead { run, events, scan }
+            })
+            .collect();
+    v.sort_by(|a, b| (&b.scan.started, &b.run).cmp(&(&a.scan.started, &a.run)));
     v
 }
 
 struct Where {
-    dir: PathBuf,
+    shared: Option<PathBuf>,
+    repo: RepoRef,
     repository: String,
+}
+
+fn terminal_dir(client: &Client, id: &str) -> Result<String, Fail> {
+    client
+        .list_terminals(None)
+        .map_err(server_error)?
+        .into_iter()
+        .find(|t| t.id == id)
+        .map(|t| t.cwd)
+        .ok_or_else(|| Fail::Tool(format!("terminal {id} is not known to the server")))
 }
 
 fn locate(client: &Client, env: &Env, args: &Value) -> Result<Where, Fail> {
     let repository = match text_arg(args, "repository") {
         Some(r) => r.to_owned(),
-        None => {
-            let caller = caller(env)?;
-            client
-                .list_terminals(None)
-                .map_err(server_error)?
-                .into_iter()
-                .find(|t| t.id == caller)
-                .map(|t| t.cwd)
-                .ok_or_else(|| {
-                    Fail::Tool(format!("terminal {caller} is not known to the server"))
-                })?
-        }
+        None => terminal_dir(client, caller(env)?)?,
     };
-    let dir = runs::events_dir(&repository).map_err(Fail::Tool)?;
-    Ok(Where { dir, repository })
+    let repo = run_files::repository(&repository).map_err(Fail::Tool)?;
+    Ok(Where {
+        shared: env.events_dir.clone(),
+        repo,
+        repository,
+    })
 }
 
 fn caller<'a>(env: &Env<'a>) -> Result<&'a str, Fail> {
@@ -202,24 +196,32 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
     let event = need(args, "event", "record_run")?;
     let at = locate(client, env, args)?;
     // A write goes only to the repository of the caller's own terminal (no confirmation needed).
-    let own_dir = locate(client, env, &json!({}))?.dir;
-    if own_dir != at.dir {
+    let own_dir = terminal_dir(client, me)?;
+    let own_repo = run_files::repository(&own_dir).map_err(Fail::Tool)?;
+    if own_repo.common != at.repo.common {
         return Err(Fail::Tool(
             "refused: a lead run is recorded in the repository of your own terminal".into(),
         ));
     }
+    let shared = at
+        .shared
+        .clone()
+        .ok_or_else(|| Fail::Tool(run_files::NO_SHARED.into()))?;
     if args
         .get("plan")
         .is_some_and(|p| p.to_string().len() > PLAN_MAX_BYTES)
     {
         return Err(Fail::Tool(format!("`plan` is over {PLAN_MAX_BYTES} bytes")));
     }
-    let own = open_runs(&at.dir)
-        .into_iter()
-        .find(|(_, s)| s.terminal.as_deref() == Some(me));
+    let mut known = lead_runs(&at);
+    let own = known
+        .iter()
+        .find(|l| !l.scan.finished && l.scan.terminal.as_deref() == Some(me))
+        .map(|l| l.run.clone());
+    let origin = run_writer::origin(&own_dir, Some(&own_repo));
 
-    let (run, mut seq, scan, mut out) = if event == "start" {
-        if let Some((run, _)) = own {
+    let (run, mut seq, scan, before, mut out) = if event == "start" {
+        if let Some(run) = own {
             return Err(Fail::Tool(format!(
                 "refused: you already have the open run `{run}`; read_run it, or finish it first"
             )));
@@ -231,22 +233,14 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
             .into_iter()
             .find(|t| t.id == me)
             .ok_or_else(|| Fail::Tool(format!("terminal {me} is not known to the server")))?;
-        let mut secs = now_secs();
-        while at
-            .dir
-            .join(format!("{LEAD_RUN_PREFIX}{secs}.jsonl"))
-            .exists()
-        {
-            secs += 1;
-        }
-        let run = format!("{LEAD_RUN_PREFIX}{secs}");
+        let run = run_writer::new_run_id(LEAD_RUN_PREFIX);
         let started = json!({
             "v": 1, "seq": 1, "ts": utc(now_secs()), "run": run, "type": "run.started",
-            "tone": "neutral", "host": {"poimen.terminal": me},
+            "tone": "neutral", "host": {"poimen.terminal": me}, "origin": origin,
             "agent": {"harness": terminal.program},
             "subject": {"kind": "poimen.lead", "id": me, "title": title},
         });
-        (run, 1, Scan::default(), vec![started])
+        (run, 1, Scan::default(), Vec::new(), vec![started])
     } else {
         let run = match text_arg(args, "run") {
             Some(r) if valid_run(r) => r.to_owned(),
@@ -254,14 +248,18 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
             None if event == "resume" => {
                 return Err(Fail::Tool("`resume` needs the argument `run`".into()));
             }
-            None => own.map(|(r, _)| r).ok_or_else(|| {
+            None => own.ok_or_else(|| {
                 Fail::Tool(
                     "you have no open lead run: `start` one, or read_run to list them".into(),
                 )
             })?,
         };
-        let (_, s) = load(&at.dir.join(format!("{run}.jsonl")))
+        let found = known
+            .iter()
+            .position(|l| l.run == run)
+            .map(|i| known.swap_remove(i))
             .ok_or_else(|| Fail::Tool(format!("unknown run `{run}` in `{}`", at.repository)))?;
+        let s = found.scan;
         if s.finished {
             return Err(Fail::Tool(format!("run `{run}` is finished")));
         }
@@ -271,7 +269,7 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
             )));
         }
         let seq = s.last_seq;
-        (run, seq, s, Vec::new())
+        (run, seq, s, found.events, Vec::new())
     };
 
     let mut push = |mut e: Value, custom: bool| {
@@ -435,7 +433,7 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
             other => return Err(Fail::Tool(format!("unknown event `{other}`"))),
         }
     }
-    report::append(&at.dir, &run, &out)
+    run_writer::append(&shared, &run, &before, &origin, &out)
         .map_err(|e| Fail::Tool(format!("cannot write the run: {e}")))?;
     Ok(json!({"run": run, "repository": at.repository, "seq": seq, "recorded": event}))
 }
@@ -453,32 +451,32 @@ pub(super) fn read_run(client: &Client, env: &Env, args: &Value) -> Result<Value
     runs::only_keys(args, &["repository", "run"])?;
     let at = locate(client, env, args)?;
     let me = env.terminal_id.filter(|i| !i.is_empty());
-    let open = open_runs(&at.dir);
+    let mut known = lead_runs(&at);
+    let mine = |s: &Scan| me.is_some() && s.terminal.as_deref() == me;
     let run = match text_arg(args, "run") {
         Some(r) if valid_run(r) => r.to_owned(),
         Some(r) => return Err(Fail::Tool(format!("`{r}` is not a lead run id"))),
-        None => match open
-            .iter()
-            .find(|(_, s)| s.terminal.as_deref() == me && me.is_some())
-        {
-            Some((r, _)) => r.clone(),
+        None => match known.iter().find(|l| !l.scan.finished && mine(&l.scan)) {
+            Some(l) => l.run.clone(),
             None => {
-                let list: Vec<Value> = open
+                let list: Vec<Value> = known
                     .iter()
-                    .map(|(r, s)| json!({"run": r, "title": s.title, "terminal": s.terminal}))
+                    .filter(|l| !l.scan.finished)
+                    .map(|l| json!({"run": l.run, "title": l.scan.title, "terminal": l.scan.terminal}))
                     .collect();
                 return Ok(json!({"repository": at.repository, "run": null, "open_runs": list}));
             }
         },
     };
-    let (text, s) = load(&at.dir.join(format!("{run}.jsonl")))
+    let Lead {
+        events, scan: s, ..
+    } = known
+        .iter()
+        .position(|l| l.run == run)
+        .map(|i| known.swap_remove(i))
         .ok_or_else(|| Fail::Tool(format!("unknown run `{run}` in `{}`", at.repository)))?;
-    let mut reducer = Reducer::new();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        reducer.push_line(line);
-    }
     let now = now_secs() as f64;
-    let mut state = reducer
+    let mut state = run_files::fold(&events)
         .snapshot(now, &agent_events::pid_alive)
         .and_then(|r| serde_json::to_value(r).ok())
         .unwrap_or(Value::Null);
@@ -505,7 +503,7 @@ pub(super) fn read_run(client: &Client, env: &Env, args: &Value) -> Result<Value
     }
     Ok(json!({
         "repository": at.repository, "run": run, "lead_terminal": s.terminal,
-        "yours": s.terminal.as_deref() == me && me.is_some(),
+        "yours": mine(&s),
         "last_seq": s.last_seq, "state": state, "plan": plan, "members": members,
         "dependencies": dependencies, "grant": grant, "decisions": decisions,
         "note": "The server is authoritative for terminals: re-check them before you act. A grant is lost when the server restarts; request_grant again.",

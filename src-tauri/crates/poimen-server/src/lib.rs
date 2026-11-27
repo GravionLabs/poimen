@@ -60,6 +60,7 @@ use std::time::{Duration, Instant};
 use typing::{Kind, Typing, type_commands};
 
 use emulator::Colors;
+use poimen_core::agent_events::{self, RepoCache};
 use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
@@ -396,7 +397,10 @@ pub(crate) struct Shared {
     /// `subscribers`, so a new subscription gets the replay and then every later event once.
     runs: Mutex<runs::Runs>,
     /// The repositories of the space and terminal directories, for `runs`.
-    run_repos: Mutex<runs::Repos>,
+    run_repos: Mutex<RepoCache>,
+    /// The shared event directory ([`Server::set_events_dir`]): followed for `runs` and given to
+    /// the terminals as `AGENT_EVENTS_DIR`.
+    events_dir: Mutex<Option<PathBuf>>,
     /// The transcript readers of `agent.transcript`, per terminal and follower.
     transcripts: Mutex<HashMap<(String, String), Followed>>,
     /// The open `agent.confirm` requests (#615): the answer of the app goes to the waiting one.
@@ -493,43 +497,6 @@ impl Shared {
             tx,
         });
         id
-    }
-
-    /// Reads what the run files of the spaces' repositories gained and sends it to the
-    /// subscriptions with `run_events`; without one, the followed files are forgotten (#692).
-    fn follow_runs(&self) {
-        let wanted = || lock(&self.subscribers).iter().any(|s| s.runs);
-        {
-            // Under the lock, so a subscription that comes meanwhile is never cleared away.
-            let mut followed = lock(&self.runs);
-            if !wanted() {
-                followed.clear();
-                return;
-            }
-        }
-        let dirs: Vec<String> = {
-            let inner = lock(&self.inner);
-            let mut dirs: Vec<String> = inner.layout.spaces.iter().map(|s| s.cwd.clone()).collect();
-            for t in &inner.terminals {
-                if t.info.status == TerminalStatus::Running && !dirs.contains(&t.info.cwd) {
-                    dirs.push(t.info.cwd.clone());
-                }
-            }
-            dirs
-        };
-        let repos = lock(&self.run_repos).resolve(&dirs, Instant::now(), poimen_core::git::roots);
-        let mut followed = lock(&self.runs);
-        // Checked again under the lock: a subscription that came meanwhile got the replay of what
-        // is kept, so it is only dropped while there is none.
-        if !wanted() {
-            followed.clear();
-            return;
-        }
-        let events = followed.scan(&repos, std::time::SystemTime::now());
-        let mut subs = lock(&self.subscribers);
-        for event in events {
-            subs.retain(|s| !s.runs || s.tx.send(event.clone()).is_ok());
-        }
     }
 
     /// Drops a subscription (ending its event loop) and tells the rest.
@@ -743,6 +710,7 @@ impl Server {
             subscribers: Mutex::new(Vec::new()),
             runs: Mutex::default(),
             run_repos: Mutex::default(),
+            events_dir: Mutex::new(agent_events::shared_dir_here()),
             transcripts: Mutex::default(),
             confirms: confirm::Confirms::default(),
             next_id: AtomicU64::new(next_id),
@@ -1889,6 +1857,7 @@ fn spawn_terminal(
     let stream = fresh_stream(shared, &id, cols, rows);
     let term = std::env::var("TERM").ok();
     let locale_set = host::locale_set(|name| std::env::var(name).ok());
+    let events_dir = lock(&shared.events_dir).clone();
     let spawned = host::start(
         &shared.pty_host,
         &host::Spec {
@@ -1901,6 +1870,7 @@ fn spawn_terminal(
             rows,
             term: term.as_deref(),
             locale_set,
+            events_dir: events_dir.as_deref(),
             env: &env,
         },
         output_to(&stream),

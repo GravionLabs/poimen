@@ -13,6 +13,8 @@
 mod grant;
 mod lead;
 mod report;
+mod run_files;
+mod run_writer;
 mod runs;
 mod screen;
 mod shell;
@@ -34,7 +36,7 @@ use poimen_client::agent::{self, AgentError, PromptResult, WriteAsk, WriteError,
 use poimen_client::protocol::{
     AgentStatus, AgentWriteAction, AgentWriteNotice, TerminalCreate, TranscriptState,
 };
-use poimen_core::harness;
+use poimen_core::{agent_events, harness};
 use serde_json::{Value, json};
 
 /// The MCP revisions this server speaks, newest first.
@@ -58,6 +60,9 @@ pub struct Env<'a> {
     pub home: Option<PathBuf>,
     /// How long a confirmation in the app may take.
     pub confirm_wait: Duration,
+    /// The shared event directory of the run tools (`AGENT_EVENTS_DIR`, else the per-user
+    /// default: `poimen_core::agent_events::shared_dir`); `None` when there is none.
+    pub events_dir: Option<PathBuf>,
 }
 
 /// Runs the server until `input` closes, with the default harnesses. `terminal_id` is
@@ -72,6 +77,7 @@ pub fn serve(
         terminal_id,
         home: None,
         confirm_wait: CONFIRM_WAIT,
+        events_dir: agent_events::shared_dir_here(),
     };
     serve_with(client, &env, input, out)
 }
@@ -198,24 +204,25 @@ fn tools() -> Value {
         },
         {
             "name": "list_runs",
-            "description": "The deliver runs (agent-events) of the repository containing a directory, newest first, at most `limit` (default 20).",
+            "description": "The deliver runs (agent-events) of all repositories in the per-user event directory (AGENT_EVENTS_DIR when set), each with its `origin` (repo, branch, worktree, host), newest first, at most `limit` (default 20). `repository` (optional) keeps the runs of the repository containing that directory, `repo` (optional) those of `owner/repo` without a local checkout.",
             "inputSchema": {"type": "object", "properties": {
-                "repository": {"type": "string", "description": "A directory inside the repository."},
+                "repository": {"type": "string", "description": "Optional: only the runs of the repository containing this directory, also those in its legacy `.agents/events`."},
+                "repo": {"type": "string", "description": "Optional: only the runs whose origin is this repository (`owner/repo`)."},
                 "status": {"type": "string", "enum": ["running", "finished", "needs-you"], "description": "Only runs with this status; `needs-you` is the runs with an attention that needs the user."},
                 "limit": {"type": "integer", "minimum": 1, "description": "At most this many runs (default 20, newest first)."},
                 "compact": {"type": "boolean", "description": "Leave out the `finished` and `links` lists of each run."}
-            }, "required": ["repository"], "additionalProperties": false},
+            }, "additionalProperties": false},
         },
         {
             "name": "get_events",
-            "description": "The raw agent-events of one run of a repository after a `seq`, in order. Read-only.",
+            "description": "The raw agent-events of one run after a `seq`, in order. The run is found by its id among the runs of all repositories; `repository` is optional. Read-only.",
             "inputSchema": {"type": "object", "properties": {
-                "repository": {"type": "string", "description": "A directory inside the repository."},
+                "repository": {"type": "string", "description": "Optional: a directory inside the run's repository, to also read its legacy `.agents/events`."},
                 "run": {"type": "string", "description": "The run id (`run` of list_runs)."},
                 "after": {"type": "integer", "minimum": 0, "description": "Only events with a greater seq (default: from the start)."},
                 "type": {"type": "string", "description": "Only events of this type, e.g. `attention.raised`."},
                 "limit": {"type": "integer", "minimum": 1, "description": "At most this many events (default 100, at most 1000)."}
-            }, "required": ["repository", "run"], "additionalProperties": false},
+            }, "required": ["run"], "additionalProperties": false},
         },
         {
             "name": "start_agent",
@@ -349,17 +356,8 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
                 "space": space.map(|s| json!({"id": s.id, "name": s.name, "directory": s.cwd})),
             }))
         }
-        "list_runs" => {
-            runs::only_keys(args, &["repository", "status", "limit", "compact"])?;
-            let dir = runs::repository_arg(args)?;
-            let filter = runs::RunFilter::parse(args)?;
-            let runs = runs::runs_of(dir, &filter).map_err(Fail::Tool)?;
-            Ok(json!({"repository": dir, "runs": runs}))
-        }
-        "get_events" => {
-            runs::only_keys(args, &["repository", "run", "after", "type", "limit"])?;
-            runs::get_events(args)
-        }
+        "list_runs" => runs::list_runs(env.events_dir.as_deref(), args),
+        "get_events" => runs::get_events(env.events_dir.as_deref(), args),
         "start_agent" => start_agent(client, env, args),
         "start_shell" => shell::start_shell(client, env, args),
         "create_space" => space::create_space(client, env, args),
@@ -372,7 +370,7 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         "write_terminal" => write::write_terminal(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
         "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
-        "wait_any" => wait_any::wait_any(client, args),
+        "wait_any" => wait_any::wait_any(client, env, args),
         "report_done" => report::report_done(client, env, args),
         "read_agent" => read_agent(client, args),
         _ => Err(Fail::Unknown),

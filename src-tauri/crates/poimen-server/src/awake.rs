@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use poimen_core::agent_events::{self, MAX_EVENTS_BYTES, Reducer};
 use poimen_core::gui_path;
 use poimen_core::keep_awake::keep_awake;
 use poimen_core::settings::config_path;
@@ -28,9 +27,6 @@ use crate::{Server, Shared, lock, now_millis};
 pub(crate) const RELEASE_AFTER: Duration = Duration::from_secs(60);
 /// How often the run files are read again.
 const RUNS_CHECK: Duration = Duration::from_secs(30);
-/// A run file untouched for longer is not a running run (the reducer abandons it after an hour).
-const RUN_FRESH: Duration = Duration::from_secs(3600);
-
 /// What the server holds and what it decided last.
 #[derive(Default)]
 pub(crate) struct Awake {
@@ -144,20 +140,7 @@ impl Shared {
         {
             return running;
         }
-        let dirs: Vec<String> = {
-            let inner = lock(&self.inner);
-            let mut dirs: Vec<String> = inner.layout.spaces.iter().map(|s| s.cwd.clone()).collect();
-            for t in &inner.terminals {
-                if t.info.status == TerminalStatus::Running && !dirs.contains(&t.info.cwd) {
-                    dirs.push(t.info.cwd.clone());
-                }
-            }
-            dirs
-        };
-        let repos = lock(&self.run_repos).resolve(&dirs, now, poimen_core::git::roots);
-        let running = repos
-            .iter()
-            .any(|(_, dir)| running_in(dir, std::time::SystemTime::now()));
+        let running = self.any_run_running();
         awake.runs = Some((now, running));
         running
     }
@@ -213,44 +196,6 @@ impl Shared {
     }
 }
 
-/// Whether a run file in `dir` shows a running run: fresh, readable, no `run.finished`, its
-/// writer alive.
-fn running_in(dir: &std::path::Path, now: std::time::SystemTime) -> bool {
-    let Some(entries) = std::fs::read_dir(dir).ok() else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        if !agent_events::is_run_file(&path) {
-            return false;
-        }
-        let Ok(meta) = std::fs::symlink_metadata(&path) else {
-            return false;
-        };
-        let fresh = meta
-            .modified()
-            .ok()
-            .and_then(|m| now.duration_since(m).ok())
-            .is_some_and(|age| age < RUN_FRESH);
-        if !meta.is_file() || meta.len() > MAX_EVENTS_BYTES || !fresh {
-            return false;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return false;
-        };
-        let mut reducer = Reducer::new();
-        for line in text.lines().filter(|l| !l.trim().is_empty()) {
-            reducer.push_line(line);
-        }
-        let secs = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0.0, |d| d.as_secs_f64());
-        reducer
-            .snapshot(secs, &agent_events::pid_alive)
-            .is_some_and(|run| run.state.status == "running")
-    })
-}
-
 impl Server {
     /// One pass of the keep-awake check at the given time in milliseconds (#987); `serve` runs it
     /// on a timer, tests call this with a clock of their own. Take it before `serve`.
@@ -295,7 +240,10 @@ impl Shared {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::runs::{Runs, Sources};
+    use poimen_core::agent_events::RepoRef;
     use std::process::Command;
+    use std::time::SystemTime;
 
     #[allow(clippy::disallowed_methods)]
     fn utc_now() -> String {
@@ -313,30 +261,33 @@ mod tests {
         ) + "\n"
     }
 
-    fn dir(name: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("poimen-awake-unit-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn a_run_without_run_finished_is_running_and_a_finished_one_is_not() {
-        let dir = dir("runs");
-        assert!(!running_in(&dir, std::time::SystemTime::now()));
-        let file = dir.join("r1.jsonl");
+        let guard = tempfile::tempdir().unwrap();
+        let shared = guard.path().to_path_buf();
+        let sources = Sources {
+            shared: Some(shared.clone()),
+            repos: vec![RepoRef::new("/r", "/r/.git", None)],
+            terminals: [("r1".to_owned(), "/r".to_owned())].into(),
+        };
+        let repo = |_: &str| Some(RepoRef::new("/r", "/r/.git", None));
+        let running = |at: SystemTime| Runs::default().running(&sources, at, repo);
+        assert!(!running(SystemTime::now()));
+        let file = shared.join("r1.jsonl");
         std::fs::write(&file, event(1, "run.started")).unwrap();
-        assert!(running_in(&dir, std::time::SystemTime::now()));
+        assert!(running(SystemTime::now()));
         std::fs::write(&file, event(1, "run.started") + &event(2, "run.finished")).unwrap();
-        assert!(!running_in(&dir, std::time::SystemTime::now()));
+        assert!(!running(SystemTime::now()));
         // Not a run file name: ignored.
-        std::fs::write(dir.join("notes.txt"), event(1, "run.started")).unwrap();
-        assert!(!running_in(&dir, std::time::SystemTime::now()));
+        std::fs::write(shared.join("notes.txt"), event(1, "run.started")).unwrap();
+        assert!(!running(SystemTime::now()));
         // A running run in a file untouched for hours is not running.
         std::fs::write(&file, event(1, "run.started")).unwrap();
-        let later = std::time::SystemTime::now() + Duration::from_secs(2 * 3600);
-        assert!(!running_in(&dir, later));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!running(SystemTime::now() + Duration::from_secs(2 * 3600)));
+        // A run of another repository does not count.
+        let other = r#","origin":{"repo":"o/other"}}"#;
+        let line = event(1, "run.started").replace("}\n", &format!("{other}\n"));
+        std::fs::write(&file, line).unwrap();
+        assert!(!running(SystemTime::now()));
     }
 }

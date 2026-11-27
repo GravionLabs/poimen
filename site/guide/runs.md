@@ -1,12 +1,14 @@
 # Runs
 
-The Runs item of the activity bar shows the agent runs of the repositories behind your spaces: deliver loops that work through a milestone, and any other tool that writes agent events. poimen only reads them and never writes.
+The Runs item of the activity bar shows the agent runs of the repositories behind your spaces: deliver loops that work through a milestone, and any other tool that writes agent events. poimen only reads them here; the only runs it writes are those of the [MCP tools](/guide/mcp) `record_run` and `report_done`.
 
 <Screenshot src="runs-dark.png" light="runs-light.png" alt="The Runs view: a milestone with its progress, the run working on issue 1109 and a gate that needs you" caption="The Runs view: the milestone, the running loop with its current task and what needs you (demo data)." />
 
 ## Where runs come from
 
-A run is a file `<repository>/.agents/events/<run>.jsonl` in the format of [agent-events](https://github.com/GravionLabs/agent-events). poimen follows these files without polling. Runs of a remote machine arrive through its server.
+A run is a file `<run>.jsonl` in the format of [agent-events](https://github.com/GravionLabs/agent-events) in the **event directory** of your user: `AGENT_EVENTS_DIR` when set, else `%LOCALAPPDATA%\agent-events` on Windows and `$XDG_STATE_HOME/agent-events` or `~/.local/state/agent-events` elsewhere. Every terminal poimen starts gets `AGENT_EVENTS_DIR`. A run shows with the repository its `origin` names (the one it was started in); the older `<repository>/.agents/events` is still read for now. poimen follows these files without polling. Runs of a remote machine arrive through its server.
+
+To drive several repositories at once, see [Objective runs](/guide/objective-runs).
 
 ## The view
 

@@ -1,0 +1,37 @@
+{
+  "now": "2026-12-31T12:00:00.000Z",
+  "files": {
+    "shared/a-finished-31-days.jsonl": {
+      "mtime": "2026-11-30T12:00:00.000Z"
+    },
+    "shared/a-abandoned-40-days.jsonl": {
+      "mtime": "2026-11-21T12:00:00.000Z"
+    },
+    "shared/a-finished-10-days.jsonl": {
+      "mtime": "2026-12-21T12:00:00.000Z"
+    },
+    "shared/a-running.jsonl": {
+      "mtime": "2026-12-31T11:50:00.000Z"
+    },
+    "shared/b-finished-40-days.jsonl": {
+      "mtime": "2026-11-21T12:00:00.000Z"
+    },
+    "shared/no-repo-finished-40-days.jsonl": {
+      "mtime": "2026-11-21T12:00:00.000Z"
+    },
+    "shared/no-origin-finished-8-days.jsonl": {
+      "mtime": "2026-12-23T12:00:00.000Z"
+    },
+    "shared/no-origin-finished-3-days.jsonl": {
+      "mtime": "2026-12-28T12:00:00.000Z"
+    }
+  },
+  "writer": {
+    "repo": "example/a"
+  },
+  "mayDelete": [
+    "shared/a-abandoned-40-days.jsonl",
+    "shared/a-finished-31-days.jsonl",
+    "shared/no-origin-finished-8-days.jsonl"
+  ]
+}

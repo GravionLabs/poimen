@@ -3,22 +3,25 @@
   "run": "r5",
   "status": "finished",
   "outcome": "failed",
-  "reason": "gave up",
-  "tasks": [
-    {
-      "task": "t1",
-      "subject": {
-        "kind": "github.issue",
-        "id": "GravionLabs/demo#1",
-        "title": "Reducer",
-        "url": "https://github.com/GravionLabs/demo/issues/1"
-      }
-    }
-  ],
+  "reason": "gave-up",
+  "text": "gave up",
+  "tasks": [],
   "finished": {
     "succeeded": [],
     "failed": [],
-    "cancelled": [],
+    "cancelled": [
+      {
+        "task": "t1",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#1",
+          "title": "Reducer",
+          "url": "https://github.com/GravionLabs/demo/issues/1"
+        },
+        "reason": "run-finished",
+        "text": "run finished"
+      }
+    ],
     "skipped": []
   },
   "attentions": [],

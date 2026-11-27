@@ -22,7 +22,8 @@
   "attentions": [
     {
       "id": "a2",
-      "reason": "pick a name",
+      "reason": "pick-name",
+      "text": "pick a name",
       "needsYou": false
     }
   ],

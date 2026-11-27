@@ -1,6 +1,6 @@
 /**
  * The live state of agent runs, read from the agent-events core (GravionLabs/agent-events,
- * `SPEC.md`): the backend folds `<git-common-dir>/.agents/events/*.jsonl` (`agent_events.rs`, run
+ * `SPEC.md`): the backend folds the run files of the event directories (`agent_events.rs`, run
  * state of `run-state.schema.json` plus `tone`, `host`, `agent` and `events`). Displays are core
  * readers: nothing here reads a profile, and a run shows from the core alone. Fallback during the
  * migration: the legacy `.agents/deliver-loop/status.json` (`schemaVersion: 1`), mapped onto the
@@ -10,6 +10,7 @@
  */
 
 import { qualifyId } from "../core/snapshot";
+import { asPullUrl, withLeftOpen } from "./run-wire";
 
 /** The legacy status file schema version this build understands. */
 export const SUPPORTED_SCHEMA = 1;
@@ -293,7 +294,8 @@ function eventRows(value: unknown): RunEventRow[] {
  * Validates the core run state the panel uses; unknown fields (and profile extensions) are
  * ignored, a wrong known field fails.
  */
-export function parseStatus(value: unknown): DeliverStatus | string {
+export function parseStatus(raw: unknown): DeliverStatus | string {
+  const value = withLeftOpen(raw);
   if (!isObject(value)) return "the run is not an object";
   const run = str(value["run"]);
   if (!run) return "run is missing";
@@ -326,10 +328,6 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     updated,
   };
 }
-
-/** Only a `/pull/<n>` URL is a pull request; the producer once wrote the issue URL (#538). */
-const asPullUrl = (v: unknown): string | null =>
-  isString(v) && /\/pull\/\d+\/?$/.test(v) ? v : null;
 
 type LegacyResult = "running" | "done" | "max reached" | "blocked" | "no progress" | "abandoned";
 const LEGACY_RESULTS: readonly string[] = [

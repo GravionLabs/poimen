@@ -121,6 +121,7 @@ fn main() -> ExitCode {
                 terminal_id: terminal.as_deref(),
                 home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
                 confirm_wait: poimen_console::mcp::CONFIRM_WAIT,
+                events_dir: poimen_core::agent_events::shared_dir_here(),
             };
             match poimen_console::mcp::serve_with(&client, &env, stdin, &mut std::io::stdout()) {
                 Ok(()) => ExitCode::SUCCESS,
