@@ -5,11 +5,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.39.0] — 2026-11-27
+
+### Bug Fixes
+- **test**: CodeQL js/incomplete-multi-character-sanitization in input-usage.spec.ts (#1393) (#1395)
+
+
+### Features
+- **ui**: Size classes for app-dialog-shell from the Helix dialog tokens (#1394) (#1399)
+
+
 ## [0.38.1] — 2026-11-26
 
 ### Documentation
 - **site**: Screenshots of the restyled views in light and dark (#1365)
 - Project style guide on the Helix base guide, UI rules moved out of AGENTS.md (#1366) (#1392)
+- Update CHANGELOG.md for v0.38.1 [skip ci]
 
 
 ### Refactoring
