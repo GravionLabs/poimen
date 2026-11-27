@@ -1,14 +1,15 @@
 //! `wait_any` (#1210, ADR 0018): `wait_agent` over several terminals and runs. It subscribes to
-//! the server's events and watches the event files of the runs before it reads any state, so no
-//! change is missed, and it never polls the server. Run files are read with the core `Tailer`.
+//! the server's events and watches the event directories of the runs before it reads any state, so
+//! no change is missed, and it never polls the server. Run files are read with the core
+//! `LineTail`.
 
-use super::runs::{events_dir, only_keys};
-use super::{Fail, WAIT_DEFAULT_S, WAIT_MAX_S, report, server_error};
+use super::run_files::{self, Attribution};
+use super::runs::{only_keys, optional_text, unknown_run};
+use super::{Env, Fail, WAIT_DEFAULT_S, WAIT_MAX_S, report, server_error};
 use notify::{RecursiveMode, Watcher};
 use poimen_client::Client;
 use poimen_client::protocol::{AgentStatus, Event};
-use poimen_core::agent_events::{self, Reducer};
-use poimen_core::transcripts::Tailer;
+use poimen_core::agent_events::{self, LineTail, MAX_EVENTS_BYTES, Reducer, RepoRef};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -17,13 +18,13 @@ use std::time::{Duration, Instant};
 pub(super) fn tool() -> Value {
     json!({
         "name": "wait_any",
-        "description": "Waits on several targets at once and returns at the first that needs you: an agent of `terminals` that is done, blocked, in error or gone (closed or exited terminal), or a run of `runs` that is finished or needs you. Returns the target that fired with its status, the notification text when blocked, the `report_done` report when there is one, and the state of the other targets. A target already in such a state returns at once. Prefer it over `wait_agent` when you wait on more than one terminal or run (for example one deliver loop per repository); use `wait_agent` for a single terminal. A read tool: any space, no confirmation. Uses events, never polls the server.",
+        "description": "Waits on several targets at once and returns at the first that needs you: an agent of `terminals` that is done, blocked, in error or gone (closed or exited terminal), or a run of `runs` that is finished or needs you. A run is found by its id among the runs of all repositories; its `repository` is optional. Returns the target that fired with its status, the notification text when blocked, the `report_done` report when there is one, and the state of the other targets. A target already in such a state returns at once. Prefer it over `wait_agent` when you wait on more than one terminal or run (for example one deliver loop per repository); use `wait_agent` for a single terminal. A read tool: any space, no confirmation. Uses events, never polls the server.",
         "inputSchema": {"type": "object", "properties": {
             "terminals": {"type": "array", "items": {"type": "string"}, "description": "Terminal ids."},
             "runs": {"type": "array", "items": {"type": "object", "properties": {
-                "repository": {"type": "string", "description": "A directory inside the repository."},
+                "repository": {"type": "string", "description": "Optional: a directory inside the run's repository, to also read its legacy `.agents/events`."},
                 "run": {"type": "string", "description": "Run id."}
-            }, "required": ["repository", "run"], "additionalProperties": false}, "description": "Runs of the Runs view."},
+            }, "required": ["run"], "additionalProperties": false}, "description": "Runs of the Runs view."},
             "timeout_s": {"type": "number", "description": "Seconds to wait (default 300, at most 3600). On timeout nothing fired: `fired` is null and `timed_out` true."}
         }, "additionalProperties": false},
     })
@@ -42,17 +43,68 @@ struct TerminalTarget {
     message: Option<String>,
 }
 
+/// A run to wait for: where it may be and what was read of it.
 struct RunTarget {
-    repository: String,
+    repository: Option<String>,
+    repo: Option<RepoRef>,
     run: String,
-    tailer: Tailer,
+    shared: Option<PathBuf>,
+    /// The legacy directory of `repo`, when it is read.
+    legacy: Option<PathBuf>,
+    /// The files read so far, the shared one first.
+    files: Vec<RunFile>,
     reducer: Reducer,
 }
 
+struct RunFile {
+    path: PathBuf,
+    tail: LineTail,
+    events: Vec<Value>,
+}
+
 impl RunTarget {
-    fn refresh(&mut self) {
-        for line in self.tailer.read_new() {
-            self.reducer.push_line(&line);
+    /// Reads what the files of the run gained; the run is folded again when anything changed.
+    fn refresh(&mut self, attribution: &mut Attribution) {
+        let paths = run_files::files_of(
+            self.shared.as_deref(),
+            self.legacy.as_deref(),
+            self.repo.as_ref(),
+            &self.run,
+            attribution,
+        );
+        // A removed file keeps what was read of it.
+        if paths.is_empty() {
+            return;
+        }
+        let mut before = std::mem::take(&mut self.files);
+        let mut changed = false;
+        for path in paths {
+            let mut file = match before.iter().position(|f| f.path == path) {
+                Some(at) => before.swap_remove(at),
+                None => RunFile {
+                    path,
+                    tail: LineTail::default(),
+                    events: Vec::new(),
+                },
+            };
+            let len = std::fs::metadata(&file.path)
+                .map(|m| m.len())
+                .ok()
+                .filter(|len| *len <= MAX_EVENTS_BYTES);
+            let tailed = len
+                .and_then(|len| file.tail.read(&file.path, len).ok())
+                .unwrap_or_default();
+            if tailed.reset {
+                file.events.clear();
+            }
+            changed |= tailed.reset || !tailed.lines.is_empty();
+            file.events
+                .extend(run_files::parse(tailed.lines.iter().map(String::as_str)));
+            self.files.push(file);
+        }
+        if changed || !before.is_empty() {
+            let merged = run_files::merge(self.files.iter().map(|f| f.events.as_slice()));
+            self.reducer = run_files::fold(&merged);
         }
     }
 
@@ -72,7 +124,10 @@ impl RunTarget {
 
     fn json(&self) -> Value {
         let status = self.status();
-        let mut v = json!({"type": "run", "repository": self.repository, "run": self.run, "status": status});
+        let mut v = json!({"type": "run", "run": self.run, "status": status});
+        if let (Some(repository), Some(o)) = (&self.repository, v.as_object_mut()) {
+            o.insert("repository".into(), json!(repository));
+        }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64());
@@ -137,47 +192,72 @@ fn string_list(args: &Value, key: &str) -> Result<Vec<String>, Fail> {
     }
 }
 
-fn run_specs(args: &Value) -> Result<Vec<(String, String)>, Fail> {
-    let bad = || Fail::Tool("`runs` holds objects `{repository, run}`".into());
+fn run_specs(args: &Value) -> Result<Vec<(Option<String>, String)>, Fail> {
+    let bad = || Fail::Tool("`runs` holds objects `{run, repository?}`".into());
     match args.get("runs") {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::Array(items)) => items
             .iter()
             .map(|i| {
-                let field = |k: &str| {
-                    i.get(k)
-                        .and_then(Value::as_str)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
-                };
                 only_keys(i, &["repository", "run"])?;
-                Ok((
-                    field("repository").ok_or_else(bad)?,
-                    field("run").ok_or_else(bad)?,
-                ))
+                let run = i
+                    .get("run")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(bad)?;
+                let repository = optional_text(i, "repository")?.map(str::to_owned);
+                Ok((repository, run.to_owned()))
             })
             .collect(),
         Some(_) => Err(Fail::Tool("`runs` must be an array".into())),
     }
 }
 
-/// The event file of a run; an unknown run is an error.
-fn run_file(repository: &str, run: &str) -> Result<PathBuf, Fail> {
-    let path = events_dir(repository)
-        .map_err(Fail::Tool)?
-        .join(format!("{run}.jsonl"));
-    let known = !run.contains(['/', '\\'])
-        && agent_events::run_of(&path) == Some(run)
-        && std::fs::metadata(&path).is_ok_and(|m| m.is_file());
-    if known {
-        Ok(path)
-    } else {
-        Err(Fail::Tool(format!("unknown run `{run}` in `{repository}`")))
+/// The targets of `specs` and the directories to watch for them. The shared directory is made
+/// when it is missing, so it can be watched; a legacy directory is read only when it exists.
+fn run_targets(
+    shared: Option<&Path>,
+    specs: Vec<(Option<String>, String)>,
+) -> Result<(Vec<RunTarget>, Vec<PathBuf>), Fail> {
+    let mut targets = Vec::new();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for (repository, run) in specs {
+        let repo = repository
+            .as_deref()
+            .map(run_files::repository)
+            .transpose()
+            .map_err(Fail::Tool)?;
+        if repo.is_none() && shared.is_none() {
+            return Err(Fail::Tool(run_files::NO_SHARED.into()));
+        }
+        let legacy = repo
+            .as_ref()
+            .map(|r| agent_events::legacy_dir(&r.common))
+            .filter(|d| d.is_dir());
+        if let Some(shared) = shared {
+            std::fs::create_dir_all(shared)
+                .map_err(|e| Fail::Tool(format!("cannot watch the runs: {e}")))?;
+        }
+        for dir in shared.into_iter().chain(legacy.as_deref()) {
+            if !dirs.iter().any(|d| d == dir) {
+                dirs.push(dir.to_path_buf());
+            }
+        }
+        targets.push(RunTarget {
+            repository,
+            repo,
+            run,
+            shared: shared.map(Path::to_path_buf),
+            legacy,
+            files: Vec::new(),
+            reducer: Reducer::new(),
+        });
     }
+    Ok((targets, dirs))
 }
 
 /// `wait_any {terminals?, runs?, timeout_s?}`.
-pub(super) fn wait_any(client: &Client, args: &Value) -> Result<Value, Fail> {
+pub(super) fn wait_any(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> {
     only_keys(args, &["terminals", "runs", "timeout_s"])?;
     let mut ids = string_list(args, "terminals")?;
     let mut seen = std::collections::HashSet::new();
@@ -198,17 +278,8 @@ pub(super) fn wait_any(client: &Client, args: &Value) -> Result<Value, Fail> {
 
     // Subscribe and watch first, read the state after.
     let (tx, rx) = mpsc::channel();
-    let mut runs = Vec::new();
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for (repository, run) in &specs {
-        let path = run_file(repository, run)?;
-        if let Some(dir) = path.parent().map(Path::to_path_buf)
-            && !dirs.contains(&dir)
-        {
-            dirs.push(dir);
-        }
-        runs.push((repository.clone(), run.clone(), path));
-    }
+    let shared = env.events_dir.as_deref();
+    let (mut runs, dirs) = run_targets(shared, specs)?;
     let watcher = if dirs.is_empty() {
         None
     } else {
@@ -225,15 +296,13 @@ pub(super) fn wait_any(client: &Client, args: &Value) -> Result<Value, Fail> {
         }
         Some(w)
     };
-    let mut runs: Vec<RunTarget> = runs
-        .into_iter()
-        .map(|(repository, run, path)| RunTarget {
-            repository,
-            run,
-            tailer: Tailer::new(path),
-            reducer: Reducer::new(),
-        })
-        .collect();
+    let mut attribution = Attribution::default();
+    for r in &mut runs {
+        r.refresh(&mut attribution);
+        if r.files.is_empty() {
+            return Err(unknown_run(shared, r.repository.as_deref(), &r.run));
+        }
+    }
     let mut terminals: Vec<TerminalTarget> = Vec::new();
     if !ids.is_empty() {
         let stream = client.subscribe().map_err(server_error)?;
@@ -263,7 +332,7 @@ pub(super) fn wait_any(client: &Client, args: &Value) -> Result<Value, Fail> {
 
     let fired = loop {
         for r in &mut runs {
-            r.refresh();
+            r.refresh(&mut attribution);
         }
         let hit = terminals
             .iter()

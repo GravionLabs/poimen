@@ -112,6 +112,7 @@ fn call(f: &Fixture, terminal: &str, tool: &str, args: Value, wait: Duration) ->
         terminal_id: Some(terminal),
         home: None,
         confirm_wait: wait,
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": tool, "arguments": args}});

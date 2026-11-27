@@ -1,5 +1,5 @@
 //! `report_done` (#980) against an in-process poimen-server: the stored report, the `run.finished`
-//! in the repository's agent-events, the line typed into an idle starter (and held back while it
+//! in the user's agent-events, the line typed into an idle starter (and held back while it
 //! works), `wait_agent` returning the report and the preamble of `start_agent`. Unix-only.
 #![cfg(unix)]
 
@@ -78,7 +78,7 @@ fn fixture(name: &str) -> Fixture {
 }
 
 fn call(
-    client: &Client,
+    f: &Fixture,
     terminal: Option<&str>,
     home: Option<PathBuf>,
     name: &str,
@@ -88,11 +88,12 @@ fn call(
         terminal_id: terminal,
         home,
         confirm_wait: Duration::from_secs(30),
+        events_dir: Some(f.dir.join("events")),
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": name, "arguments": args}});
     let mut out = Vec::new();
-    mcp::serve_with(client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
+    mcp::serve_with(&f.client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
     let line = String::from_utf8(out).unwrap();
     serde_json::from_str::<Value>(line.lines().next().unwrap()).unwrap()["result"].clone()
 }
@@ -141,7 +142,7 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
     agent_status(&f.client, &helper, 1, AgentStatus::Working);
 
     let r = call(
-        &f.client,
+        &f,
         Some(&helper),
         None,
         "report_done",
@@ -162,9 +163,9 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
     assert_eq!(report.summary, "Fixed it.");
     assert_eq!(report.files, ["a.rs"]);
 
-    // The run in the repository's events is finished with the summary.
+    // The run in the shared directory is finished with the summary.
     let runs = call(
-        &f.client,
+        &f,
         None,
         None,
         "list_runs",
@@ -190,7 +191,7 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
     });
     // Once: a second report is refused, and the summary was never typed.
     let again = call(
-        &f.client,
+        &f,
         Some(&helper),
         None,
         "report_done",
@@ -213,7 +214,7 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
     // wait_agent returns the report.
     agent_status(&f.client, &helper, 2, AgentStatus::Done);
     let waited = call(
-        &f.client,
+        &f,
         None,
         None,
         "wait_agent",
@@ -238,19 +239,20 @@ fn a_report_appends_to_the_running_run_of_the_terminal() {
         })
         .unwrap()
         .id;
-    let events = f.repo.join(".git/.agents/events");
+    let events = f.dir.join("events");
     std::fs::create_dir_all(&events).unwrap();
     std::fs::write(
         events.join("loop-1.jsonl"),
         format!(
             "{}\n",
             json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":"loop-1",
-                "type":"run.started","tone":"info","host":{"poimen.terminal":t}})
+                "type":"run.started","tone":"info","host":{"poimen.terminal":t},
+                "origin":{"worktree":f.repo.display().to_string()}})
         ),
     )
     .unwrap();
     let r = call(
-        &f.client,
+        &f,
         Some(&t),
         None,
         "report_done",
@@ -288,7 +290,7 @@ fn bad_reports_and_callers_outside_poimen_are_refused() {
             json!({"outcome": "failed", "summary": "x", "files": "a"}),
         ),
     ] {
-        let r = call(&f.client, caller, None, "report_done", args.clone());
+        let r = call(&f, caller, None, "report_done", args.clone());
         assert_eq!(r["isError"], true, "{args} {r}");
     }
     let listed = f.client.list_terminals(None).unwrap();
@@ -339,7 +341,7 @@ fn start_agent_appends_the_preamble_to_the_prompt() {
         }
     });
     let r = call(
-        &f.client,
+        &f,
         Some(&lead),
         Some(home),
         "start_agent",
@@ -361,4 +363,138 @@ fn start_agent_appends_the_preamble_to_the_prompt() {
     assert!(prompt.starts_with("Do the thing."), "{prompt}");
     assert!(prompt.contains("report_done"), "{prompt}");
     assert_eq!(kid.started_by.as_deref(), Some(lead.as_str()));
+}
+
+fn shell_terminal(f: &Fixture) -> String {
+    f.client
+        .create_terminal(&TerminalCreate {
+            space_id: f.space.clone(),
+            command: Some(vec!["sh".into(), "-c".into(), "sleep 60".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id
+}
+
+fn git(f: &Fixture, args: &[&str]) {
+    let out = poimen_core::gui_path::command("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}");
+}
+
+fn done(f: &Fixture, terminal: &str) -> String {
+    let r = call(
+        f,
+        Some(terminal),
+        None,
+        "report_done",
+        json!({"outcome": "succeeded", "summary": "Ok."}),
+    );
+    r["structuredContent"]["run"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{r}"))
+        .to_owned()
+}
+
+fn lines(path: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_new_run_is_written_to_the_shared_directory_with_its_origin() {
+    let f = fixture("origin");
+    git(&f, &["symbolic-ref", "HEAD", "refs/heads/feat/x"]);
+    git(
+        &f,
+        &["remote", "add", "origin", "git@github.com:example/a.git"],
+    );
+    let t = shell_terminal(&f);
+    let run = done(&f, &t);
+    assert!(run.starts_with("agent-"), "{run}");
+    let events = lines(&f.dir.join("events").join(format!("{run}.jsonl")));
+    let origin = &events[0]["origin"];
+    assert_eq!(origin["repo"], "example/a", "{origin}");
+    assert_eq!(origin["branch"], "feat/x");
+    assert_eq!(origin["worktree"], f.repo.display().to_string());
+    assert!(origin["host"].as_str().is_some_and(|h| !h.is_empty()));
+    assert!(!f.repo.join(".git/.agents").exists(), "no legacy write");
+}
+
+#[test]
+fn the_same_terminal_id_in_two_repositories_gives_two_run_ids() {
+    // Two servers, so both terminals have the first id; both report within the same second or so.
+    let (a, b) = (fixture("twin-a"), fixture("twin-b"));
+    let (ta, tb) = (shell_terminal(&a), shell_terminal(&b));
+    assert_eq!(ta, tb, "the same terminal id");
+    assert_ne!(done(&a, &ta), done(&b, &tb));
+}
+
+#[test]
+fn a_run_of_another_repository_or_machine_with_the_terminal_id_is_left_alone() {
+    let f = fixture("foreign");
+    let t = shell_terminal(&f);
+    let events = f.dir.join("events");
+    std::fs::create_dir_all(&events).unwrap();
+    let repo = f.repo.display().to_string();
+    let foreign = [
+        ("other-repo", json!({"repo": "example/other"})),
+        (
+            "other-host",
+            json!({"worktree": repo, "host": "some-other-machine"}),
+        ),
+    ];
+    let mut before = Vec::new();
+    for (run, origin) in foreign {
+        let path = events.join(format!("{run}.jsonl"));
+        let line = json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":run,
+            "type":"run.started","tone":"info","host":{"poimen.terminal":t},"origin":origin});
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        before.push((path, format!("{line}\n")));
+    }
+    let run = done(&f, &t);
+    assert!(run.starts_with("agent-"), "{run}");
+    for (path, text) in before {
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+    }
+}
+
+#[test]
+fn a_run_started_in_the_legacy_directory_is_finished_in_the_shared_one() {
+    let f = fixture("legacy");
+    let t = shell_terminal(&f);
+    let legacy = f.repo.join(".git/.agents/events");
+    std::fs::create_dir_all(&legacy).unwrap();
+    let text = format!(
+        "{}\n",
+        json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":"old-1",
+            "type":"run.started","tone":"info","host":{"poimen.terminal":t}})
+    );
+    std::fs::write(legacy.join("old-1.jsonl"), &text).unwrap();
+    assert_eq!(done(&f, &t), "old-1");
+    // The legacy file is not written; the shared one names the repository.
+    assert_eq!(
+        std::fs::read_to_string(legacy.join("old-1.jsonl")).unwrap(),
+        text
+    );
+    let shared = lines(&f.dir.join("events").join("old-1.jsonl"));
+    assert_eq!(shared[0]["type"], "run.started");
+    assert_eq!(
+        shared[0]["origin"]["worktree"],
+        f.repo.display().to_string()
+    );
+    assert_eq!(shared[1]["type"], "run.finished");
+    assert_eq!(shared[1]["seq"], 2);
+    let listed = call(&f, None, None, "list_runs", json!({}));
+    assert_eq!(
+        listed["structuredContent"]["runs"][0]["status"], "finished",
+        "{listed}"
+    );
 }

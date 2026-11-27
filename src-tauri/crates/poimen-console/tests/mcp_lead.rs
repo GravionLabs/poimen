@@ -69,7 +69,7 @@ fn fixture(name: &str) -> Fixture {
 }
 
 fn call(
-    client: &Client,
+    f: &Fixture,
     terminal: Option<&str>,
     home: Option<PathBuf>,
     name: &str,
@@ -79,11 +79,12 @@ fn call(
         terminal_id: terminal,
         home,
         confirm_wait: Duration::from_secs(30),
+        events_dir: Some(f.dir.join("events")),
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": name, "arguments": args}});
     let mut out = Vec::new();
-    mcp::serve_with(client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
+    mcp::serve_with(&f.client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
     let line = String::from_utf8(out).unwrap();
     serde_json::from_str::<Value>(line.lines().next().unwrap()).unwrap()["result"].clone()
 }
@@ -101,7 +102,7 @@ fn terminal(f: &Fixture, name: &str) -> String {
 }
 
 fn tool(f: &Fixture, terminal: &str, name: &str, args: Value) -> Value {
-    call(&f.client, Some(terminal), None, name, args)
+    call(f, Some(terminal), None, name, args)
 }
 
 fn data(result: &Value) -> Value {
@@ -286,11 +287,104 @@ fn bad_calls_are_refused() {
         error(&tool(&f, &lead, "record_run", json!({"event": "bogus"}))).contains("unknown event")
     );
     let outside = call(
-        &f.client,
+        &f,
         None,
         None,
         "record_run",
         json!({"event": "start", "title": "t"}),
     );
     assert!(error(&outside).contains("POIMEN_TERMINAL_ID"));
+}
+
+#[test]
+fn a_lead_run_is_written_to_the_shared_directory_with_its_origin() {
+    let f = fixture("shared");
+    let lead = terminal(&f, "lead");
+    let run = data(&tool(
+        &f,
+        &lead,
+        "record_run",
+        json!({"event": "start", "title": "plan"}),
+    ))["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let text = std::fs::read_to_string(f.dir.join("events").join(format!("{run}.jsonl"))).unwrap();
+    let started: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    let repo = f.repo.display().to_string();
+    assert_eq!(started["origin"]["worktree"], repo);
+    assert_eq!(started["origin"]["repo"], repo);
+    assert!(!f.repo.join(".git/.agents").exists(), "no legacy write");
+}
+
+#[test]
+fn lead_runs_of_another_repository_are_neither_listed_nor_written() {
+    let f = fixture("foreign");
+    let lead = terminal(&f, "lead");
+    let events = f.dir.join("events");
+    std::fs::create_dir_all(&events).unwrap();
+    let line = format!(
+        "{}\n",
+        json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":"lead-other",
+            "type":"run.started","tone":"info","host":{"poimen.terminal":lead},
+            "origin":{"repo":"example/other"}})
+    );
+    std::fs::write(events.join("lead-other.jsonl"), &line).unwrap();
+    let read = data(&tool(&f, &lead, "read_run", json!({})));
+    assert_eq!(read["open_runs"], json!([]));
+    let refused = error(&tool(
+        &f,
+        &lead,
+        "record_run",
+        json!({"event": "resume", "run": "lead-other"}),
+    ));
+    assert!(refused.contains("unknown run"), "{refused}");
+    // The terminal's id in it does not count as an own open run.
+    data(&tool(
+        &f,
+        &lead,
+        "record_run",
+        json!({"event": "start", "title": "mine"}),
+    ));
+    assert_eq!(
+        std::fs::read_to_string(events.join("lead-other.jsonl")).unwrap(),
+        line
+    );
+}
+
+#[test]
+fn a_lead_run_started_in_the_legacy_directory_goes_on_in_the_shared_one() {
+    let f = fixture("legacy");
+    let lead = terminal(&f, "lead");
+    let legacy = f.repo.join(".git/.agents/events");
+    std::fs::create_dir_all(&legacy).unwrap();
+    let text = format!(
+        "{}\n",
+        json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":"lead-1700000000",
+            "type":"run.started","tone":"info","host":{"poimen.terminal":lead},
+            "subject":{"kind":"poimen.lead","id":lead,"title":"old plan"}})
+    );
+    std::fs::write(legacy.join("lead-1700000000.jsonl"), &text).unwrap();
+    let noted = data(&tool(
+        &f,
+        &lead,
+        "record_run",
+        json!({"event": "note", "text": "after the upgrade"}),
+    ));
+    assert_eq!(noted["run"], "lead-1700000000");
+    assert_eq!(noted["seq"], 2);
+    data(&tool(
+        &f,
+        &lead,
+        "record_run",
+        json!({"event": "note", "text": "again"}),
+    ));
+    let read = data(&tool(&f, &lead, "read_run", json!({})));
+    assert_eq!(read["run"], "lead-1700000000");
+    assert_eq!(read["last_seq"], 3);
+    assert_eq!(read["state"]["gaps"], json!([]));
+    assert_eq!(
+        std::fs::read_to_string(legacy.join("lead-1700000000.jsonl")).unwrap(),
+        text
+    );
 }

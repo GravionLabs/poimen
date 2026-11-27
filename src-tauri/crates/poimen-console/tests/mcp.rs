@@ -92,7 +92,16 @@ fn fixture(name: &str) -> Fixture {
 fn session(client: &Client, terminal: Option<&str>, messages: &[Value]) -> Vec<Value> {
     let input: String = messages.iter().map(|m| format!("{m}\n")).collect();
     let mut out = Vec::new();
-    mcp::serve(client, terminal, Cursor::new(input), &mut out).unwrap();
+    // Never the user's event directory.
+    let env = mcp::Env {
+        terminal_id: terminal,
+        home: None,
+        confirm_wait: mcp::CONFIRM_WAIT,
+        events_dir: Some(
+            std::env::temp_dir().join(format!("poimen-mcp-{}-events", std::process::id())),
+        ),
+    };
+    mcp::serve_with(client, &env, Cursor::new(input), &mut out).unwrap();
     String::from_utf8(out)
         .unwrap()
         .lines()
@@ -245,7 +254,7 @@ fn errors_are_tool_errors() {
             .starts_with("poimen-server:")
     );
 
-    let r = call(&f.client, None, "list_runs", json!({}));
+    let r = call(&f.client, None, "get_events", json!({}));
     assert_eq!(r["isError"], true);
 
     // An unknown tool is a protocol error.

@@ -77,7 +77,7 @@ fn fixture(name: &str) -> Fixture {
 }
 
 fn call(
-    client: &Client,
+    f: &Fixture,
     terminal: Option<&str>,
     home: Option<PathBuf>,
     name: &str,
@@ -87,11 +87,12 @@ fn call(
         terminal_id: terminal,
         home,
         confirm_wait: Duration::from_secs(30),
+        events_dir: Some(f.dir.join("events")),
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": name, "arguments": args}});
     let mut out = Vec::new();
-    mcp::serve_with(client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
+    mcp::serve_with(&f.client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
     let line = String::from_utf8(out).unwrap();
     serde_json::from_str::<Value>(line.lines().next().unwrap()).unwrap()["result"].clone()
 }
@@ -109,7 +110,7 @@ fn terminal(f: &Fixture, name: &str) -> String {
 }
 
 fn events_dir(f: &Fixture) -> PathBuf {
-    let dir = f.repo.join(".git/.agents/events");
+    let dir = f.dir.join("events");
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -136,7 +137,7 @@ fn ev(run: &str, seq: u32, kind: &str, extra: Value) -> Value {
 }
 
 fn wait(f: &Fixture, args: Value) -> Value {
-    call(&f.client, None, None, "wait_any", args)["structuredContent"].clone()
+    call(f, None, None, "wait_any", args)["structuredContent"].clone()
 }
 
 #[test]
@@ -320,7 +321,7 @@ fn bad_arguments_are_tool_errors() {
         json!({"terminals": "x"}),
         json!({"terminals": ["x"], "other": 1}),
     ] {
-        let r = call(&f.client, None, None, "wait_any", args.clone());
+        let r = call(&f, None, None, "wait_any", args.clone());
         assert_eq!(r["isError"], true, "{args}: {r}");
     }
 }

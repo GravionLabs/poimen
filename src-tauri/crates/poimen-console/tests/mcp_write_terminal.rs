@@ -97,6 +97,7 @@ fn call(client: &Client, terminal: Option<&str>, wait: Duration, args: Value) ->
         terminal_id: terminal,
         home: None,
         confirm_wait: wait,
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "write_terminal", "arguments": args}});
@@ -137,6 +138,7 @@ fn screen(f: &Fixture, id: &str) -> String {
         terminal_id: Some(&f.caller),
         home: None,
         confirm_wait: WAIT,
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "read_terminal", "arguments": {"terminal": id}}});
