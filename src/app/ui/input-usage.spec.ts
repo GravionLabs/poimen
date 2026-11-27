@@ -16,8 +16,18 @@ function sources(dir: string, suffix: string): string[] {
   });
 }
 
+/** The markup outside comments. As in HTML, a comment that is not closed runs to the end. */
+function withoutComments(html: string): string {
+  const [first, ...opened] = html.split("<!--");
+  const rest = opened.map((part) => {
+    const end = part.indexOf("-->");
+    return end < 0 ? "" : part.slice(end + "-->".length);
+  });
+  return [first, ...rest].join("");
+}
+
 const templates = sources("src/app", ".html").map(
-  (file) => [file, readFileSync(file, "utf8").replace(/<!--.*?-->/gs, "")] as const,
+  (file) => [file, withoutComments(readFileSync(file, "utf8"))] as const,
 );
 
 const ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
@@ -36,6 +46,10 @@ function textControls(text: string): string[] {
 }
 
 describe("inputs", () => {
+  it("are checked outside comments only", () => {
+    expect(withoutComments("a<!-- <input>\n<!-- --><b><!---->c<!-- <input>")).toBe("a<b>c");
+  });
+
   it("are small hx-inputs", () => {
     const bad = templates.flatMap(([file, text]) =>
       textControls(text)
