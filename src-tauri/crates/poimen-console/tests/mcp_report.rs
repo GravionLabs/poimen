@@ -498,3 +498,46 @@ fn a_run_started_in_the_legacy_directory_is_finished_in_the_shared_one() {
         "{listed}"
     );
 }
+
+#[test]
+fn outside_a_repository_and_for_the_run_the_server_gave_the_terminal() {
+    let f = fixture("plain");
+    // A terminal outside a repository: the run names the machine only.
+    let plain = f.dir.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let space = f
+        .client
+        .create_space("plain", &plain.display().to_string())
+        .unwrap()
+        .id;
+    let outside = f
+        .client
+        .create_terminal(&TerminalCreate {
+            space_id: space,
+            command: Some(vec!["sh".into(), "-c".into(), "sleep 60".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    let events = f.dir.join("events");
+    let run = done(&f, &outside);
+    let origin = lines(&events.join(format!("{run}.jsonl")))[0]["origin"].clone();
+    let keys: Vec<_> = origin.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["host"], "{origin}");
+
+    // The run the server gave the terminal is continued, also without origin.
+    let scripted = f
+        .client
+        .create_terminal(&TerminalCreate {
+            space_id: f.space.clone(),
+            command: Some(vec!["sh".into(), "-c".into(), "sleep 60".into()]),
+            run: Some("script-1".into()),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    let line = json!({"v":1,"seq":1,"ts":poimen_protocol::files::utc_now(),"run":"script-1",
+        "type":"run.started","tone":"info","host":{"poimen.terminal":scripted}});
+    std::fs::write(events.join("script-1.jsonl"), format!("{line}\n")).unwrap();
+    assert_eq!(done(&f, &scripted), "script-1");
+}
