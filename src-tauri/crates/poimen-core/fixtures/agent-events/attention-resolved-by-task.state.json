@@ -22,7 +22,8 @@
   "attentions": [
     {
       "id": "a2",
-      "reason": "run-wide notice",
+      "reason": "run-wide-notice",
+      "text": "run-wide notice",
       "needsYou": false
     }
   ],

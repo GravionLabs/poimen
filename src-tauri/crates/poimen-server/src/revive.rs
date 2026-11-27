@@ -80,6 +80,7 @@ impl Shared {
         let entry = &mut inner.terminals[index];
         // Before the host starts: its first output must find the stream revived.
         entry.stream.revive();
+        let events_dir = lock(&self.events_dir).clone();
         let spawned = host::start(
             &self.pty_host,
             &host::Spec {
@@ -92,6 +93,7 @@ impl Shared {
                 rows,
                 term: term.as_deref(),
                 locale_set: host::locale_set(|name| std::env::var(name).ok()),
+                events_dir: events_dir.as_deref(),
                 env: &env,
             },
             output_to(&entry.stream),

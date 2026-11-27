@@ -1399,8 +1399,8 @@ pub enum Event {
     #[serde(rename = "server.awake_changed")]
     ServerAwakeChanged { awake: bool },
     /// Progress events of a run (agent-events, jsonl-file binding) in the repository at `root`,
-    /// as written to `<git-common-dir>/.agents/events/<run>.jsonl`: complete lines, JSON objects,
-    /// in file order and unchanged. Only to subscriptions with `run_events`.
+    /// from `<run>.jsonl` of the shared event directory and `<git-common-dir>/.agents/events`:
+    /// complete lines, JSON objects, unchanged, each `seq` once. Only with `run_events`.
     #[serde(rename = "run.events")]
     RunEvents {
         root: String,

@@ -22,7 +22,7 @@ fn pinned_tag() -> String {
 
 #[test]
 fn the_pinned_tag_is_recorded_in_source_txt() {
-    assert_eq!(pinned_tag(), "v0.1.0");
+    assert_eq!(pinned_tag(), "v0.3.0");
 }
 
 /// Every reader fixture of agent-events: events in, run state out. `<case>.now` fixes the
@@ -37,7 +37,7 @@ fn every_reader_fixture_of_agent_events_folds_to_its_state() {
         })
         .collect();
     names.sort();
-    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names.len(), 12, "{names:?}");
     for name in names {
         let clock = std::fs::read_to_string(format!("{DIR}/{name}.now"))
             .unwrap_or_else(|_| "2026-11-08T10:30:00.000Z".into());
@@ -200,15 +200,16 @@ fn read(tail: &mut LineTail, path: &Path) -> Tailed {
 }
 
 #[test]
-fn first_subject_reads_only_the_first_line() {
+fn the_subject_comes_from_the_first_line_only() {
     let (_dir, path) = temp_file("r1.jsonl");
+    let subject = |path: &Path| first_head(path).and_then(|h| h.subject);
     std::fs::write(
         &path,
         "{\"v\":1,\"type\":\"run.started\",\"subject\":{\"kind\":\"github.milestone\",\"id\":\"M16\"}}\n{\"type\":\"x\"}\n",
     )
     .unwrap();
     assert_eq!(
-        first_subject(&path),
+        subject(&path),
         Some(("github.milestone".to_owned(), "M16".to_owned()))
     );
     // Incomplete first line, other first event, no subject, missing file: none.
@@ -218,9 +219,9 @@ fn first_subject_reads_only_the_first_line() {
         "{\"type\":\"run.started\"}\n",
     ] {
         std::fs::write(&path, text).unwrap();
-        assert_eq!(first_subject(&path), None, "{text}");
+        assert_eq!(subject(&path), None, "{text}");
     }
-    assert_eq!(first_subject(&path.with_extension("none")), None);
+    assert_eq!(subject(&path.with_extension("none")), None);
 }
 
 #[test]
@@ -315,4 +316,22 @@ fn a_run_without_lead_records_has_no_lead_state() {
     let run = reduce(text, now(), &|_| true).unwrap();
     assert!(run.lead.is_none());
     assert!(serde_json::to_value(&run).unwrap().get("lead").is_none());
+}
+
+#[test]
+fn the_run_carries_the_origin_of_run_started() {
+    let line = |extra: &str| {
+        format!(
+            r#"{{"v":1,"seq":1,"ts":"2026-11-08T11:00:00Z","run":"r","type":"run.started","tone":"neutral"{extra}}}"#
+        ) + "\n"
+    };
+    let full = r#","origin":{"repo":"o/r","branch":"main","worktree":"/w","host":"h"}"#;
+    let run = reduce(&line(full), now(), &|_| true).unwrap();
+    assert_eq!(
+        serde_json::to_value(&run).unwrap()["origin"],
+        serde_json::json!({"repo":"o/r","branch":"main","worktree":"/w","host":"h"})
+    );
+    let bare = reduce(&line(""), now(), &|_| true).unwrap();
+    assert_eq!(bare.origin, None);
+    assert!(serde_json::to_value(&bare).unwrap().get("origin").is_none());
 }

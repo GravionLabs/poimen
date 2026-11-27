@@ -13,12 +13,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poimen_client::Client;
-use poimen_client::protocol::{Event, EventsSubscribe};
+use poimen_client::protocol::{Event, EventsSubscribe, TerminalCreate};
 use poimen_server::{Config, PtyHost, Server};
 use serde_json::Value;
 
 struct Env {
     repo: PathBuf,
+    /// The shared event directory of the server.
+    shared: PathBuf,
     client: Client,
     /// Removes the directory of the server when the test ends.
     _dir: tempfile::TempDir,
@@ -34,12 +36,13 @@ impl Env {
         let repo = dir.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let repo = repo.canonicalize().unwrap();
-        let git = Command::new("git")
-            .args(["init", "-q"])
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-        assert!(git.success());
+        git(&repo, &["init", "-q"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", "https://github.com/o/api.git"],
+        );
+        let shared = dir.join("events");
+        std::fs::create_dir_all(&shared).unwrap();
         let config = Config {
             socket: dir.join("run").join("server.sock"),
             state_file: dir.join("state").join("server.json"),
@@ -52,6 +55,7 @@ impl Env {
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
         let server = Server::bind(config.clone()).unwrap();
+        server.set_events_dir(Some(shared.clone()));
         thread::spawn(move || server.serve());
         let client = Client::new(&config.socket);
         client
@@ -59,6 +63,7 @@ impl Env {
             .unwrap();
         Self {
             repo,
+            shared,
             client,
             _dir: guard,
         }
@@ -68,6 +73,10 @@ impl Env {
         let dir = self.repo.join(".git/.agents/events");
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(format!("{run}.jsonl"))
+    }
+
+    fn shared_file(&self, run: &str) -> PathBuf {
+        self.shared.join(format!("{run}.jsonl"))
     }
 
     /// A subscription; `runs` asks for `run_events`. Its events arrive on the receiver.
@@ -90,6 +99,18 @@ impl Env {
         });
         rx
     }
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let git = Command::new("git").args(args).current_dir(dir).status();
+    assert!(git.unwrap().success());
+}
+
+/// A `run.started` line with the `origin` object `origin`.
+fn started(run: &str, origin: &str) -> String {
+    format!(
+        r#"{{"v":1,"seq":1,"ts":"2026-11-13T10:00:01Z","run":"{run}","type":"run.started","tone":"info","origin":{origin}}}"#
+    ) + "\n"
 }
 
 fn line(run: &str, seq: u32, ty: &str) -> String {
@@ -221,4 +242,71 @@ fn earlier_runs_of_a_shown_subject_are_sent_and_other_old_runs_are_not() {
             pair("earlier", 2)
         ]
     );
+}
+
+#[test]
+fn runs_of_the_shared_and_the_legacy_directory_arrive_once_with_the_repositorys_root() {
+    let env = Env::new("shared");
+    let worktree = format!(r#"{{"worktree":"{}"}}"#, env.repo.display());
+    // By the worktree, by the remote's name, and one of a repository outside the spaces.
+    append(&env.shared_file("tree"), &started("tree", &worktree));
+    append(
+        &env.shared_file("name"),
+        &started("name", r#"{"repo":"o/api","worktree":"/gone"}"#),
+    );
+    append(
+        &env.shared_file("foreign"),
+        &started("foreign", r#"{"repo":"o/other"}"#),
+    );
+    // The same run in both places: the legacy copy lags one event behind.
+    let both = started("both", &worktree) + &line("both", 2, "progress");
+    append(&env.events_file("both"), &both);
+    append(
+        &env.shared_file("both"),
+        &(both.clone() + &line("both", 3, "progress")),
+    );
+    append(&env.events_file("old"), &line("old", 1, "run.started"));
+    let rx = env.subscribe(true);
+    let mut got = run_seqs(&rx, 6);
+    got.sort();
+    let want = [
+        pair("both", 1),
+        pair("both", 2),
+        pair("both", 3),
+        pair("name", 1),
+        pair("old", 1),
+        pair("tree", 1),
+    ];
+    assert_eq!(got, want);
+    // The writer of the old place appends what the shared file already has: not sent again.
+    append(&env.events_file("both"), &line("both", 3, "progress"));
+    no_run_events(&rx);
+    let again = env.subscribe(true);
+    let mut replay = run_seqs(&again, 6);
+    replay.sort();
+    assert_eq!(replay, want);
+    no_run_events(&again);
+}
+
+#[test]
+fn a_run_without_origin_belongs_to_the_repository_of_its_terminal() {
+    let env = Env::new("terminal");
+    append(&env.shared_file("mine"), &line("mine", 1, "run.started"));
+    append(
+        &env.shared_file("nobody"),
+        &line("nobody", 1, "run.started"),
+    );
+    let rx = env.subscribe(true);
+    no_run_events(&rx);
+    let space = env.client.list_spaces().unwrap().remove(0);
+    env.client
+        .create_terminal(&TerminalCreate {
+            space_id: space.id,
+            command: Some(vec!["sh".into()]),
+            run: Some("mine".into()),
+            ..TerminalCreate::default()
+        })
+        .unwrap();
+    assert_eq!(run_seqs(&rx, 1), [pair("mine", 1)]);
+    no_run_events(&rx);
 }

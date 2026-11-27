@@ -126,6 +126,42 @@ describe("parseStatus of a core run", () => {
   });
 });
 
+describe("tasks a finished run left open (#1408)", () => {
+  it("shows the tasks of `leftOpen` as open, not as cancelled", () => {
+    const task = { task: "t1", subject: { kind: "k", id: "1", title: "One" } };
+    const parsed = must(
+      parseStatus({
+        run: "r",
+        status: "finished",
+        updated: "2026-11-27T10:00:00Z",
+        tasks: [],
+        leftOpen: [{ ...task, step: { name: "merge" } }],
+        finished: { cancelled: [{ ...task, reason: "run-finished" }] },
+      }),
+    );
+    expect(parsed.tasks.map((t) => [t.task, t.step?.name])).toEqual([["t1", "merge"]]);
+    expect(parsed.finished).toEqual([]);
+  });
+});
+
+describe("tasks a finished run left open (#1408)", () => {
+  it("shows the tasks of `leftOpen` as open, not as cancelled", () => {
+    const task = { task: "t1", subject: { kind: "k", id: "1", title: "One" } };
+    const parsed = must(
+      parseStatus({
+        run: "r",
+        status: "finished",
+        updated: "2026-11-27T10:00:00Z",
+        tasks: [],
+        leftOpen: [{ ...task, step: { name: "merge" } }],
+        finished: { cancelled: [{ ...task, reason: "run-finished" }] },
+      }),
+    );
+    expect(parsed.tasks.map((t) => [t.task, t.step?.name])).toEqual([["t1", "merge"]]);
+    expect(parsed.finished).toEqual([]);
+  });
+});
+
 describe("cardsOf", () => {
   it("has no card for a repository without runs", () => {
     expect(cardsOf("/r", { kind: "missing" })).toEqual([]);

@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "run": "r11",
+  "status": "running",
+  "step": {
+    "name": "pr",
+    "n": 2,
+    "total": 2
+  },
+  "tasks": [],
+  "finished": {
+    "succeeded": [],
+    "failed": [],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [
+    {
+      "rel": "pull-request",
+      "url": "https://github.com/GravionLabs/demo/pull/3",
+      "title": "PR 3"
+    }
+  ],
+  "gaps": [],
+  "lastSeq": 3,
+  "updated": "2026-11-08T10:00:03.000Z"
+}
