@@ -174,6 +174,7 @@ fn env<'a>(terminal: Option<&'a str>, home: Option<PathBuf>, wait: Duration) -> 
         terminal_id: terminal,
         home,
         confirm_wait: wait,
+        events_dir: None,
     }
 }
 

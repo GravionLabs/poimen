@@ -133,6 +133,7 @@ fn call(f: &Fixture, terminal: Option<&str>, tool: &str, args: Value) -> Value {
         terminal_id: terminal,
         home: Some(f.dir.join("home")),
         confirm_wait: Duration::from_secs(30),
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": tool, "arguments": args}});
@@ -337,6 +338,7 @@ fn both_tools_are_listed_with_their_use() {
         terminal_id: None,
         home: None,
         confirm_wait: Duration::from_secs(1),
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
     let mut out = Vec::new();

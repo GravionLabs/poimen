@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// The `profile` of these events.
 pub const LEAD_PROFILE: &str = "orchestrate@1";
-/// The prefix of a lead run id: `lead-<secs>`.
+/// The prefix of a lead run id: `lead-<uuid>` (before #1417 `lead-<secs>`).
 pub const LEAD_RUN_PREFIX: &str = "lead-";
 
 /// A record of a lead run, without its envelope.

@@ -99,6 +99,7 @@ fn call(client: &Client, terminal: Option<&str>, wait: Duration, args: Value) ->
         terminal_id: terminal,
         home: None,
         confirm_wait: wait,
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "start_shell", "arguments": args}});
@@ -123,6 +124,7 @@ fn screen_has(client: &Client, terminal: &str, needle: &str) -> bool {
             terminal_id: None,
             home: None,
             confirm_wait: Duration::from_secs(1),
+            events_dir: None,
         };
         mcp::serve_with(client, &env, Cursor::new(format!("{msg}\n")), &mut out).unwrap();
         let r: Value =

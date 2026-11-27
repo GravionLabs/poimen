@@ -99,6 +99,7 @@ fn call(client: &Client, terminal: Option<&str>, wait: Duration, args: Value) ->
         terminal_id: terminal,
         home: None,
         confirm_wait: wait,
+        events_dir: None,
     };
     let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "stop_terminal", "arguments": args}});
