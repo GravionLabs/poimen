@@ -1,6 +1,6 @@
 @if (actions.dialog(); as d) {
   @if (d.kind === "new") {
-    <app-dialog-shell heading="New pane" label="New pane" (cancelled)="cancel()">
+    <app-dialog-shell size="md" heading="New pane" label="New pane" (cancelled)="cancel()">
       <form (submit)="$event.preventDefault(); create($any($event.target))">
         <fieldset class="types">
           <legend class="sr-only">Type</legend>
@@ -40,6 +40,7 @@
     </app-dialog-shell>
   } @else if (d.kind === "restart") {
     <app-dialog-shell
+      size="sm"
       heading="Restart terminal"
       label="Restart terminal"
       [alert]="true"
@@ -69,6 +70,7 @@
     </app-dialog-shell>
   } @else if (d.kind === "agent") {
     <app-dialog-shell
+      size="md"
       heading="Start agent in {{ d.name }}"
       label="Start agent"
       (cancelled)="cancel()"
@@ -120,6 +122,7 @@
     </app-dialog-shell>
   } @else if (d.kind === "save-layout") {
     <app-dialog-shell
+      size="md"
       heading="Save tab as layout"
       label="Save tab as layout"
       (cancelled)="cancel()"
@@ -145,6 +148,7 @@
     </app-dialog-shell>
   } @else {
     <app-dialog-shell
+      size="sm"
       heading="Close pane"
       label="Close pane"
       [alert]="true"

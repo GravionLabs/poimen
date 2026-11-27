@@ -1,8 +1,8 @@
 @if (state.choices(); as choices) {
   <app-dialog-shell
+    size="sm"
     heading="Send to which agent?"
     label="Choose an agent"
-    width="360px"
     (cancelled)="state.answer(null)"
   >
     <hx-list aria-label="Agents">

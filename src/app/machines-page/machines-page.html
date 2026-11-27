@@ -173,8 +173,8 @@
   }
   @if (removing(); as name) {
     <app-dialog-shell
+      size="sm"
       heading="Remove machine?"
-      width="520px"
       [alert]="true"
       [cancelDefault]="true"
       (cancelled)="removing.set(null)"

@@ -1,5 +1,6 @@
 @if (restart.action(); as action) {
   <app-dialog-shell
+    size="sm"
     [heading]="
       action === 'restart' ? 'Restart poimen-server?' : 'Quit poimen and stop poimen-server?'
     "

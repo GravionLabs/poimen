@@ -18,6 +18,9 @@ const FIELDS =
   "input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), .hx-select-trigger:not([disabled])";
 const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[href], [tabindex]:not([tabindex="-1"])`;
 
+/** The Helix dialog size classes; each is the `--h-dialog-<size>-width` token. */
+export type DialogSize = "sm" | "md" | "lg";
+
 /**
  * The one shell of the app's dialogs: a native modal `<dialog>` (the page behind is inert), a heading
  * with the same close icon button everywhere, and the content of the dialog projected. The buttons of
@@ -88,8 +91,10 @@ export class DialogShell implements OnDestroy {
   @Input() alert = false;
   /** A destructive or risky confirmation: Cancel is the default and Enter does not confirm. */
   @Input() cancelDefault = false;
-  /** Width of the dialog, a CSS length. */
-  @Input() width = "480px";
+  /** Width class by content: `sm` confirmation, `md` few fields, `lg` wide form or table. */
+  @Input() size: DialogSize = "md";
+  /** A CSS length that replaces the width of the size class, for content that fits none. */
+  @Input() width: string | null = null;
   /** Escape, the backdrop or the close icon. */
   @Output() readonly cancelled = new EventEmitter<void>();
   /** Enter outside a form and a button. */
@@ -117,6 +122,11 @@ export class DialogShell implements OnDestroy {
     if (el && typeof el.close === "function") el.close();
     else el?.removeAttribute("open");
     if (this.opener?.isConnected) returnFocus(this.opener, this.byKeyboard);
+  }
+
+  /** Never wider than the window. */
+  protected get cssWidth(): string {
+    return `min(${this.width ?? `var(--h-dialog-${this.size}-width)`}, 92vw)`;
   }
 
   protected backdrop(event: MouseEvent): void {

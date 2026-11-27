@@ -1,5 +1,5 @@
 @if (launcher.opened(); as open) {
-  <app-dialog-shell heading="Deliver" width="560px" (cancelled)="launcher.close()">
+  <app-dialog-shell size="md" heading="Deliver" (cancelled)="launcher.close()">
     @if (refusal(); as why) {
       <p class="hint" data-testid="refusal">{{ why }}</p>
       <div class="dialog-buttons">

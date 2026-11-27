@@ -1,5 +1,10 @@
 @if (resume.dialog(); as d) {
-  <app-dialog-shell heading="Resume session" label="Resume session" (cancelled)="resume.cancel()">
+  <app-dialog-shell
+    size="md"
+    heading="Resume session"
+    label="Resume session"
+    (cancelled)="resume.cancel()"
+  >
     <p class="hint dir">{{ d.dir }}</p>
     @if (d.error) {
       <hx-message class="error" severity="error" size="small">{{ d.error }}</hx-message>

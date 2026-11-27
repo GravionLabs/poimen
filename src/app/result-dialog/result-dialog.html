@@ -1,5 +1,5 @@
 @if (state.content(); as c) {
-  <app-dialog-shell [heading]="c.title" (cancelled)="state.close()">
+  <app-dialog-shell size="md" [heading]="c.title" (cancelled)="state.close()">
     <p class="summary">{{ c.summary }}</p>
     @if (c.text) {
       <pre class="output" aria-label="Output">{{ c.text }}</pre>
