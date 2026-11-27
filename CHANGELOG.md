@@ -5,10 +5,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.40.0] — 2026-11-27
+
+### Bug Fixes
+- **deliver**: Serialize the left-open tasks of a run as leftOpen (#1408)
+
+
+### Documentation
+- Poimen as the host of delivery runs and their events (#1410) (#1421)
+- Poimen as the host of delivery runs and their events (#1410)
+- Link the skills ADR by commit (#1410)
+
+
+### Features
+- **events**: Poimen-server and its terminals use the per-user event directory (#1408) (#1418)
+- **events**: Use the per-user event directory (#1408)
+
+
 ## [0.39.0] — 2026-11-27
 
 ### Bug Fixes
 - **test**: CodeQL js/incomplete-multi-character-sanitization in input-usage.spec.ts (#1393) (#1395)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.39.0 [skip ci]
 
 
 ### Features
