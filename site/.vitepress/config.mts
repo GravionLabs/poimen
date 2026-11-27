@@ -39,6 +39,7 @@ export default defineConfig({
           { text: "Agents", link: "/guide/agents" },
           { text: "GitHub and tasks", link: "/guide/github" },
           { text: "Runs", link: "/guide/runs" },
+          { text: "Objective runs", link: "/guide/objective-runs" },
           { text: "Remote machines", link: "/guide/remote-machines" },
           { text: "Console (TUI and CLI)", link: "/guide/console" },
           { text: "MCP server", link: "/guide/mcp" },
