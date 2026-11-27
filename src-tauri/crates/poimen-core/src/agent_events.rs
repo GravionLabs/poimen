@@ -265,7 +265,7 @@ pub struct Run {
     pub origin: Option<Origin>,
     /// The tasks `run.finished` found open, with their step and progress: the core state lists
     /// them as cancelled, the Runs view shows them as left open.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "leftOpen", skip_serializing_if = "Vec::is_empty")]
     pub left_open: Vec<Task>,
     /// One row per event of a known type, in file order.
     pub events: Vec<RunEvent>,

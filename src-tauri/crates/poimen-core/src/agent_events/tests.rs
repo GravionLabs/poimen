@@ -335,3 +335,17 @@ fn the_run_carries_the_origin_of_run_started() {
     assert_eq!(bare.origin, None);
     assert!(serde_json::to_value(&bare).unwrap().get("origin").is_none());
 }
+
+/// The app reads the open tasks of a finished run as `leftOpen` (`src/app/deliver/run-wire.ts`).
+#[test]
+fn the_left_open_tasks_of_a_finished_run_are_serialized_as_left_open_in_camel_case() {
+    let text = fixture("run-finished-open-tasks", "jsonl");
+    let run = reduce(&text, 0.0, &|_| true).expect("a run");
+    let json = serde_json::to_value(&run).unwrap();
+    assert!(!run.left_open.is_empty());
+    assert_eq!(
+        json["leftOpen"].as_array().map(Vec::len),
+        Some(run.left_open.len())
+    );
+    assert!(json.get("left_open").is_none());
+}
