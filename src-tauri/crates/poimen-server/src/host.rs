@@ -14,6 +14,7 @@
 //! records up to its `hello` as a replay ([`Chunk::Replay`]). A `gap` becomes a marker line in
 //! the grid ([`gap_marker`]).
 
+use poimen_core::agent_events::DIR_ENV;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -113,6 +114,9 @@ pub(crate) struct Spec<'a> {
     /// Whether the server has a locale (see [`locale_set`]); without one the child gets a UTF-8
     /// `LC_CTYPE` ([`default_lc_ctype`]).
     pub locale_set: bool,
+    /// The server's shared event directory, for `AGENT_EVENTS_DIR` of the child unless `env`
+    /// sets it.
+    pub events_dir: Option<&'a Path>,
     /// The request's extra variables; applied before POIMEN_SOCKET and POIMEN_TERMINAL_ID, which
     /// they cannot override.
     pub env: &'a std::collections::BTreeMap<String, String>,
@@ -149,8 +153,8 @@ pub(crate) fn endpoint_for(socket: &Path, terminal_id: &str) -> PathBuf {
 }
 
 /// The start line of a host: the command, its directory and size, and the environment poimen
-/// adds (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID`, `TERM=xterm-256color` when the server has none
-/// or a dumb one, `LC_CTYPE` when the server has no locale).
+/// adds (`AGENT_EVENTS_DIR`, `POIMEN_SOCKET`, `POIMEN_TERMINAL_ID`, `TERM=xterm-256color` when
+/// the server has none or a dumb one, `LC_CTYPE` when the server has no locale).
 pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
     let mut env = spec.env.clone();
     if spec.term.is_none_or(|t| t.is_empty() || t == "dumb") {
@@ -158,6 +162,10 @@ pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
     }
     if let (false, Some(ctype)) = (spec.locale_set, default_lc_ctype()) {
         env.insert("LC_CTYPE".to_string(), ctype.to_string());
+    }
+    if let Some(dir) = spec.events_dir {
+        env.entry(DIR_ENV.to_string())
+            .or_insert_with(|| dir.to_string_lossy().into_owned());
     }
     env.insert(
         ENV_SOCKET.to_string(),

@@ -1,0 +1,32 @@
+{
+  "now": "2026-11-20T10:30:00.000Z",
+  "files": {
+    "shared/01JDA0000000000000000000A1.jsonl": {
+      "mtime": "2026-11-20T10:00:02.000Z"
+    },
+    "shared/01JDA0000000000000000000B1.jsonl": {
+      "mtime": "2026-11-20T10:00:01.000Z"
+    }
+  },
+  "runs": [
+    {
+      "run": "01JDA0000000000000000000A1",
+      "repo": "example/a",
+      "status": "finished",
+      "seqs": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "run": "01JDA0000000000000000000B1",
+      "repo": "example/b",
+      "status": "running",
+      "seqs": [
+        1,
+        2
+      ]
+    }
+  ]
+}

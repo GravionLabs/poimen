@@ -1,0 +1,2 @@
+{"v":1,"seq":1,"ts":"2026-11-20T10:00:00.000Z","run":"01JDA0000000000000000000B1","type":"run.started","tone":"neutral","profiles":[],"host":{},"origin":{"repo":"example/b","branch":"main","worktree":"/home/dev/b","host":"devbox"}}
+{"v":1,"seq":2,"ts":"2026-11-20T10:00:01.000Z","run":"01JDA0000000000000000000B1","type":"progress","tone":"neutral","done":1,"total":2}

@@ -1,0 +1,40 @@
+{
+  "v": 1,
+  "run": "r9",
+  "status": "finished",
+  "outcome": "failed",
+  "reason": "stopped",
+  "text": "stopped",
+  "tasks": [],
+  "finished": {
+    "succeeded": [
+      {
+        "task": "t3",
+        "subject": { "kind": "github.issue", "id": "GravionLabs/demo#3", "title": "Three" }
+      }
+    ],
+    "failed": [],
+    "cancelled": [
+      {
+        "task": "t1",
+        "subject": { "kind": "github.issue", "id": "GravionLabs/demo#1", "title": "One" },
+        "reason": "run-finished",
+        "text": "run finished"
+      },
+      {
+        "task": "t2",
+        "parent": "t1",
+        "subject": { "kind": "github.issue", "id": "GravionLabs/demo#2", "title": "Two" },
+        "reason": "run-finished",
+        "text": "run finished"
+      }
+    ],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [],
+  "gaps": [],
+  "lastSeq": 7,
+  "updated": "2026-11-08T10:00:07.000Z"
+}

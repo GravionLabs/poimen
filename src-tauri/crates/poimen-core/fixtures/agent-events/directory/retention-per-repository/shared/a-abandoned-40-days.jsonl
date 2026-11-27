@@ -1,0 +1,2 @@
+{"v":1,"seq":1,"ts":"2026-11-21T12:00:00.000Z","run":"a-abandoned-40-days","type":"run.started","tone":"neutral","profiles":[],"host":{},"origin":{"repo":"example/a","branch":"main","worktree":"/home/dev/a","host":"devbox"}}
+{"v":1,"seq":2,"ts":"2026-11-21T12:00:01.000Z","run":"a-abandoned-40-days","type":"progress","tone":"neutral","done":1,"total":2}

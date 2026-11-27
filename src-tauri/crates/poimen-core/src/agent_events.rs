@@ -20,7 +20,12 @@ use serde::Serialize;
 use serde_json::Value;
 
 mod lead;
+mod location;
 pub use lead::{LeadDependency, LeadGrant, LeadMember, LeadState};
+pub use location::{
+    DIR_ENV, Head, Heads, Origin, RESOLVE_TTL, RepoCache, RepoRef, attribute, first_head,
+    legacy_dir, repo_name, shared_dir, shared_dir_here,
+};
 
 /// The event version this build understands.
 pub const SUPPORTED_V: i64 = 1;
@@ -45,7 +50,8 @@ const OUTCOMES: [&str; 4] = ["succeeded", "failed", "cancelled", "skipped"];
 /// The `host` key of the jsonl-file binding with the writer's pid.
 const PID_KEY: &str = "jsonl-file.pid";
 
-/// The progress event files relative to the git common dir (jsonl-file binding).
+/// The legacy event directory relative to the git common dir (jsonl-file binding up to 0.2,
+/// [`legacy_dir`]); run files live in the shared directory ([`shared_dir`]) since 0.3.
 pub const EVENTS_PATH: &str = ".agents/events";
 
 /// A larger event file is not read.
@@ -84,9 +90,6 @@ pub const SUBJECT_KEEP_SECS: f64 = 14.0 * 24.0 * 3600.0;
 /// At most this many runs of one subject are kept, newest first.
 pub const MAX_SUBJECT_RUNS: usize = 50;
 
-/// How much of a file [`first_subject`] reads to find its first line.
-const FIRST_LINE_BYTES: u64 = 64 << 10;
-
 /// The identity of a run's subject: `(kind, id)` of `subject` in `run.started`.
 pub type SubjectKey = (String, String);
 
@@ -96,20 +99,6 @@ pub fn subject_key(subject: &Value) -> Option<SubjectKey> {
         subject.get("kind")?.as_str()?.to_owned(),
         subject.get("id")?.as_str()?.to_owned(),
     ))
-}
-
-/// The subject of the run in `path`, from its first line only (`run.started`), without replaying
-/// the file. `None` for a first line that is incomplete, not a `run.started` or without subject.
-pub fn first_subject(path: &Path) -> Option<SubjectKey> {
-    let file = std::fs::File::open(path).ok()?;
-    let mut buf = Vec::new();
-    file.take(FIRST_LINE_BYTES).read_to_end(&mut buf).ok()?;
-    let end = buf.iter().position(|b| *b == b'\n')?;
-    let event: Value = serde_json::from_slice(&buf[..end]).ok()?;
-    if event.get("type")?.as_str()? != "run.started" {
-        return None;
-    }
-    subject_key(event.get("subject")?)
 }
 
 /// Where the reading of one event file stands: the offset after its last complete line.
@@ -245,6 +234,9 @@ pub struct RunState {
     pub subject: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<Value>,
+    /// The latest step without a task: the step of the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<Value>,
     pub tasks: Vec<Task>,
     pub finished: Finished,
     pub attentions: Vec<Attention>,
@@ -268,6 +260,13 @@ pub struct Run {
     /// `agent` of `run.started` (`harness`, `model`), as sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<Value>,
+    /// `origin` of `run.started`: the repository, branch, worktree and machine of the writer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
+    /// The tasks `run.finished` found open, with their step and progress: the core state lists
+    /// them as cancelled, the Runs view shows them as left open.
+    #[serde(rename = "leftOpen", skip_serializing_if = "Vec::is_empty")]
+    pub left_open: Vec<Task>,
     /// One row per event of a known type, in file order.
     pub events: Vec<RunEvent>,
     /// The members, dependencies and grant of a lead run (`orchestrate@1`, #1213); absent for
@@ -389,7 +388,9 @@ pub struct Reducer {
     tone: String,
     host: BTreeMap<String, String>,
     agent: Option<Value>,
+    origin: Option<Origin>,
     rows: Vec<RunEvent>,
+    left_open: Vec<Task>,
     lead: Option<LeadState>,
 }
 
@@ -413,6 +414,7 @@ impl Reducer {
                 text: None,
                 subject: None,
                 progress: None,
+                step: None,
                 tasks: Vec::new(),
                 finished: Finished::default(),
                 attentions: Vec::new(),
@@ -428,7 +430,9 @@ impl Reducer {
             tone: "neutral".into(),
             host: BTreeMap::new(),
             agent: None,
+            origin: None,
             rows: Vec::new(),
+            left_open: Vec::new(),
             lead: None,
         }
     }
@@ -551,6 +555,7 @@ impl Reducer {
                     self.pid = self.host.get(PID_KEY).and_then(|p| p.parse().ok());
                 }
                 self.agent = e.get("agent").filter(|a| a.is_object()).cloned();
+                self.origin = Origin::of(e);
             }
             "run.finished" => {
                 self.state.status = "finished".into();
@@ -558,6 +563,16 @@ impl Reducer {
                 self.state.reason = e.get("reason").and_then(text);
                 self.state.text = e.get("text").and_then(text);
                 self.state.attentions.clear();
+                self.left_open = std::mem::take(&mut self.state.tasks);
+                let cancelled = self.left_open.iter().map(|t| DoneTask {
+                    task: t.task.clone(),
+                    parent: t.parent.clone(),
+                    subject: t.subject.clone(),
+                    links: t.links.clone(),
+                    reason: Some("run-finished".into()),
+                    text: Some("run finished".into()),
+                });
+                self.state.finished.cancelled.extend(cancelled);
             }
             "task.started" => {
                 let Some(id) = e.get("task").and_then(text) else {
@@ -608,12 +623,17 @@ impl Reducer {
                     return;
                 };
                 let finished = ty == "step.finished" && !links.is_empty();
-                let Some(t) = self.task_mut(e) else {
+                if e.get("task").is_none() {
+                    self.state.step = Some(step);
+                } else if let Some(t) = self.task_mut(e) {
+                    t.step = Some(step);
+                    if finished {
+                        add_links(&mut t.links, &links);
+                    }
+                } else {
                     return;
-                };
-                t.step = Some(step);
+                }
                 if finished {
-                    add_links(&mut t.links, &links);
                     add_links(&mut self.state.links, &links);
                 }
             }
@@ -687,6 +707,8 @@ impl Reducer {
             tone,
             host: self.host.clone(),
             agent: self.agent.clone(),
+            left_open: self.left_open.clone(),
+            origin: self.origin.clone(),
             events: self.rows.clone(),
             lead: self.lead.clone(),
         })

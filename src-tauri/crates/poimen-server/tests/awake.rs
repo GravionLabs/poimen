@@ -58,6 +58,7 @@ impl Env {
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
         let server = Server::bind(config.clone()).unwrap();
+        server.set_events_dir(Some(dir.join("events")));
         server.set_awake_command(vec![
             "sh".into(),
             "-c".into(),

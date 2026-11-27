@@ -44,7 +44,8 @@
           "title": "First",
           "url": "https://github.com/GravionLabs/demo/issues/11"
         },
-        "reason": "review rejected"
+        "reason": "review-rejected",
+        "text": "review rejected"
       }
     ],
     "cancelled": [],

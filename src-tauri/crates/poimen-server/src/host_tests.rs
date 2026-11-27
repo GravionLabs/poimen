@@ -45,6 +45,7 @@ fn spec<'a>(command: &'a [String], term: Option<&'a str>) -> Spec<'a> {
         rows: 30,
         term,
         locale_set: false,
+        events_dir: None,
         env: &NO_ENV,
     }
 }
@@ -100,6 +101,26 @@ fn extra_env_is_added_but_cannot_override_poimens_variables() {
         got.get("POIMEN_SOCKET").map(String::as_str),
         Some("/run/s.sock")
     );
+}
+
+#[test]
+fn the_start_line_sets_the_event_directory_and_keeps_an_explicit_one() {
+    let command = vec!["sh".to_string()];
+    let got = |env: &std::collections::BTreeMap<String, String>| {
+        let spec = Spec {
+            events_dir: Some(Path::new("/state/agent-events")),
+            env,
+            ..spec(&command, None)
+        };
+        start_line(&spec, PathBuf::from("/e"))
+            .spawn
+            .env
+            .remove("AGENT_EVENTS_DIR")
+    };
+    assert_eq!(got(&NO_ENV).as_deref(), Some("/state/agent-events"));
+    let own =
+        std::collections::BTreeMap::from([("AGENT_EVENTS_DIR".to_string(), "/own".to_string())]);
+    assert_eq!(got(&own).as_deref(), Some("/own"));
 }
 
 #[test]
