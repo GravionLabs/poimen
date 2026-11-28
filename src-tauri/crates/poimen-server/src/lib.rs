@@ -536,9 +536,8 @@ impl Shared {
         format!("{}-{:016x}", self.new_id(prefix), h.finish())
     }
 
-    /// Writes spaces, tabs, the id counter and the running terminals. Called on every change of
-    /// them (the `seq` read from each host goes along, it is not a change of its own).
-    /// Writes `server.json`; `false` when it was not written.
+    /// Writes `server.json` (spaces, tabs, id counter, running terminals, grants) on every change
+    /// of them (each host's `seq` goes along, not a change of its own); `false`: not written.
     fn persist(&self, inner: &Inner) -> bool {
         if self.stopped.load(Ordering::SeqCst) {
             return false;
@@ -550,8 +549,8 @@ impl Shared {
             .iter()
             .filter_map(|t| t.stored(now, now_ms))
             .collect();
-        let (file, schedules) = (&self.state_file, inner.schedules.stored());
-        let saved = store::save(file, &inner.layout, next_id, terminals, schedules);
+        let (file, schedules, grants) = (&self.state_file, inner.schedules.stored(), self.grants());
+        let saved = store::save(file, &inner.layout, next_id, terminals, schedules, &grants);
         if let Err(e) = &saved {
             self.log("store", &format!("could not save {}: {e}", file.display()));
         }
@@ -661,6 +660,7 @@ impl Server {
             next_id,
             terminals,
             schedules,
+            grants,
         } = store::load_or_refuse(&config.state_file)?;
         match transport::inspect(&config.socket)? {
             Entry::Missing => {}
@@ -742,8 +742,7 @@ impl Server {
             let mut guard = lock(&shared.inner);
             let inner = &mut *guard;
             adopt::adopt_terminals(&shared, inner, terminals);
-            // The leaves of terminals that did not come back, the splits they leave behind and
-            // the empty tabs go (#510).
+            // The leaves of terminals that did not come back, their splits and empty tabs go (#510).
             let live: Vec<tabs::Live<'_>> = inner
                 .terminals
                 .iter()
@@ -756,6 +755,7 @@ impl Server {
             inner
                 .layout
                 .reconcile(&live, &mut |prefix| shared.new_id(prefix));
+            shared.restore_grants(inner, grants, now_millis());
             shared.persist(inner);
         }
         Ok(Self { listener, shared })

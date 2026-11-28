@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub use poimen_protocol::files::state_file_path;
-use poimen_protocol::{AgentInfo, Space, Tab};
+use poimen_protocol::{AgentInfo, AgentWriteAction, Space, Tab};
 use serde::{Deserialize, Serialize};
 
 use crate::scheduler::{Alerts, Persisted, StoredSchedule};
@@ -40,6 +40,28 @@ struct File {
     /// The unacknowledged alerts of the scheduler (#1308); absent while there never was one.
     #[serde(default, skip_serializing_if = "Alerts::is_unused")]
     schedule_alerts: Alerts,
+    /// The active scoped write grants (ADR 0018, #1453); absent without one. Kept as raw values
+    /// so a grant that does not parse costs only the grants, never the spaces and terminals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    grants: Vec<serde_json::Value>,
+}
+
+/// A confirmed grant as the next server needs it (ADR 0018 amendment, #1453). An unknown field
+/// (a newer server's, which might narrow the grant) makes the grants unreadable, not wider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StoredGrant {
+    pub(crate) id: String,
+    /// The lead terminal.
+    pub(crate) lead: String,
+    pub(crate) spaces: Vec<String>,
+    pub(crate) tools: Vec<AgentWriteAction>,
+    pub(crate) max_agents: u32,
+    /// The grant covers worktree starts (#1451); absent when it does not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) worktrees: bool,
+    /// Milliseconds since the epoch, by the wall clock.
+    pub(crate) expires_at: u64,
 }
 
 /// A running terminal as the next server needs it to adopt the host: who it is, where its host
@@ -127,6 +149,9 @@ pub(crate) struct Stored {
     /// The terminals that ran when the file was written.
     pub(crate) terminals: Vec<StoredTerminal>,
     pub(crate) schedules: Persisted,
+    /// The grants of the current file; none when it was damaged, missing or any grant in it does
+    /// not parse (never a part of them, never the backup's, which may predate a revocation).
+    pub(crate) grants: Vec<StoredGrant>,
 }
 
 /// The version of the file this server writes and the highest it reads.
@@ -296,7 +321,7 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         stuck: Some(e.to_string()),
         ..newer(file, 0)
     };
-    let file = match read_file(path) {
+    let mut file = match read_file(path) {
         Read::Good(file) => file,
         Read::Newer(v) => return Err(newer(path, v)),
         read @ (Read::Missing | Read::Damaged(_)) => {
@@ -308,15 +333,16 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
                 _ => "missing",
             };
             match read_file(&backup) {
-                Read::Good(file) => {
+                Read::Good(mut file) => {
                     note(
                         path,
                         &format!(
-                            "{} is {reason}, loaded {}",
+                            "{} is {reason}, loaded {} without its grants",
                             path.display(),
                             backup.display()
                         ),
                     );
+                    file.grants.clear();
                     file
                 }
                 Read::Newer(v) => return Err(newer(&backup, v)),
@@ -334,6 +360,17 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         .into_iter()
         .chain(file.terminals.iter().map(|t| t.id.as_str()));
     let next_id = next_id(ids).max(file.next_id.unwrap_or(1));
+    let grants = std::mem::take(&mut file.grants)
+        .into_iter()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<StoredGrant>, _>>()
+        .unwrap_or_else(|e| {
+            note(
+                path,
+                &format!("the grants of {} are dropped: {e}", path.display()),
+            );
+            Vec::new()
+        });
     Ok(Stored {
         layout,
         next_id,
@@ -342,10 +379,11 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
             list: file.schedules,
             alerts: file.schedule_alerts,
         },
+        grants,
     })
 }
 
-/// Writes the layout, the id counter and the running terminals: the temp file is synced, the
+/// Writes the layout, the id counter, the running terminals and the grants: the temp file is synced, the
 /// previous `server.json` becomes `server.json.bak`, the temp file becomes `server.json` and
 /// the directory is synced (Unix). A crash leaves a readable `server.json` or `server.json.bak`.
 pub(crate) fn save(
@@ -354,6 +392,7 @@ pub(crate) fn save(
     next_id: u64,
     terminals: Vec<StoredTerminal>,
     schedules: impl Into<Persisted>,
+    grants: &[StoredGrant],
 ) -> io::Result<()> {
     let Persisted { list, alerts } = schedules.into();
     if let Some(dir) = path.parent() {
@@ -367,6 +406,11 @@ pub(crate) fn save(
         terminals,
         schedules: list,
         schedule_alerts: alerts,
+        grants: grants
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
+            .map_err(io::Error::other)?,
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
@@ -479,7 +523,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, _) = temp("modes");
         let path = dir.path().join("fresh").join("server.json");
-        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &[]).unwrap();
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(path.parent().unwrap()), 0o700);
@@ -505,7 +549,7 @@ mod tests {
             parent: None,
             place: None,
         });
-        save(&path, &saved, 40, Vec::new(), Vec::new()).unwrap();
+        save(&path, &saved, 40, Vec::new(), Vec::new(), &[]).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.layout, saved);
         assert_eq!(loaded.next_id, 40);
@@ -577,7 +621,15 @@ mod tests {
     #[test]
     fn the_terminal_list_round_trips_with_endpoint_seq_status_and_tokens() {
         let (_dir, path) = temp("terms");
-        save(&path, &layout(&["s1"]), 20, vec![stored("t9")], Vec::new()).unwrap();
+        save(
+            &path,
+            &layout(&["s1"]),
+            20,
+            vec![stored("t9")],
+            Vec::new(),
+            &[],
+        )
+        .unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.terminals, vec![stored("t9")]);
         let text = fs::read_to_string(&path).unwrap();
@@ -593,7 +645,7 @@ mod tests {
     #[test]
     fn a_file_without_terminals_has_no_terminal_key_and_loads_an_empty_list() {
         let (_dir, path) = temp("noterms");
-        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &[]).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("terminals"));
         assert!(load(&path).unwrap().terminals.is_empty());
     }
@@ -640,9 +692,9 @@ mod tests {
     fn the_persisted_counter_wins_over_the_ids_left_in_the_file() {
         // A split that was dropped took its id with it; the counter still remembers it.
         let (_dir, path) = temp("counter");
-        save(&path, &layout(&["s1"]), 30, Vec::new(), Vec::new()).unwrap();
+        save(&path, &layout(&["s1"]), 30, Vec::new(), Vec::new(), &[]).unwrap();
         assert_eq!(load(&path).unwrap().next_id, 30);
-        save(&path, &layout(&["s50"]), 30, Vec::new(), Vec::new()).unwrap();
+        save(&path, &layout(&["s50"]), 30, Vec::new(), Vec::new(), &[]).unwrap();
         assert_eq!(load(&path).unwrap().next_id, 51);
     }
 
