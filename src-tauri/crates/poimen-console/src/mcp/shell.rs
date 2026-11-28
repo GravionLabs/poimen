@@ -1,5 +1,5 @@
 //! `start_shell` (#1181): a new terminal of a space that runs a command, for work that outlives a
-//! tool call (the deliver loop). The permission model is the one of `start_agent`.
+//! tool call (a scripted run). The permission model is the one of `start_agent`.
 
 use std::collections::BTreeMap;
 

@@ -40,20 +40,20 @@ const KEYS: [&str; 16] = [
 pub(super) fn record_tool() -> Value {
     json!({
         "name": "record_run",
-        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<uuid>` of the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started loop: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run`, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
+        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<uuid>` of the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started member run: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run` = the run id of the member's run, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
         "inputSchema": {"type": "object", "properties": {
             "event": {"type": "string", "enum": ["start", "plan", "member", "member_done", "dependency", "grant", "decision", "attention", "resolved", "note", "resume", "finish"]},
             "repository": {"type": "string", "description": "A directory in the repository that holds the run; default: the directory of your terminal."},
             "run": {"type": "string", "description": "The lead run id; default: your open run."},
             "title": {"type": "string"},
             "plan": {"description": "The plan as structured data."},
-            "target": {"type": "string", "description": "`member`: the directory of the repository the loop works in."},
+            "target": {"type": "string", "description": "`member`: the directory of the repository the member run works in."},
             "task": {"type": "string"},
             "blocked_by": {"type": "string"},
             "space": {"type": "string"},
             "terminal": {"type": "string"},
             "machine": {"type": "string"},
-            "deliver_run": {"type": "string"},
+            "deliver_run": {"type": "string", "description": "`member`: the run id of the member's run."},
             "text": {"type": "string"},
             "outcome": {"type": "string", "enum": ["succeeded", "failed", "cancelled", "skipped"]},
             "id": {"type": "string", "description": "The attention id."},
