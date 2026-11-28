@@ -26,6 +26,10 @@ pub struct AgentGrantRequest {
     pub tools: Vec<AgentWriteAction>,
     /// The most agents the lead may have running at once across the granted spaces.
     pub max_agents: u32,
+    /// Also asks to start agents in new worktrees of the granted spaces' repositories (ADR 0018,
+    /// amendment #1448); shown as its own line in the dialog. Absent is `false`.
+    #[serde(default)]
+    pub worktrees: bool,
     /// Seconds; default [`GRANT_DEFAULT_SECS`], at most [`GRANT_MAX_SECS`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_s: Option<u64>,
@@ -55,6 +59,9 @@ pub struct GrantInfo {
     pub max_agents: u32,
     /// Agents the lead started that are still running (not `done`, `error` or `gone`).
     pub running: u32,
+    /// Whether the grant may cover worktree starts (#1448); `false` when absent.
+    #[serde(default)]
+    pub worktrees: bool,
     /// Milliseconds since the epoch.
     pub expires_at: u64,
 }
@@ -70,8 +77,9 @@ pub struct GrantResult {
 }
 
 /// Params of `agent.grant_answer`: the app's answer to an [`crate::Event::AgentGrantRequested`].
-/// The user can only deny or narrow: `spaces` must be a subset of the asked ones and `max_agents`
-/// not above the asked limit; anything wider is refused.
+/// The user can only deny or narrow: `spaces` must be a subset of the asked ones, `max_agents`
+/// not above the asked limit and `worktrees` not `true` when it was not asked; anything wider is
+/// refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentGrantAnswer {
     pub id: String,
@@ -80,6 +88,9 @@ pub struct AgentGrantAnswer {
     pub spaces: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_agents: Option<u32>,
+    /// `Some(false)` turns the asked worktree line off; absent keeps what was asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktrees: Option<bool>,
 }
 
 /// Params of `agent.grant_revoke`: by grant `id` (the app), or the grant of the caller's own
@@ -133,7 +144,7 @@ mod tests {
             "tools": ["start_agent", "prompt_agent"], "max_agents": 3
         }))
         .unwrap();
-        assert_eq!((r.duration_s, r.wait_ms), (None, None));
+        assert_eq!((r.duration_s, r.wait_ms, r.worktrees), (None, None, false));
         assert_eq!(
             r.tools,
             [AgentWriteAction::StartAgent, AgentWriteAction::PromptAgent]
@@ -151,7 +162,15 @@ mod tests {
     fn answer_revoke_and_check_shapes() {
         let a: AgentGrantAnswer =
             serde_json::from_value(json!({"id": "g1", "approve": true})).unwrap();
-        assert_eq!((a.spaces, a.max_agents), (None, None));
+        assert_eq!((a.spaces, a.max_agents, a.worktrees), (None, None, None));
+        let off: AgentGrantAnswer =
+            serde_json::from_value(json!({"id": "g1", "approve": true, "worktrees": false}))
+                .unwrap();
+        assert_eq!(off.worktrees, Some(false));
+        assert_eq!(
+            serde_json::to_value(&off).unwrap(),
+            json!({"id": "g1", "approve": true, "worktrees": false})
+        );
         let narrowed: AgentGrantAnswer = serde_json::from_value(
             json!({"id": "g1", "approve": true, "spaces": ["s1"], "max_agents": 2}),
         )
@@ -199,7 +218,8 @@ mod tests {
     fn grant_events_and_results_round_trip() {
         let info = json!({"id": "g1", "lead_terminal_id": "t1", "lead_name": "lead",
             "spaces": [{"id": "s1", "name": "api", "path": "/w/api"}, {"id": "s2", "name": "web"}],
-            "tools": ["start_agent"], "max_agents": 2, "running": 1, "expires_at": 1_700_000_000_000_u64});
+            "tools": ["start_agent"], "max_agents": 2, "running": 1, "worktrees": true,
+            "expires_at": 1_700_000_000_000_u64});
         let grant: GrantInfo = serde_json::from_value(info.clone()).unwrap();
         assert_eq!(grant.spaces[1].path, None);
         assert_eq!(serde_json::to_value(&grant).unwrap(), info);
@@ -210,7 +230,7 @@ mod tests {
             (false, ConfirmReason::Timeout, None)
         );
         for line in [
-            r#"{"event":"agent.grant_requested","data":{"id":"g1","lead_terminal_id":"t1","lead_name":"lead","plan":"p","spaces":[{"id":"s1","name":"api"}],"tools":["start_agent"],"max_agents":2,"duration_s":28800,"wait_ms":120000}}"#,
+            r#"{"event":"agent.grant_requested","data":{"id":"g1","lead_terminal_id":"t1","lead_name":"lead","plan":"p","spaces":[{"id":"s1","name":"api"}],"tools":["start_agent"],"max_agents":2,"worktrees":true,"duration_s":28800,"wait_ms":120000}}"#,
             r#"{"event":"agent.grant_resolved","data":{"id":"g1"}}"#,
             r#"{"event":"agent.grants_changed","data":{"grants":[]}}"#,
         ] {
@@ -228,5 +248,37 @@ mod tests {
                 serde_json::from_str::<Value>(line).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn worktrees_default_to_false_and_round_trip() {
+        let asked: AgentGrantRequest = serde_json::from_value(json!({
+            "caller_terminal_id": "t1", "plan": "p", "spaces": ["s1"], "tools": ["start_agent"],
+            "max_agents": 1, "worktrees": true
+        }))
+        .unwrap();
+        assert!(asked.worktrees);
+        assert_eq!(serde_json::to_value(&asked).unwrap()["worktrees"], true);
+        assert!(
+            serde_json::from_value::<AgentGrantRequest>(json!({
+                "caller_terminal_id": "t1", "plan": "p", "spaces": ["s1"], "tools": ["start_agent"],
+                "max_agents": 1, "worktrees": "yes"
+            }))
+            .is_err(),
+            "only a boolean"
+        );
+        // An event and a grant of an older server have no `worktrees`: they cover none.
+        let ServerLine::Event(Event::AgentGrantRequested { worktrees, .. }) = parse_server_line(
+            r#"{"event":"agent.grant_requested","data":{"id":"g1","lead_terminal_id":"t1","lead_name":"lead","plan":"p","spaces":[],"tools":["start_agent"],"max_agents":1,"duration_s":60,"wait_ms":1000}}"#,
+        )
+        .unwrap() else {
+            panic!("not a grant request");
+        };
+        assert!(!worktrees);
+        let old: GrantInfo = serde_json::from_value(json!({"id": "g1", "lead_terminal_id": "t1",
+            "lead_name": "lead", "spaces": [], "tools": [], "max_agents": 1, "running": 0,
+            "expires_at": 1}))
+        .unwrap();
+        assert!(!old.worktrees);
     }
 }

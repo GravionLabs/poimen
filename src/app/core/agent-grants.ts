@@ -18,6 +18,8 @@ export interface GrantRequest {
   spaces: GrantSpace[];
   tools: AgentWriteAction[];
   maxAgents: number;
+  /** The lead also asks to start agents in new worktrees of these repositories (#1448). */
+  worktrees: boolean;
   /** Seconds the grant lasts once confirmed. */
   durationS: number;
 }
@@ -31,6 +33,8 @@ export interface ActiveGrant {
   maxAgents: number;
   /** Agents the lead started that are still running. */
   running: number;
+  /** The grant may cover worktree starts (#1448). */
+  worktrees: boolean;
   /** Milliseconds since the epoch. */
   expiresAt: number;
 }
@@ -42,6 +46,7 @@ interface WireGrant {
   tools?: AgentWriteAction[];
   max_agents?: number;
   running?: number;
+  worktrees?: boolean;
   expires_at?: number;
 }
 
@@ -61,6 +66,7 @@ export function toGrantRequest(data: GrantData | null): GrantRequest | null {
     spaces: data.spaces,
     tools: data.tools,
     maxAgents: data.max_agents ?? 1,
+    worktrees: data.worktrees === true,
     durationS: data.duration_s ?? 0,
   };
 }
@@ -75,6 +81,7 @@ export function toActiveGrant(data: WireGrant): ActiveGrant | null {
     tools: data.tools ?? [],
     maxAgents: data.max_agents ?? 0,
     running: data.running ?? 0,
+    worktrees: data.worktrees === true,
     expiresAt: data.expires_at ?? 0,
   };
 }
@@ -139,10 +146,16 @@ export class AgentGrants {
   }
 
   /**
-   * The user's answer for the request on screen: no, or yes for the `spaces` that stay checked
-   * and the `maxAgents` that stays (the server refuses anything wider than asked).
+   * The user's answer for the request on screen: no, or yes for the `spaces` that stay checked,
+   * the `maxAgents` that stays and `worktrees: false` when the user unchecked the worktree line
+   * (the server refuses anything wider than asked).
    */
-  async answer(approve: boolean, spaces?: string[], maxAgents?: number): Promise<void> {
+  async answer(
+    approve: boolean,
+    spaces?: string[],
+    maxAgents?: number,
+    worktrees?: boolean,
+  ): Promise<void> {
     const request = this.current();
     if (!request) return;
     this.error.set(null);
@@ -152,6 +165,7 @@ export class AgentGrants {
         approve,
         spaces: approve ? spaces : undefined,
         maxAgents: approve ? maxAgents : undefined,
+        worktrees: approve ? worktrees : undefined,
       });
     } catch (e) {
       // Settled already (timed out) or refused as wider than asked.

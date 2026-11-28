@@ -20,8 +20,8 @@ pub async fn agent_confirm_answer(
     .await
 }
 
-/// The user's answer to a lead agent that asks for a grant: no, or yes with fewer spaces or a
-/// lower limit; the server refuses a wider one.
+/// The user's answer to a lead agent that asks for a grant: no, or yes with fewer spaces, a lower
+/// limit or without worktree starts; the server refuses a wider one.
 #[tauri::command]
 pub async fn agent_grant_answer(
     backend: State<'_, Shared>,
@@ -29,12 +29,14 @@ pub async fn agent_grant_answer(
     approve: bool,
     spaces: Option<Vec<String>>,
     max_agents: Option<u32>,
+    worktrees: Option<bool>,
 ) -> Result<(), String> {
     let answer = AgentGrantAnswer {
         id,
         approve,
         spaces,
         max_agents,
+        worktrees,
     };
     on_backend(backend.inner(), move |b| b.agent_grant_answer(&answer)).await
 }

@@ -31,6 +31,22 @@
       }
     </ul>
     <p class="hint">Tools: {{ request.tools.join(", ") }}.</p>
+    @if (request.worktrees) {
+      <label class="worktrees">
+        <input
+          hx-checkbox
+          type="checkbox"
+          [checked]="worktrees(request)"
+          (change)="toggleWorktrees(request)"
+        />
+        May start agents in new worktrees of these repositories
+      </label>
+      <p class="hint worktrees-hint">
+        Each new worktree becomes a space of this grant, so the lead can then prompt and stop its
+        agents there with no question. The limit bounds the agents running at once, not how many
+        worktrees it makes. Uncheck it to keep a question for every worktree start.
+      </p>
+    }
     <div class="limit">
       At most
       <hx-field
