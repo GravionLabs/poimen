@@ -228,6 +228,7 @@ fn grant(id: &str) -> StoredGrant {
         max_agents: 3,
         worktrees: id.starts_with("grant1"),
         expires_at: 1_900_000_000_000,
+        ended: id.starts_with("grant2").then_some(GrantEndReason::Revoked),
     }
 }
 

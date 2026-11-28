@@ -28,13 +28,13 @@ pub use files::windows_dir_from;
 pub use grant::{
     AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
     AgentGrantRevoke, AgentGrants, GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS,
-    GRANT_WORKTREE_PROTOCOL, GrantInfo, GrantResult, GrantSpace, GrantVerdict,
+    GRANT_WORKTREE_PROTOCOL, GrantEndReason, GrantInfo, GrantResult, GrantSpace, GrantVerdict,
 };
 pub use schedule::*;
 pub use status::{AgentInfo, Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version of the server and this crate, raised on incompatible changes (`ping`).
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";

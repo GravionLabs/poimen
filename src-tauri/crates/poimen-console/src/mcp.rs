@@ -404,14 +404,37 @@ fn authorize(
         text,
         always_ask,
         worktree: false,
+        grant: None,
     };
     authorize_as(client, env, &ask).map(|a| a == Authorized::Confirmed)
 }
 
-/// [`authorize`], saying how the write was allowed (a covered one names its grant).
+/// [`authorize`], saying how the write was allowed (a covered one names its grant). A write the
+/// server checks against grants carries the grant the caller's lead run records (#1454): one the
+/// server does not know refuses with `grant_lost` and raises the attention on that run.
 fn authorize_as(client: &Client, env: &Env, ask: &WriteAsk<'_>) -> Result<Authorized, Fail> {
-    authorize_write_as(client, env.terminal_id, ask, env.confirm_wait).map_err(|e| match e {
+    let held = if ask.always_ask && !ask.worktree {
+        None
+    } else {
+        lead::held_grant(client, env)
+    };
+    let ask = WriteAsk {
+        grant: held.as_ref().map(|h| h.grant.as_str()),
+        ..*ask
+    };
+    authorize_write_as(client, env.terminal_id, &ask, env.confirm_wait).map_err(|e| match e {
         WriteError::Refused(m) => Fail::Tool(m),
+        WriteError::GrantLost { message, .. } => Fail::Tool(match held.as_ref() {
+            // The refusal stands whether or not the attention could be written.
+            Some(h) => match lead::raise_grant_lost(client, env, h) {
+                Ok(_) => format!(
+                    "{message}. The attention grant-lost-{} is on your lead run {}.",
+                    h.grant, h.run
+                ),
+                Err(e) => format!("{message}. The attention on your lead run was not written: {e}"),
+            },
+            None => message,
+        }),
         WriteError::Client(e) => server_error(e),
     })
 }
@@ -502,6 +525,7 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
         text: &confirm_text,
         always_ask: false,
         worktree: worktree.is_some(),
+        grant: None,
     };
     let mut allowed = authorize_as(client, env, &first)?;
     let (space_id, new_space) = match &worktree {

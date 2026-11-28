@@ -39,6 +39,9 @@ const TITLE_WORDS: usize = 6;
 pub enum WriteError {
     /// Refused, with the reason to show.
     Refused(String),
+    /// Refused without a question: the `grant` the caller's lead run records is unknown to the
+    /// server (#1454). `message` starts with `grant_lost`.
+    GrantLost { grant: String, message: String },
     /// A request failed.
     Client(ClientError),
 }
@@ -63,6 +66,9 @@ pub struct WriteAsk<'a> {
     /// A `start_agent` in a new worktree of `space_id` (#1452): asked as with `always_ask`,
     /// unless a grant of the caller with `worktrees` covers it.
     pub worktree: bool,
+    /// The grant id the caller's lead run records (#1454), if any; an unknown one refuses with
+    /// [`WriteError::GrantLost`] instead of asking.
+    pub grant: Option<&'a str>,
 }
 
 /// How a write was allowed.
@@ -104,6 +110,7 @@ pub fn authorize_write_as(
         text,
         always_ask,
         worktree,
+        grant,
     } = *ask;
     let always_ask = always_ask || worktree;
     let Some(caller) = caller.filter(|i| !i.is_empty()) else {
@@ -118,6 +125,8 @@ pub fn authorize_write_as(
         WriteError::Refused(format!("terminal {caller} is not known to the server"))
     })?;
     let own_space = own.space_id == space_id && !always_ask;
+    // The recorded grant ended for a known reason: ask as without a grant and name the reason.
+    let mut ended: Option<(String, &str)> = None;
     // A grant of this caller (ADR 0018) covers the write without a question; a limit it reached
     // refuses, also in the caller's own space; no grant, or a server that does not know grants,
     // falls back to the question (or, in the own space, to free). Of the `always_ask` writes only
@@ -128,6 +137,7 @@ pub fn authorize_write_as(
             action,
             space_id: space_id.to_owned(),
             worktree,
+            grant: grant.map(str::to_owned),
         };
         match client.check_agent_grant(&check) {
             // An older server ignores `worktree` and may cover a worktree start it does not
@@ -139,6 +149,21 @@ pub fn authorize_write_as(
             }
             Ok(GrantVerdict::Covered { .. }) => {}
             Ok(GrantVerdict::Refused { reason }) => return Err(WriteError::Refused(reason)),
+            // Only a write that would ask: one in the own space stays free (#1454).
+            Ok(GrantVerdict::Lost { .. }) if own_space => return Ok(Authorized::Free),
+            Ok(GrantVerdict::Lost { grant }) => {
+                return Err(WriteError::GrantLost {
+                    message: format!(
+                        "grant_lost: the grant {grant} your lead run records is not known to \
+                         poimen-server (its state was not kept, for example after a restart); \
+                         the write was not made and nobody was asked: call request_grant again"
+                    ),
+                    grant,
+                });
+            }
+            Ok(GrantVerdict::Ended { grant, reason }) => {
+                ended = Some((grant, reason.as_str()));
+            }
             Ok(GrantVerdict::NeedsConfirmation) | Err(_) => {}
         }
     }
@@ -165,7 +190,12 @@ pub fn authorize_write_as(
         }
         ConfirmReason::Approved => "refused: the server did not approve",
     };
-    Err(WriteError::Refused(refusal.into()))
+    Err(WriteError::Refused(match ended {
+        Some((grant, reason)) => format!(
+            "{refusal}; your grant {grant} ended ({reason}): call request_grant for a new one"
+        ),
+        None => refusal.into(),
+    }))
 }
 
 /// Whether the server's `agent.grant_check` knows worktree starts; unknown counts as no.
@@ -502,11 +532,14 @@ pub fn run_session(
             text: &command_line,
             always_ask: false,
             worktree: false,
+            grant: None,
         },
         ctx.confirm_wait,
     )
     .map_err(|e| match e {
-        WriteError::Refused(m) => SessionError::PermissionRefused(m),
+        WriteError::Refused(m) | WriteError::GrantLost { message: m, .. } => {
+            SessionError::PermissionRefused(m)
+        }
         WriteError::Client(e) => failed(e),
     })?;
 

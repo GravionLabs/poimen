@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub use poimen_protocol::files::state_file_path;
-use poimen_protocol::{AgentInfo, AgentWriteAction, Space, Tab};
+use poimen_protocol::{AgentInfo, AgentWriteAction, GrantEndReason, Space, Tab};
 use serde::{Deserialize, Serialize};
 
 use crate::scheduler::{Alerts, Persisted, StoredSchedule};
@@ -62,6 +62,9 @@ pub(crate) struct StoredGrant {
     pub(crate) worktrees: bool,
     /// Milliseconds since the epoch, by the wall clock.
     pub(crate) expires_at: u64,
+    /// Set on a grant that ended (#1454): kept only to tell a lead why, never restored as active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ended: Option<GrantEndReason>,
 }
 
 /// A running terminal as the next server needs it to adopt the host: who it is, where its host

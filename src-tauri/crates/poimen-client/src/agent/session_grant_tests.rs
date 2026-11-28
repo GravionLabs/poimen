@@ -58,6 +58,7 @@ fn ask(worktree: bool) -> WriteAsk<'static> {
         text: "worker",
         always_ask: false,
         worktree,
+        grant: None,
     }
 }
 
