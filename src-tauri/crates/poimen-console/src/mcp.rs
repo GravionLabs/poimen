@@ -29,7 +29,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use terminal::{terminal_detail, terminal_json};
-use worktree::{WorktreeSpec, make_worktree_space};
+use worktree::{WorktreeSpec, make_worktree_space, reuse_is_covered};
 
 use poimen_client::Client;
 use poimen_client::agent::{
@@ -236,7 +236,7 @@ fn tools() -> Value {
                 "model": {"type": "string", "description": "A model of the harness."},
                 "prompt": {"type": "string", "description": "The first prompt of the agent."},
                 "name": {"type": "string", "description": "The name of the new terminal; the harness id by default."},
-                "worktree": {"type": "object", "description": "Start in a new space on a task worktree of the repository of `space` (or your own space) instead: {issue: number, title?, mode?} (the task mode, `agent` by default) or {branch: name}. An existing worktree of that branch is reused, never changed. A new space needs the user's confirmation in the poimen app, also from your own space, unless your grant (request_grant with `worktrees`) covers worktree starts in `space`: then it needs none and the new space joins that grant, so prompt_agent and stop_terminal there need none either. The answer names the space, the worktree path and the branch.",
+                "worktree": {"type": "object", "description": "Start in a new space on a task worktree of the repository of `space` (or your own space) instead: {issue: number, title?, mode?} (the task mode, `agent` by default) or {branch: name}. An existing worktree of that branch is reused, never changed. A new space needs the user's confirmation in the poimen app, also from your own space, unless your grant (request_grant with `worktrees`) covers worktree starts in `space`: then it needs none and the new space joins that grant, so prompt_agent and stop_terminal there need none either. Reusing an existing worktree is covered only when every space open on it is already in your grant (your own worker); any other reuse asks per call and its space joins no grant. The answer names the space, the worktree path and the branch.",
                     "properties": {
                         "issue": {"type": "integer"},
                         "title": {"type": "string"},
@@ -495,33 +495,47 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
     };
     // A worktree start asks per call, also in the own space, unless a grant with `worktrees`
     // covers it (#1452).
-    let allowed = authorize_as(
-        client,
-        env,
-        &WriteAsk {
-            space_id: &space_id,
-            action: AgentWriteAction::StartAgent,
-            terminal_id: None,
-            text: &confirm_text,
-            always_ask: false,
-            worktree: worktree.is_some(),
-        },
-    )?;
-    let confirmed = allowed == Authorized::Confirmed;
+    let first = WriteAsk {
+        space_id: &space_id,
+        action: AgentWriteAction::StartAgent,
+        terminal_id: None,
+        text: &confirm_text,
+        always_ask: false,
+        worktree: worktree.is_some(),
+    };
+    let mut allowed = authorize_as(client, env, &first)?;
     let (space_id, new_space) = match &worktree {
         Some(spec) => {
             let source = spaces
                 .iter()
                 .find(|s| s.id == space_id)
                 .ok_or_else(|| Fail::Tool(format!("space {space_id} not found")))?;
-            let made = make_worktree_space(client, env, &source.cwd, spec)?;
-            if let Authorized::Covered { grant } = allowed {
+            // A covered start reuses an existing worktree without a question only when it is
+            // already the grant's; else it asks per call and the space joins no grant.
+            let made = make_worktree_space(client, env, &source.cwd, spec, |path, created| {
+                if let Authorized::Covered { grant } = &allowed
+                    && !created
+                    && !reuse_is_covered(client, grant, path)
+                {
+                    let text = format!("{confirm_text} (reuses the existing worktree {path})");
+                    let again = WriteAsk {
+                        text: &text,
+                        always_ask: true,
+                        worktree: false,
+                        ..first
+                    };
+                    allowed = authorize_as(client, env, &again)?;
+                }
+                Ok(())
+            })?;
+            if let Authorized::Covered { grant } = allowed.clone() {
                 join_grant(client, env, grant, &space_id, &made.space.id)?;
             }
             (made.space.id.clone(), Some(made))
         }
         None => (space_id, None),
     };
+    let confirmed = allowed == Authorized::Confirmed;
     // A space made for this start does not outlive a failed start (the worktree stays).
     let drop_new_space = || {
         if new_space.is_some() {

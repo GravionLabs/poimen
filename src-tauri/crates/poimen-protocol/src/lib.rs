@@ -27,8 +27,8 @@ pub use confirm::{
 pub use files::windows_dir_from;
 pub use grant::{
     AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
-    AgentGrantRevoke, AgentGrants, GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo,
-    GrantResult, GrantSpace, GrantVerdict,
+    AgentGrantRevoke, AgentGrants, GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS,
+    GRANT_WORKTREE_PROTOCOL, GrantInfo, GrantResult, GrantSpace, GrantVerdict,
 };
 pub use schedule::*;
 pub use status::{AgentInfo, Hibernated, MAX_STATUS_HISTORY, StatusChange};

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use poimen_core::{harness, settings};
 use poimen_protocol::{
     AgentConfirm, AgentGrantCheck, AgentStatus, AgentWriteAction, ConfirmReason, Event,
-    GrantVerdict, Placement, TerminalCreate,
+    GRANT_WORKTREE_PROTOCOL, GrantVerdict, Placement, TerminalCreate,
 };
 use serde_json::Value;
 
@@ -130,7 +130,14 @@ pub fn authorize_write_as(
             worktree,
         };
         match client.check_agent_grant(&check) {
-            Ok(GrantVerdict::Covered { grant }) => return Ok(Authorized::Covered { grant }),
+            // An older server ignores `worktree` and may cover a worktree start it does not
+            // know: that answer is not trusted, the start asks (#1452).
+            Ok(GrantVerdict::Covered { grant })
+                if !worktree || server_knows_worktree_grants(client) =>
+            {
+                return Ok(Authorized::Covered { grant });
+            }
+            Ok(GrantVerdict::Covered { .. }) => {}
             Ok(GrantVerdict::Refused { reason }) => return Err(WriteError::Refused(reason)),
             Ok(GrantVerdict::NeedsConfirmation) | Err(_) => {}
         }
@@ -160,6 +167,17 @@ pub fn authorize_write_as(
     };
     Err(WriteError::Refused(refusal.into()))
 }
+
+/// Whether the server's `agent.grant_check` knows worktree starts; unknown counts as no.
+fn server_knows_worktree_grants(client: &Client) -> bool {
+    client
+        .ping()
+        .is_ok_and(|p| p.protocol >= GRANT_WORKTREE_PROTOCOL)
+}
+
+#[cfg(test)]
+#[path = "session_grant_tests.rs"]
+mod grant_tests;
 
 /// The harnesses of the user's `config.json` under `home`, the defaults without. A project config
 /// contributes none: only the user's templates start a session, trusted or not (#255).

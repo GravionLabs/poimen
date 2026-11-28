@@ -257,19 +257,20 @@ fn no_question(seen: &Receiver<Event>) {
 }
 
 /// The app's answer `approve` to the next question, which must be a `start_agent`.
-fn answer_start(f: &Fixture, approve: bool) -> thread::JoinHandle<()> {
+fn answer_start(f: &Fixture, approve: bool) -> thread::JoinHandle<String> {
     let rx = app(&f.client);
     let client = f.client.clone();
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            if let Event::AgentConfirmRequested { id, action, .. } =
-                rx.recv_timeout(left).expect("a question")
+            if let Event::AgentConfirmRequested {
+                id, action, text, ..
+            } = rx.recv_timeout(left).expect("a question")
             {
                 assert_eq!(action, AgentWriteAction::StartAgent);
                 client.answer_agent_confirm(&id, approve).unwrap();
-                return;
+                return text;
             }
         }
     })
@@ -356,6 +357,68 @@ fn asks(f: &Fixture, from: &str, space: &str) {
     assert_eq!(r["isError"], true, "{r}");
     assert!(text(&r).contains("declined"), "{}", text(&r));
     assert_eq!(space_count(f), before);
+}
+
+/// The user's own linked worktree of `repo` on branch `x`, with a space on it when `open`.
+fn users_worktree(f: &Fixture, open: bool) -> PathBuf {
+    let path = f.dir.join("repo-user");
+    git(
+        &f.dir.join("repo"),
+        &["worktree", "add", "-q", path.to_str().unwrap(), "x"],
+    );
+    if open {
+        space_on(&f.client, &path);
+    }
+    path
+}
+
+#[test]
+fn a_covered_start_that_reuses_the_users_worktree_asks_and_its_space_joins_no_grant() {
+    let f = fixture("reuse-users");
+    let (_, seen) = grant(&f, &[&f.repo], ALL, true);
+    users_worktree(&f, true);
+    asks(&f, &f.lead, &f.repo);
+    // A yes runs it, as an uncovered start: confirmed, and the space is in no grant.
+    let asked = answer_start(&f, true);
+    let r = start_in_worktree(&f, &f.lead, &f.repo, "x");
+    let question = asked.join().unwrap();
+    assert!(
+        question.contains("reuses the existing worktree"),
+        "{question}"
+    );
+    assert_eq!(r["isError"], Value::Null, "{r}");
+    assert_eq!(r["structuredContent"]["worktree"]["created"], false, "{r}");
+    let space = r["structuredContent"]["space"].as_str().unwrap();
+    assert!(!granted_spaces(&f).iter().any(|s| s == space));
+    let wrote = loop {
+        let e = seen.recv_timeout(Duration::from_secs(10));
+        if let Event::AgentWrote { confirmed, .. } = e.expect("agent.wrote") {
+            break confirmed;
+        }
+    };
+    assert!(wrote, "announced as confirmed");
+}
+
+#[test]
+fn a_covered_start_that_reuses_a_worktree_without_a_space_asks() {
+    let f = fixture("reuse-closed");
+    grant(&f, &[&f.repo], ALL, true);
+    users_worktree(&f, false);
+    asks(&f, &f.lead, &f.repo);
+}
+
+#[test]
+fn the_lead_starting_again_in_its_own_workers_worktree_needs_no_dialog() {
+    let f = fixture("reuse-own");
+    let (_, seen) = grant(&f, &[&f.repo], ALL, true);
+    let first = start_in_worktree(&f, &f.lead, &f.repo, "w1");
+    assert_eq!(first["isError"], Value::Null, "{first}");
+    let again = start_in_worktree(&f, &f.lead, &f.repo, "w1");
+    assert_eq!(again["isError"], Value::Null, "{again}");
+    assert_eq!(again["structuredContent"]["worktree"]["created"], false);
+    let space = again["structuredContent"]["space"].as_str().unwrap();
+    assert!(granted_spaces(&f).iter().any(|s| s == space));
+    no_question(&seen);
 }
 
 #[test]

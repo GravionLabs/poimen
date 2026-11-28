@@ -9,6 +9,10 @@ use crate::{AgentWriteAction, ConfirmReason};
 pub const GRANT_DEFAULT_SECS: u64 = 8 * 3600;
 /// The longest duration of a grant: 24 hours. There is no grant without an end.
 pub const GRANT_MAX_SECS: u64 = 24 * 3600;
+/// The first protocol whose `agent.grant_check` knows `worktree` (#1452). An older server ignores
+/// the field and could answer `covered` for a worktree start, so a client trusts that answer only
+/// from a server of at least this protocol.
+pub const GRANT_WORKTREE_PROTOCOL: u32 = 10;
 /// How long `agent.grant_request` waits for the user at most.
 pub const GRANT_WAIT_MS: u64 = 120_000;
 
