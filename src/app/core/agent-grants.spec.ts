@@ -54,12 +54,18 @@ describe("agent grants", () => {
       spaces: asked.data.spaces,
       tools: ["start_agent", "prompt_agent"],
       maxAgents: 3,
+      worktrees: false,
       durationS: 28800,
     });
+    expect(toGrantRequest({ ...asked.data, worktrees: true } as never)?.worktrees).toBe(true);
+    // Only a real `true` counts as asked; anything else is no.
+    expect(toGrantRequest({ ...asked.data, worktrees: "yes" } as never)?.worktrees).toBe(false);
     expect(toGrantRequest({ id: "x", lead_name: "lead", tools: ["start_agent"] })).toBeNull();
     expect(toGrantRequest(null)).toBeNull();
     expect(toActiveGrant({})).toBeNull();
     expect(toActiveGrant(active as never)?.running).toBe(1);
+    expect(toActiveGrant(active as never)?.worktrees).toBe(false);
+    expect(toActiveGrant({ ...active, worktrees: true } as never)?.worktrees).toBe(true);
   });
 
   it("names the duration", () => {
@@ -83,21 +89,23 @@ describe("agent grants", () => {
   it("answers no, or yes with the narrowed spaces and limit", async () => {
     const { grants, invoke } = setup();
     grants.handle(asked as never);
-    await grants.answer(true, ["s1"], 2);
+    await grants.answer(true, ["s1"], 2, false);
     expect(invoke).toHaveBeenCalledWith("agent_grant_answer", {
       id: "grant1",
       approve: true,
       spaces: ["s1"],
       maxAgents: 2,
+      worktrees: false,
     });
     expect(grants.current()).toBeNull();
     grants.handle(asked as never);
-    await grants.answer(false, ["s1"], 2);
+    await grants.answer(false, ["s1"], 2, true);
     expect(invoke).toHaveBeenLastCalledWith("agent_grant_answer", {
       id: "grant1",
       approve: false,
       spaces: undefined,
       maxAgents: undefined,
+      worktrees: undefined,
     });
   });
 

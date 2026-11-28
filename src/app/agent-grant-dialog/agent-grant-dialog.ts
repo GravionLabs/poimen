@@ -3,17 +3,19 @@ import { HxButton, HxCheckbox, HxField, HxInput, HxMessage } from "@gravionlabs/
 import { AgentGrants, durationText, type GrantRequest } from "../core/agent-grants";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
 
-/** What the user changed in the request on screen: spaces left out and a lower limit. */
+/** What the user changed in the request on screen: spaces left out, a lower limit, no worktrees. */
 interface Edit {
   id: string;
   left: ReadonlySet<string>;
   limit: number | null;
+  noWorktrees: boolean;
 }
 
 /**
  * A lead agent asks for a scoped write grant (ADR 0018, #1211): who asks, the plan, each space with
- * its path, the tools, the limit and the end. The user can only deny or narrow it (uncheck spaces,
- * lower the limit); Cancel has the focus, Escape and the backdrop deny.
+ * its path, the tools, the worktree line when asked (#1448), the limit and the end. The user can
+ * only deny or narrow it (uncheck spaces or worktrees, lower the limit); Cancel has the focus,
+ * Escape and the backdrop deny.
  */
 @Component({
   selector: "app-agent-grant-dialog",
@@ -29,7 +31,9 @@ export class AgentGrantDialog {
 
   private editOf(request: GrantRequest): Edit {
     const edit = this.edit();
-    return edit?.id === request.id ? edit : { id: request.id, left: new Set(), limit: null };
+    return edit?.id === request.id
+      ? edit
+      : { id: request.id, left: new Set(), limit: null, noWorktrees: false };
   }
 
   protected checked(request: GrantRequest, spaceId: string): boolean {
@@ -39,6 +43,16 @@ export class AgentGrantDialog {
   protected chosen(request: GrantRequest): string[] {
     const { left } = this.editOf(request);
     return request.spaces.map((s) => s.id).filter((id) => !left.has(id));
+  }
+
+  /** Whether the yes covers worktree starts: only when asked and still checked. */
+  protected worktrees(request: GrantRequest): boolean {
+    return request.worktrees && !this.editOf(request).noWorktrees;
+  }
+
+  protected toggleWorktrees(request: GrantRequest): void {
+    const edit = this.editOf(request);
+    this.edit.set({ ...edit, noWorktrees: !edit.noWorktrees });
   }
 
   protected limit(request: GrantRequest): number {
@@ -65,6 +79,7 @@ export class AgentGrantDialog {
       true,
       spaces.length === request.spaces.length ? undefined : spaces,
       this.limit(request) === request.maxAgents ? undefined : this.limit(request),
+      request.worktrees && !this.worktrees(request) ? false : undefined,
     );
   }
 }

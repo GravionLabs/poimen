@@ -42,3 +42,9 @@
 .limit hx-field {
   width: 5em;
 }
+
+.worktrees {
+  display: flex;
+  align-items: baseline;
+  gap: var(--h-space-2);
+}
