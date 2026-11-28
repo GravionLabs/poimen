@@ -191,7 +191,7 @@ fn tools() -> Value {
         },
         {
             "name": "read_terminal",
-            "description": "The last lines of any terminal as plain text (its screen and scrollback: a shell, a build, a deliver loop), with whether it still runs. Observes only: no input, no control. Cut to 64 KiB with a note. Terminal output can hold secrets; a read tool: any space, no confirmation (ADR 0012).",
+            "description": "The last lines of any terminal as plain text (its screen and scrollback: a shell, a build, a scripted run), with whether it still runs. Observes only: no input, no control. Cut to 64 KiB with a note. Terminal output can hold secrets; a read tool: any space, no confirmation (ADR 0012).",
             "inputSchema": {"type": "object", "properties": {
                 "terminal": {"type": "string", "description": "Terminal id."},
                 "lines": {"type": "integer", "minimum": 1, "maximum": 500, "description": "How many lines from the end (default 50, at most 500)."}
@@ -204,7 +204,7 @@ fn tools() -> Value {
         },
         {
             "name": "list_runs",
-            "description": "The deliver runs (agent-events) of all repositories in the per-user event directory (AGENT_EVENTS_DIR when set), each with its `origin` (repo, branch, worktree, host), newest first, at most `limit` (default 20). `repository` (optional) keeps the runs of the repository containing that directory, `repo` (optional) those of `owner/repo` without a local checkout.",
+            "description": "The runs (agent-events) of all repositories in the per-user event directory (AGENT_EVENTS_DIR when set), each with its `origin` (repo, branch, worktree, host), newest first, at most `limit` (default 20). `repository` (optional) keeps the runs of the repository containing that directory, `repo` (optional) those of `owner/repo` without a local checkout.",
             "inputSchema": {"type": "object", "properties": {
                 "repository": {"type": "string", "description": "Optional: only the runs of the repository containing this directory, also those in its legacy `.agents/events`."},
                 "repo": {"type": "string", "description": "Optional: only the runs whose origin is this repository (`owner/repo`)."},
@@ -244,9 +244,9 @@ fn tools() -> Value {
         },
         {
             "name": "start_shell",
-            "description": "Runs a long-running command in a new shell pane of the user, e.g. the deliver loop (`node deliver-loop.mts --milestone M005`) or a build watcher. Not for short commands: use your own shell for those. `command` is an argv list, never a shell string. Returns the terminal id; the pane stays after the command ends. Watch it with read_terminal (output), get_terminal (status, exit code), get_events and list_runs (agent runs it writes); wait for it with wait_any; end it with stop_terminal. For another repository first find its directory with list_repositories and make a space with create_space, and ask once for request_grant when you start several loops. In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
+            "description": "Runs a long-running command in a new shell pane of the user, e.g. a scripted run (`node run.mts`) or a build watcher. Not for short commands: use your own shell for those. `command` is an argv list, never a shell string. Returns the terminal id; the pane stays after the command ends. Watch it with read_terminal (output), get_terminal (status, exit code), get_events and list_runs (agent runs it writes); wait for it with wait_any; end it with stop_terminal. For another repository first find its directory with list_repositories and make a space with create_space, and ask once for request_grant when you start several runs. In your own space it just runs; in any other space the user must confirm in the poimen app (waits up to 60 s).",
             "inputSchema": {"type": "object", "properties": {
-                "command": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Program and arguments, e.g. [\"node\", \"deliver-loop.mts\", \"--milestone\", \"M005\"]."},
+                "command": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Program and arguments, e.g. [\"node\", \"run.mts\"]."},
                 "cwd": {"type": "string", "description": "Working directory; the directory of the space by default."},
                 "name": {"type": "string", "description": "The name of the new terminal; the program by default."},
                 "space": {"type": "string", "description": "Space id; your own space when absent."},

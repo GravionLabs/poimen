@@ -177,6 +177,15 @@ fn initialize_and_tools_list() {
 }
 
 #[test]
+fn no_tool_description_names_a_delivery_flow() {
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let reply = session(&offline_client(), None, &[list]).remove(0);
+    // The whole definitions; `deliver_run` is a wire field of `record_run` and keeps its name.
+    let text = reply["result"]["tools"].to_string().to_lowercase();
+    assert!(text.contains("wait_any") && !text.replace("deliver_run", "").contains("deliver"));
+}
+
+#[test]
 fn garbage_input_is_an_error_reply_not_a_crash() {
     let mut out = Vec::new();
     mcp::serve(
