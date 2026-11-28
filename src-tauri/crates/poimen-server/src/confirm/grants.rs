@@ -1,10 +1,12 @@
 //! The scoped write grant (ADR 0018, #1211). A lead agent asks once for a plan over several
 //! spaces (`agent.grant_request`), the user confirms in the app (`agent.grant_answer`), and
 //! `poimen mcp` asks `agent.grant_check` before each write: a covered write needs no dialog, any
-//! other write falls back to the per-call confirmation of ADR 0012. Grants live in memory and end
-//! with the server, the duration, the lead's terminal or a revocation.
+//! other write falls back to the per-call confirmation of ADR 0012. Grants end with the duration,
+//! the lead's terminal or a revocation; they are written to `server.json` on every change and a
+//! restarted server restores those whose lead it adopted (ADR 0018 amendment, #1453).
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
@@ -16,7 +18,8 @@ use poimen_protocol::{
 };
 use serde_json::{Value, json};
 
-use crate::{ApiResult, Shared, invalid, lock, not_found, now_millis, parsed};
+use crate::store::StoredGrant;
+use crate::{ApiResult, Inner, Shared, invalid, lock, not_found, now_millis, parsed};
 
 /// A confirmed grant.
 #[derive(Debug, Clone)]
@@ -47,6 +50,20 @@ struct Narrowed {
     worktrees: bool,
 }
 
+impl From<&Grant> for StoredGrant {
+    fn from(g: &Grant) -> Self {
+        Self {
+            id: g.id.clone(),
+            lead: g.lead.clone(),
+            spaces: g.spaces.clone(),
+            tools: g.tools.clone(),
+            max_agents: g.max_agents,
+            worktrees: g.worktrees,
+            expires_at: g.expires_at,
+        }
+    }
+}
+
 /// The state of the grants of one server.
 #[derive(Default)]
 pub(super) struct Grants {
@@ -55,6 +72,99 @@ pub(super) struct Grants {
 }
 
 impl Shared {
+    /// The active grants as `server.json` keeps them. Pending requests are never written.
+    pub(crate) fn grants(&self) -> Vec<StoredGrant> {
+        let active = lock(&self.confirms.grants.active);
+        active.iter().map(StoredGrant::from).collect()
+    }
+
+    /// Writes `server.json` after a change of the grants, before the request answers. A failed
+    /// write is logged by `persist` and the grants stay as they are; the next change retries.
+    fn persist_grants(&self) {
+        let inner = lock(&self.inner);
+        self.persist(&inner);
+    }
+
+    /// Changes the grants a request asked to change and writes them, both under the state lock,
+    /// so the change is either in the file `server.shutdown` leaves for the next server or
+    /// refused: once that file is written (`stopped`), nothing is changed and the request fails
+    /// rather than answer a change the next server would undo. `f` says whether it changed any.
+    fn change_grants<R>(
+        &self,
+        f: impl FnOnce(&mut Vec<Grant>) -> (R, bool),
+    ) -> Result<R, (ErrorCode, String)> {
+        let inner = lock(&self.inner);
+        if self.stopped.load(Ordering::SeqCst) {
+            return Err((
+                ErrorCode::Internal,
+                "the server is shutting down: no grant was changed; ask the next server".into(),
+            ));
+        }
+        let (result, changed) = f(&mut lock(&self.confirms.grants.active));
+        if changed {
+            self.persist(&inner);
+        }
+        drop(inner);
+        if changed {
+            self.publish_grants();
+        }
+        Ok(result)
+    }
+
+    /// Restores the grants of `server.json` at the start (`Server::bind`, after the adoption): a
+    /// grant comes back only when its lead terminal was adopted and runs, it has not expired by
+    /// the wall clock and is in the bounds a request could get; spaces that are gone are dropped
+    /// from it, and a grant left with none is dropped. Never creates or extends a grant.
+    pub(crate) fn restore_grants(&self, inner: &Inner, stored: Vec<StoredGrant>, now_ms: u64) {
+        let leads: Vec<&str> = stored.iter().map(|g| g.lead.as_str()).collect();
+        let mut restored = Vec::new();
+        for g in &stored {
+            let alive = inner
+                .terminals
+                .iter()
+                .any(|t| t.info.id == g.lead && t.info.status != TerminalStatus::Exited);
+            let spaces: Vec<String> = g
+                .spaces
+                .iter()
+                .filter(|id| inner.layout.spaces.iter().any(|s| s.id == **id))
+                .cloned()
+                .collect();
+            let why_not = if !alive {
+                Some("its lead terminal was not adopted")
+            } else if g.expires_at <= now_ms {
+                Some("it expired")
+            } else if g.expires_at > now_ms.saturating_add(GRANT_MAX_SECS * 1000)
+                || g.max_agents == 0
+                || g.tools.is_empty()
+                || g.tools.contains(&AgentWriteAction::WriteTerminal)
+                || leads.iter().filter(|l| **l == g.lead).count() > 1
+            {
+                Some("it is not a grant this server gives")
+            } else if spaces.is_empty() {
+                Some("none of its spaces exists")
+            } else {
+                None
+            };
+            if let Some(why) = why_not {
+                self.log("grants", &format!("grant {} not restored: {why}", g.id));
+                continue;
+            }
+            restored.push(Grant {
+                id: g.id.clone(),
+                lead: g.lead.clone(),
+                spaces,
+                tools: g.tools.clone(),
+                max_agents: g.max_agents,
+                worktrees: g.worktrees,
+                expires_at: g.expires_at,
+            });
+        }
+        if !restored.is_empty() {
+            self.log("grants", &format!("restored {} grant(s)", restored.len()));
+        }
+        *lock(&self.confirms.grants.active) = restored;
+    }
+
     /// Whether the terminal exists and still runs.
     fn terminal_alive(&self, id: &str) -> bool {
         lock(&self.inner)
@@ -156,6 +266,7 @@ impl Shared {
         let dropped = active.len() != before;
         drop(active);
         if dropped {
+            self.persist_grants();
             self.publish_grants();
         }
         dropped
@@ -273,12 +384,11 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         expires_at: now_millis() + duration_s * 1000,
     };
     let info = shared.grant_info(&grant);
-    {
-        let mut active = lock(&shared.confirms.grants.active);
+    shared.change_grants(|active| {
         active.retain(|g| g.lead != grant.lead);
         active.push(grant);
-    }
-    shared.publish_grants();
+        ((), true)
+    })?;
     Ok(json!(GrantResult {
         granted: true,
         reason,
@@ -338,19 +448,18 @@ fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
 /// `agent.grant_revoke`: by id, or the grant of the caller's terminal. Ends no terminal and sends
 /// no input: running agents are left alone (ADR 0018).
 fn revoke(shared: &Shared, p: AgentGrantRevoke) -> ApiResult {
-    let removed = {
-        let mut active = lock(&shared.confirms.grants.active);
+    if p.id.is_none() && p.caller_terminal_id.is_none() {
+        return Err(invalid("`id` or `caller_terminal_id` is required"));
+    }
+    let removed = shared.change_grants(|active| {
         let before = active.len();
         match (&p.id, &p.caller_terminal_id) {
             (Some(id), _) => active.retain(|g| g.id != *id),
-            (None, Some(lead)) => active.retain(|g| g.lead != *lead),
-            (None, None) => return Err(invalid("`id` or `caller_terminal_id` is required")),
+            (_, lead) => active.retain(|g| Some(&g.lead) != lead.as_ref()),
         }
-        before - active.len()
-    };
-    if removed > 0 {
-        shared.publish_grants();
-    }
+        let removed = before - active.len();
+        (removed, removed > 0)
+    })?;
     Ok(json!({ "revoked": removed > 0 }))
 }
 

@@ -506,6 +506,6 @@ pub(super) fn read_run(client: &Client, env: &Env, args: &Value) -> Result<Value
         "yours": mine(&s),
         "last_seq": s.last_seq, "state": state, "plan": plan, "members": members,
         "dependencies": dependencies, "grant": grant, "decisions": decisions,
-        "note": "The server is authoritative for terminals: re-check them before you act. A grant is lost when the server restarts; request_grant again.",
+        "note": "The server is authoritative for terminals: re-check them before you act. A grant survives a server restart within its duration; if agent.grants no longer lists it, request_grant again.",
     }))
 }

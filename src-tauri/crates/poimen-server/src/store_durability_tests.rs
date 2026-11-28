@@ -38,8 +38,16 @@ fn nothing_on_disk_gives_no_spaces() {
 #[test]
 fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
     let (_dir, path) = fresh("bad-bak");
-    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 6, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new(), &[]).unwrap();
+    save(
+        &path,
+        &layout(&["s1", "s2"]),
+        6,
+        Vec::new(),
+        Vec::new(),
+        &[],
+    )
+    .unwrap();
     fs::write(&path, "{ nope").unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
@@ -57,6 +65,7 @@ fn a_damaged_file_is_set_aside_and_the_backup_is_loaded() {
         loaded.next_id,
         Vec::new(),
         Vec::new(),
+        &[],
     )
     .unwrap();
     assert_eq!(damaged_files(&path), aside);
@@ -76,8 +85,16 @@ fn a_damaged_file_without_a_backup_starts_empty_and_is_kept() {
 #[test]
 fn a_missing_file_loads_the_backup() {
     let (_dir, path) = fresh("missing-bak");
-    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 6, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 5, Vec::new(), Vec::new(), &[]).unwrap();
+    save(
+        &path,
+        &layout(&["s1", "s2"]),
+        6,
+        Vec::new(),
+        Vec::new(),
+        &[],
+    )
+    .unwrap();
     fs::remove_file(&path).unwrap();
     let loaded = load(&path).unwrap();
     assert_eq!(ids(&loaded), ["s1"]);
@@ -144,6 +161,7 @@ fn a_file_without_a_version_is_read_and_written_with_one() {
         loaded.next_id,
         Vec::new(),
         Vec::new(),
+        &[],
     )
     .unwrap();
     assert!(
@@ -156,9 +174,9 @@ fn a_file_without_a_version_is_read_and_written_with_one() {
 #[test]
 fn a_save_keeps_the_previous_file_as_backup() {
     let (_dir, path) = fresh("bak");
-    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &[]).unwrap();
     assert!(!backup_path(&path).exists());
-    save(&path, &layout(&["s2"]), 3, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s2"]), 3, Vec::new(), Vec::new(), &[]).unwrap();
     assert_eq!(ids(&load(&path).unwrap()), ["s2"]);
     let previous = fs::read_to_string(backup_path(&path)).unwrap();
     assert!(previous.contains("\"s1\""), "{previous}");
@@ -170,8 +188,16 @@ fn a_save_keeps_the_previous_file_as_backup() {
 fn a_damaged_file_that_cannot_be_moved_aside_refuses_the_start_and_keeps_the_backup() {
     use std::os::unix::fs::PermissionsExt;
     let (_dir, path) = fresh("stuck");
-    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new()).unwrap();
-    save(&path, &layout(&["s1", "s2"]), 3, Vec::new(), Vec::new()).unwrap();
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &[]).unwrap();
+    save(
+        &path,
+        &layout(&["s1", "s2"]),
+        3,
+        Vec::new(),
+        Vec::new(),
+        &[],
+    )
+    .unwrap();
     fs::write(&path, "{ nope").unwrap();
     let dir = path.parent().unwrap();
     fs::set_permissions(dir, fs::Permissions::from_mode(0o500)).unwrap();
@@ -190,5 +216,102 @@ fn a_damaged_file_that_cannot_be_moved_aside_refuses_the_start_and_keeps_the_bac
         fs::read_to_string(backup_path(&path))
             .unwrap()
             .contains("\"s1\"")
+    );
+}
+
+fn grant(id: &str) -> StoredGrant {
+    StoredGrant {
+        id: id.into(),
+        lead: "t1".into(),
+        spaces: vec!["s1".into()],
+        tools: vec![AgentWriteAction::StartAgent, AgentWriteAction::StopTerminal],
+        max_agents: 3,
+        worktrees: id.starts_with("grant1"),
+        expires_at: 1_900_000_000_000,
+    }
+}
+
+#[test]
+fn a_file_with_grants_round_trips_them() {
+    let (_dir, path) = fresh("grants");
+    let grants = [grant("grant1-ab"), grant("grant2-cd")];
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &grants).unwrap();
+    assert_eq!(load(&path).unwrap().grants, grants);
+}
+
+#[test]
+fn a_file_without_grants_has_no_grant_key_and_loads_none() {
+    let (_dir, path) = fresh("no-grants");
+    save(&path, &layout(&["s1"]), 2, Vec::new(), Vec::new(), &[]).unwrap();
+    assert!(!fs::read_to_string(&path).unwrap().contains("grants"));
+    assert!(load(&path).unwrap().grants.is_empty());
+}
+
+#[test]
+fn one_grant_that_does_not_parse_drops_all_grants_but_keeps_the_spaces() {
+    let (_dir, path) = fresh("bad-grant");
+    let good = serde_json::to_value(grant("grant1-ab")).unwrap();
+    let mut newer = serde_json::to_value(grant("grant2-cd")).unwrap();
+    newer["narrowed_by"] = serde_json::json!("a field this server does not know");
+    let file = serde_json::json!({
+        "version": VERSION,
+        "spaces": [{"id": "s1", "name": "a", "cwd": "/x"}],
+        "grants": [good, newer],
+    });
+    fs::write(&path, file.to_string()).unwrap();
+    let loaded = load(&path).unwrap();
+    assert_eq!(ids(&loaded), ["s1"]);
+    assert!(loaded.grants.is_empty(), "never a part of them");
+    assert!(damaged_files(&path).is_empty());
+}
+
+#[test]
+fn the_grants_of_a_backup_are_never_loaded() {
+    let (_dir, path) = fresh("bak-grants");
+    save(
+        &path,
+        &layout(&["s1"]),
+        2,
+        Vec::new(),
+        Vec::new(),
+        &[grant("g1-a")],
+    )
+    .unwrap();
+    save(
+        &path,
+        &layout(&["s1"]),
+        3,
+        Vec::new(),
+        Vec::new(),
+        &[grant("g1-a")],
+    )
+    .unwrap();
+    fs::write(&path, "{ nope").unwrap();
+    let loaded = load(&path).unwrap();
+    assert_eq!(ids(&loaded), ["s1"]);
+    assert!(loaded.grants.is_empty());
+    fs::remove_file(&path).ok();
+    save(
+        &path,
+        &layout(&["s1"]),
+        3,
+        Vec::new(),
+        Vec::new(),
+        &[grant("g1-a")],
+    )
+    .unwrap();
+    save(
+        &path,
+        &layout(&["s1"]),
+        3,
+        Vec::new(),
+        Vec::new(),
+        &[grant("g1-a")],
+    )
+    .unwrap();
+    fs::remove_file(&path).unwrap();
+    assert!(
+        load(&path).unwrap().grants.is_empty(),
+        "missing file, backup used"
     );
 }

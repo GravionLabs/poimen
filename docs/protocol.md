@@ -209,7 +209,7 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 | `agent.confirm_resolved` | `{id}` | only to `app`: the confirmation is settled (answered, timed out), so its dialog closes. |
 | `agent.grant_requested` | `{id, lead_terminal_id, lead_name, plan, spaces[{id,name,path?}], tools[], max_agents, worktrees, duration_s, wait_ms}` | only to `app`: a lead agent asks for a grant; answered by `agent.grant_answer`. |
 | `agent.grant_resolved` | `{id}` | only to `app`: the grant request is settled, so its dialog closes. |
-| `agent.grants_changed` | `{grants[]}` | only to `app`: the active grants changed (given, revoked, expired, lead gone); all of them. Grants are in memory and end with the server until #1453 ([ADR 0018, amendment #1448](adr/0018-scoped-write-grant-and-lead-runs-for-orchestration.md#amendment-1448): they survive a restart). |
+| `agent.grants_changed` | `{grants[]}` | only to `app`: the active grants changed (given, revoked, expired, lead gone); all of them. Grants are written to `server.json` (key `grants`) on every change, before the request that changed them answers; a restarted server restores a grant only when it adopted its lead terminal alive and `expires_at` is still ahead, with the spaces that still exist ([ADR 0018, amendment #1448](adr/0018-scoped-write-grant-and-lead-runs-for-orchestration.md#amendment-1448), #1453). |
 | `agent.wrote` | `{caller_terminal_id, caller_name, action, space_id, space_name, terminal_id?, text, confirmed}` | only to `app`: an agent wrote through `poimen mcp` (`agent.write_notice`). |
 | `run.events` | `{root, run, events}` | only to subscriptions with `run_events`: progress events of the run `run` in the repository at `root`, see Runs. |
 
