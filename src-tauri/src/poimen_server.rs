@@ -1095,7 +1095,7 @@ mod tests {
     fn a_protocol_5_server_without_apply_layout_is_incompatible() {
         // Rebuild and presets go through `space.apply_layout` (protocol 6) on the poimen
         // backend; a protocol 5 server answers it with `unknown_method`.
-        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 9);
+        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 11);
         for running in ["0.14.0", "0.15.0"] {
             assert_eq!(
                 classify(pong_of(running, 5), false, "0.14.0"),

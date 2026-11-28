@@ -15,8 +15,9 @@ use std::time::Duration;
 use poimen_client::Client;
 use poimen_client::protocol::host::{HostMessage, HostStart, Size, to_line};
 use poimen_client::protocol::{
-    AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentWriteAction, ClientInfo, ClientKind,
-    Event, EventsSubscribe, GrantEndReason, GrantVerdict, TerminalCreate,
+    AgentGrantAddWorktreeSpace, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke,
+    AgentWriteAction, ClientInfo, ClientKind, Event, EventsSubscribe, GrantEndReason, GrantVerdict,
+    TerminalCreate,
 };
 use poimen_client::transport::{Conn, Listener};
 use poimen_server::{Config, PtyHost, Server};
@@ -205,6 +206,7 @@ fn check_held(client: &Client, lead: &str, space: &str, held: Option<&str>) -> G
             action: AgentWriteAction::PromptAgent,
             space_id: space.into(),
             grant: held.map(str::to_owned),
+            worktree: false,
         })
         .unwrap()
 }
@@ -494,4 +496,89 @@ fn a_revoke_after_the_shutdown_wrote_the_file_is_refused_not_lost() {
     let after = b.agent_grants().unwrap().grants;
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].id, id);
+}
+
+/// `api` as a repository with a linked worktree `api-wt`, and a space on the worktree.
+fn worktree_space(client: &Client, env: &Env) -> String {
+    let git = |dir: &Path, args: &[&str]| {
+        let ok = poimen_core::gui_path::command("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    let api = env.dir.join("api");
+    git(&api, &["init", "-q", "-b", "main"]);
+    git(&api, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    let wt = env.dir.join("api-wt");
+    git(
+        &api,
+        &["worktree", "add", "-q", "-b", "w1", wt.to_str().unwrap()],
+    );
+    client
+        .create_space("api-wt", &env.path("api-wt"))
+        .unwrap()
+        .id
+}
+
+fn add_worktree(client: &Client, l: &Lead, grant: &str, space: &str) -> Result<(), String> {
+    client
+        .add_worktree_space_to_grant(&AgentGrantAddWorktreeSpace {
+            caller_terminal_id: l.lead.clone(),
+            grant: grant.into(),
+            source_space_id: l.api.clone(),
+            space_id: space.into(),
+        })
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// A worktree space that joined a grant (#1452) is in `server.json` before the add answers, and
+/// a restarted server restores the grant with it.
+#[test]
+fn a_worktree_space_that_joined_a_grant_comes_back_after_a_restart() {
+    let env = Env::new("worktree-space");
+    let (a, a_down) = start(&env.config(1, fake(true)));
+    let l = lead(&a, &env);
+    let id = grant(&a, &l);
+    let wt = worktree_space(&a, &env);
+    add_worktree(&a, &l, &id, &wt).unwrap();
+    let state = env.state();
+    assert_eq!(state["grants"][0]["spaces"][2], wt.as_str(), "{state}");
+    stop(&a, &a_down);
+
+    let (b, _) = start(&env.config(2, no_new_host()));
+    let after = b.agent_grants().unwrap().grants;
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert!(after[0].spaces.iter().any(|s| s.id == wt), "{after:?}");
+    assert_eq!(check(&b, &l.lead, &wt), GrantVerdict::Covered { grant: id });
+}
+
+/// An add that reaches the server after its shutdown wrote `server.json` is refused, so the
+/// next server never misses a space the add answered (#1452).
+#[cfg(unix)]
+#[test]
+fn a_worktree_add_after_the_shutdown_wrote_the_file_is_refused() {
+    let env = Env::new("worktree-stopping");
+    let config = env.config(1, fake(true));
+    let (a, a_down) = start(&config);
+    let l = lead(&a, &env);
+    let id = grant(&a, &l);
+    let wt = worktree_space(&a, &env);
+    let side = config.socket.with_file_name("side.sock");
+    std::fs::hard_link(&config.socket, &side).unwrap();
+    stop(&a, &a_down);
+
+    let refused = add_worktree(&Client::new(&side), &l, &id, &wt).unwrap_err();
+    assert!(refused.contains("shutting down"), "{refused}");
+    let state = env.state();
+    assert_eq!(
+        state["grants"][0]["spaces"].as_array().unwrap().len(),
+        2,
+        "{state}"
+    );
 }

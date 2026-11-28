@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use poimen_protocol::{AgentInfo, AgentStatus, Terminal, TerminalSetDraft, TerminalStatus};
 
 pub use session::{
-    CONFIRM_WAIT, RUN_ENV, SessionContext, SessionEnd, SessionError, SessionEvent, SessionRequest,
-    Watched, WriteAsk, WriteError, authorize_write, harnesses_of, run_session, watch_agent,
+    Authorized, CONFIRM_WAIT, RUN_ENV, SessionContext, SessionEnd, SessionError, SessionEvent,
+    SessionRequest, Watched, WriteAsk, WriteError, authorize_write, authorize_write_as,
+    harnesses_of, run_session, watch_agent,
 };
 
 use crate::{AttachmentWriter, Client, ClientError, to_value};

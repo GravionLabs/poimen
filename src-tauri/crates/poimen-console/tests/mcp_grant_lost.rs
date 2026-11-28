@@ -358,3 +358,30 @@ fn an_attention_that_cannot_be_written_leaves_the_refusal_standing() {
         "nothing started"
     );
 }
+
+#[test]
+fn a_worktree_start_with_a_lost_grant_is_refused_before_anything_is_made() {
+    let f = fixture("worktree");
+    lead_run(&f, Some("grant9-2222222222222222"));
+    let spaces = f.client.list_spaces().unwrap().len();
+    let r = call(
+        &f,
+        "start_agent",
+        json!({"harness": "claude", "worktree": {"branch": "w1"}}),
+    );
+    let refused = error(&r);
+    assert!(refused.starts_with("grant_lost"), "{refused}");
+    assert_eq!(
+        f.client.list_spaces().unwrap().len(),
+        spaces,
+        "no space made"
+    );
+    let branches = poimen_core::gui_path::command("git")
+        .arg("-C")
+        .arg(f.dir.join("work"))
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .unwrap();
+    let list = String::from_utf8_lossy(&branches.stdout).into_owned();
+    assert!(!list.contains("w1"), "no worktree made: {list}");
+}
