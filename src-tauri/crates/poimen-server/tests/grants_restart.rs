@@ -183,6 +183,7 @@ fn grant(client: &Client, l: &Lead) -> String {
         "spaces": [l.work, l.api],
         "tools": ["start_agent", "prompt_agent"],
         "max_agents": 2,
+        "worktrees": true,
         "duration_s": 3600,
     }))
     .unwrap();
@@ -235,6 +236,7 @@ fn a_grant_comes_back_with_its_id_and_end_after_a_restart() {
     assert_eq!(after[0].expires_at, before[0].expires_at);
     assert_eq!(after[0].lead_terminal_id, l.lead);
     assert_eq!(after[0].max_agents, 2);
+    assert!(after[0].worktrees, "the worktree line comes back too");
     assert_eq!(after[0].spaces.len(), 2);
     assert_eq!(
         check(&b, &l.lead, &l.api),

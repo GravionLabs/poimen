@@ -134,6 +134,7 @@ const grant = (): ActiveGrant => ({
   tools: ["start_agent"],
   maxAgents: 3,
   running: 2,
+  worktrees: false,
   expiresAt: NOW + 3600_000,
 });
 

@@ -114,6 +114,7 @@ describe("Notifications", () => {
       tools: ["start_agent"],
       maxAgents: 3,
       running: 1,
+      worktrees: false,
       expiresAt: Date.now() + 3600_000,
     };
     const grants = { active: signal([grant]), revoke: vi.fn() };
@@ -132,8 +133,14 @@ describe("Notifications", () => {
     expect(el.querySelector(".grant .message")?.textContent).toContain(
       "lead may write in api, web",
     );
+    expect(el.querySelector(".grant .message")?.textContent).not.toContain("worktrees");
     expect(el.querySelector(".grant .meta")?.textContent).toContain("1 of 3 agents running");
     el.querySelector<HTMLButtonElement>(".revoke")!.click();
     expect(grants.revoke).toHaveBeenCalledWith("g1");
+    grants.active.set([{ ...grant, worktrees: true }]);
+    await fixture.whenStable();
+    expect(el.querySelector(".grant .message")?.textContent?.replace(/\s+/g, " ")).toContain(
+      "lead may write in api, web and start agents in new worktrees of them",
+    );
   });
 });

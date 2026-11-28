@@ -28,6 +28,8 @@ struct Grant {
     spaces: Vec<String>,
     tools: Vec<AgentWriteAction>,
     max_agents: u32,
+    /// The user let it cover worktree starts (#1448); never without being asked for it.
+    worktrees: bool,
     /// Milliseconds since the epoch.
     expires_at: u64,
 }
@@ -37,12 +39,14 @@ struct Ask {
     answer: Sender<Option<Narrowed>>,
     spaces: Vec<String>,
     max_agents: u32,
+    worktrees: bool,
 }
 
-/// The user's yes: all the spaces and the limit asked for, or fewer.
+/// The user's yes: all the spaces, the limit and the worktree starts asked for, or less.
 struct Narrowed {
     spaces: Vec<String>,
     max_agents: u32,
+    worktrees: bool,
 }
 
 impl From<&Grant> for StoredGrant {
@@ -53,6 +57,7 @@ impl From<&Grant> for StoredGrant {
             spaces: g.spaces.clone(),
             tools: g.tools.clone(),
             max_agents: g.max_agents,
+            worktrees: g.worktrees,
             expires_at: g.expires_at,
         }
     }
@@ -123,6 +128,7 @@ impl Shared {
                 spaces,
                 tools: g.tools.clone(),
                 max_agents: g.max_agents,
+                worktrees: g.worktrees,
                 expires_at: g.expires_at,
             });
         }
@@ -195,6 +201,7 @@ impl Shared {
             tools: g.tools.clone(),
             max_agents: g.max_agents,
             running: self.running_agents(&g.lead),
+            worktrees: g.worktrees,
             expires_at: g.expires_at,
         }
     }
@@ -304,6 +311,7 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
             answer: tx,
             spaces: ids,
             max_agents: p.max_agents,
+            worktrees: p.worktrees,
         },
     );
     let sent = shared.publish_to_apps(&Event::AgentGrantRequested {
@@ -314,6 +322,7 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         spaces,
         tools: tools.clone(),
         max_agents: p.max_agents,
+        worktrees: p.worktrees,
         duration_s,
         wait_ms,
     });
@@ -343,6 +352,8 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         spaces: n.spaces,
         tools,
         max_agents: n.max_agents,
+        // Both the lead and the user said yes to it: an answer cannot add it (see `answer`).
+        worktrees: p.worktrees && n.worktrees,
         expires_at: now_millis() + duration_s * 1000,
     };
     let info = shared.grant_info(&grant);
@@ -360,8 +371,9 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
     }))
 }
 
-/// `agent.grant_answer`: the user's answer. A yes can only narrow what was asked; an answer that
-/// widens it is `invalid_params` and leaves the request open. A settled id is `not_found`.
+/// `agent.grant_answer`: the user's answer. A yes can only narrow what was asked (fewer spaces, a
+/// lower limit, no worktree starts); an answer that widens it is `invalid_params` and leaves the
+/// request open. A settled id is `not_found`.
 fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
     let mut asks = lock(&shared.confirms.grants.asks);
     let Some(ask) = asks.get(&p.id) else {
@@ -384,7 +396,21 @@ fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
         if max_agents == 0 || max_agents > ask.max_agents {
             return Err(invalid("`max_agents` can only be lowered, and not to 0"));
         }
-        Some(Narrowed { spaces, max_agents })
+        let worktrees = match p.worktrees {
+            None => ask.worktrees,
+            Some(false) => false,
+            Some(true) if ask.worktrees => true,
+            Some(true) => {
+                return Err(invalid(
+                    "`worktrees` was not asked for: an answer can only turn it off",
+                ));
+            }
+        };
+        Some(Narrowed {
+            spaces,
+            max_agents,
+            worktrees,
+        })
     } else {
         None
     };

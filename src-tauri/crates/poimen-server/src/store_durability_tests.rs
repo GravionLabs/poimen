@@ -226,6 +226,7 @@ fn grant(id: &str) -> StoredGrant {
         spaces: vec!["s1".into()],
         tools: vec![AgentWriteAction::StartAgent, AgentWriteAction::StopTerminal],
         max_agents: 3,
+        worktrees: id.starts_with("grant1"),
         expires_at: 1_900_000_000_000,
     }
 }

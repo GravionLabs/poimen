@@ -57,6 +57,9 @@ pub(crate) struct StoredGrant {
     pub(crate) spaces: Vec<String>,
     pub(crate) tools: Vec<AgentWriteAction>,
     pub(crate) max_agents: u32,
+    /// The grant covers worktree starts (#1451); absent when it does not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) worktrees: bool,
     /// Milliseconds since the epoch, by the wall clock.
     pub(crate) expires_at: u64,
 }
