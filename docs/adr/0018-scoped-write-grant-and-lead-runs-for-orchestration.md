@@ -5,6 +5,7 @@
 - Issues: #1208, #1207
 - Builds on: [ADR 0012](0012-mcp-server-for-agent-sessions.md), [ADR 0016](0016-poimen-hosts-the-sessions-of-scripted-runs.md), [ADR 0008](0008-remote-machines-over-ssh.md)
 - Amended by: [ADR 0021](0021-mcp-2026-07-28-and-its-extensions.md) (the push model of #1182 is MCP Events; `wait_any` stays as the fallback)
+- Amendment: [#1448](#amendment-1448) (a grant can cover worktree starts, grants survive a server restart, `grant_lost`)
 
 ## Context
 
@@ -83,3 +84,47 @@ It is the first version; it does not decide the push model of #1182. The relatio
 - **A grant that survives a server restart.** It would have to be stored on disk and could be replayed; asking once again is cheaper.
 - **Stop all agents on revoke.** Safe against a runaway, but it ends terminals on its own and loses work, against the non-destructive rule; the explicit stop action is available.
 - **Wait for push (#1182) instead of `wait_any`.** The lead needs to wait on many loops now; push is an open ADR of its own.
+
+## Amendment (#1448)
+
+Date: 2026-11-28. Issues: #1448, #1450; code: #1451, #1452, #1453, #1454. The status of this ADR stays Proposed.
+
+A lead that runs unattended stops at its first worktree start, which asks per call even inside a grant, and loses its grant when `poimen-server` restarts. This amendment changes both. It replaces, for the cases below, the per-call question for a worktree start (ADR 0012, #981: the new space counts as another space), the sentences "Grants are lost on a server restart. That is accepted" and "it loses grants, which are in memory and end with the server", and the rejected alternative "A grant that survives a server restart". Everything else of this ADR and of ADR 0012 stays, including that `write_terminal` into a terminal the lead did not start is never covered.
+
+### Worktree starts under a grant
+
+- A grant may carry `worktrees: true`. The lead asks for it in `request_grant` (default `false`), and the grant dialog shows it as its own line with the blast radius. The user can uncheck it; an answer can never add it when it was not asked (narrow only, as for the spaces and the limit).
+- It covers `start_agent` with `worktree` only when the grant has `worktrees: true`, `start_agent` among its tools and the **source space** among its spaces. Every other worktree start asks per call, also from the caller's own space.
+- `max_agents` applies as for other starts: a start over the limit is refused with the reason, not queued.
+- The space poimen makes on the new worktree **joins that grant by its server-resolved id**, as an explicit add right after the space is created. The server adds it only when the grant is the caller's, has `worktrees`, contains the source space, and the new space's directory is a linked worktree of the source space's repository (same git common directory). The grant never matches "any space of a granted repository", so a space the user or another agent makes later is not covered.
+- A joined space is listed in the grant overview like any other, and the tools of the grant apply to it, so the lead prompts and stops its workers without a dialog. The add and its announcement happen together; a grant that was revoked or ran out in between refuses the add. A failed add closes the new space and fails the start; the worktree directory may stay, as after any failed start.
+- This is the one case in which a space enters a grant without a second dialog: the user confirmed it in advance with the `worktrees` line. `create_space` still adds a space only through a confirmation.
+
+### Grants across a restart
+
+- The server writes its grants to `server.json` (mode 0600, in the user's private state directory) on every change, before the request that changed them is answered. It also keeps a bounded list of ended grants as `{id, reason}`, with the reason `revoked`, `expired` or `lead_gone`, each until its `expires_at` has passed. A grant replaced by a later grant of the same lead, or transferred to another lead terminal, counts as `revoked`. Unanswered requests are never written.
+- A restarted server restores a grant only when it adopted the lead terminal (ADR 0009) and that terminal is alive, and `expires_at` is still ahead by the wall clock. Spaces that no longer exist are dropped from it; a grant left with none is dropped. Restore never creates a grant the file did not hold and never extends `expires_at`: downtime counts against the duration.
+- Grants come only from the current state file. A damaged or newer `server.json` yields no grants: not a part of them, and none from a backup, which may predate a revocation.
+
+### `grant_lost`
+
+- The lead's run records the grant it holds (the `grant` record). When a write of that lead is covered by no live grant and the recorded id is neither active nor ended on the server (the state was not restored), the write is refused with `grant_lost` and no per-call dialog is shown: an unattended lead learns at once that it must call `request_grant` again, instead of waiting on a dialog nobody answers.
+- An attention with the stable id `grant-lost-<grant>` is raised **on the lead's own run**, so the Runs view shows the run as needing the user. It is raised once per grant and run. If it cannot be written, the write stays refused and the tool result says so.
+- A recorded grant that ended for a known reason is not lost: the write asks per call as before, and the answer names the reason.
+- A lead without an open run, or whose run records no grant, keeps the per-call behaviour.
+- The recorded id is written by the lead and is not trusted: it can only turn a question into a refusal, never a write into a covered one.
+
+### Security consequences
+
+- The blast radius of a grant with `worktrees` grows from the listed spaces to those spaces and new worktrees of their repositories. `max_agents` bounds the agents running at once, not how many worktrees are made over the duration of the grant. Each new space shows in the overview and each covered write is announced; revoking works as before.
+- A grant on disk is readable and writable only by the user. A process that runs as the user and writes the file can forge a grant, or put back an earlier file with a grant that was revoked since, until its `expires_at`. Such a process can already speak the socket protocol, which the grant does not guard against (see "The scoped grant"), but the file is a second way in that outlasts the process.
+- If writing the file fails, the server logs it and retries on the next change. Until then a restart can bring back the earlier state, including a grant revoked in between.
+
+### Alternatives rejected
+
+- **A grant matches any space of a granted repository.** No add request is needed, but spaces the user opens for their own work would be covered without being listed at any point. The explicit add keeps the list of covered spaces exact.
+- **Cover every worktree start of a granted space without a separate line.** Fewer fields, but the user would not see that the grant reaches new directories and could not refuse that part alone.
+- **Keep grants in memory and only report `grant_lost`.** Nothing on disk, but an update or crash at night still stops the run until the user answers.
+- **A separate grant file.** The same protection and the same risks as `server.json`, with a second store to keep consistent with the terminals the grants name.
+- **A notification of the app for `grant_lost`.** It is gone for a user who was not there; the attention stays on the run until it is resolved.
+
