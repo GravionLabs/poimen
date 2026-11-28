@@ -9,10 +9,10 @@ use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use poimen_protocol::{
-    AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentGrants,
-    AgentStatus, AgentWriteAction, ConfirmReason, ErrorCode, Event, GRANT_DEFAULT_SECS,
-    GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace, GrantVerdict, Request,
-    TerminalStatus,
+    AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
+    AgentGrantRevoke, AgentGrants, AgentStatus, AgentWriteAction, ConfirmReason, ErrorCode, Event,
+    GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace,
+    GrantVerdict, Request, TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -169,6 +169,9 @@ pub(super) fn dispatch(shared: &Shared, method: &str, req: &Request) -> ApiResul
         "agent.grant_answer" => parsed(req).and_then(|p| answer(shared, p)),
         "agent.grant_revoke" => parsed(req).and_then(|p| revoke(shared, p)),
         "agent.grant_check" => parsed(req).map(|p| check(shared, &p)),
+        "agent.grant_add_worktree_space" => {
+            parsed(req).and_then(|p| add_worktree_space(shared, &p))
+        }
         "agent.grants" => {
             shared.prune_grants();
             Ok(json!(shared.grants_snapshot()))
@@ -354,6 +357,59 @@ fn revoke(shared: &Shared, p: AgentGrantRevoke) -> ApiResult {
     Ok(json!({ "revoked": removed > 0 }))
 }
 
+/// `agent.grant_add_worktree_space` (#1452): adds the space made on a new worktree to the caller's
+/// grant, by its id. Refused (`invalid_params`, nothing changed) unless the directory of `space_id`
+/// is the top of a linked worktree of the source space's repository and the grant is live, the
+/// caller's, has `worktrees` and `start_agent`, and contains the source space. The checks of the
+/// grant, the add and `agent.grants_changed` happen under one lock of `Grants.active`, so a grant
+/// revoked or pruned in between refuses the add and is never re-created.
+fn add_worktree_space(shared: &Shared, p: &AgentGrantAddWorktreeSpace) -> ApiResult {
+    let refuse = |why: String| Err(invalid(format!("refused: {why}")));
+    let dir_of = |id: &str| shared.space_of(id).map(|s| s.path.unwrap_or_default());
+    let Some(source) = dir_of(&p.source_space_id) else {
+        return Err(not_found("space", &p.source_space_id));
+    };
+    let Some(target) = dir_of(&p.space_id) else {
+        return Err(not_found("space", &p.space_id));
+    };
+    // git runs outside the grant lock; the directories of spaces do not change.
+    if source.is_empty()
+        || target.is_empty()
+        || !poimen_core::git::is_linked_worktree_of(&target, &source)
+    {
+        return refuse(format!(
+            "space {} is not a linked worktree of the repository of space {}",
+            p.space_id, p.source_space_id
+        ));
+    }
+    let now = now_millis();
+    let mut active = lock(&shared.confirms.grants.active);
+    let Some(g) = active.iter_mut().find(|g| {
+        g.id == p.grant
+            && g.lead == p.caller_terminal_id
+            && g.expires_at > now
+            && shared.terminal_alive(&g.lead)
+    }) else {
+        return refuse(format!("no live grant {} of this terminal", p.grant));
+    };
+    if !g.worktrees || !g.tools.contains(&AgentWriteAction::StartAgent) {
+        return refuse(format!("grant {} does not cover worktree starts", p.grant));
+    }
+    if !g.spaces.contains(&p.source_space_id) {
+        return refuse(format!(
+            "space {} is not in grant {}",
+            p.source_space_id, p.grant
+        ));
+    }
+    if !g.spaces.contains(&p.space_id) {
+        g.spaces.push(p.space_id.clone());
+    }
+    let grants = active.iter().map(|g| shared.grant_info(g)).collect();
+    shared.publish_to_apps(&Event::AgentGrantsChanged { grants });
+    drop(active);
+    Ok(json!({ "added": true }))
+}
+
 /// `agent.grant_check`: `covered` when a live grant of the caller covers the write, `refused`
 /// when one does but the limit of parallel agents is reached, else `needs_confirmation`.
 fn check(shared: &Shared, p: &AgentGrantCheck) -> Value {
@@ -364,6 +420,9 @@ fn check(shared: &Shared, p: &AgentGrantCheck) -> Value {
             g.lead == p.caller_terminal_id
                 && g.tools.contains(&p.action)
                 && g.spaces.contains(&p.space_id)
+                // A worktree start reaches a new directory: only a grant the user let cover
+                // worktree starts covers it, and only as a `start_agent` (#1452).
+                && (!p.worktree || (g.worktrees && p.action == AgentWriteAction::StartAgent))
         })
         .cloned();
     let verdict = match found {

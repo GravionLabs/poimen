@@ -639,23 +639,3 @@ fn an_answer_cannot_add_worktrees_that_were_not_asked() {
     assert_eq!(r["structuredContent"]["grant"]["worktrees"], false, "{r}");
     assert!(!f.client.agent_grants().unwrap().grants[0].worktrees);
 }
-
-#[test]
-fn a_worktree_start_still_asks_per_call_under_a_worktree_grant() {
-    let f = fixture("worktrees-ask");
-    let (_, r) = ask_worktrees(&f, Some(true), yes());
-    assert_eq!(r["structuredContent"]["grant"]["worktrees"], true, "{r}");
-    let asked = answer_confirm(&f, false);
-    let r = call(
-        &f,
-        &f.lead,
-        "start_agent",
-        json!({"space": f.api, "harness": "claude", "worktree": {"branch": "topic"}}),
-        Duration::from_secs(5),
-    );
-    let Event::AgentConfirmRequested { action, .. } = asked.join().unwrap() else {
-        unreachable!()
-    };
-    assert_eq!(action, AgentWriteAction::StartAgent);
-    assert_eq!(r["isError"], true, "declined: {r}");
-}
