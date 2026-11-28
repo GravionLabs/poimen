@@ -116,6 +116,31 @@ pub struct AgentGrantCheck {
     pub action: AgentWriteAction,
     /// The server-resolved space id of the write.
     pub space_id: String,
+    /// The grant id the caller's lead run records (#1454); not trusted: it can only turn a
+    /// question into a refusal (`lost`), never a write into a covered one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<String>,
+}
+
+/// Why a grant ended (#1454). A grant replaced by a later grant of the same lead counts as
+/// `revoked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantEndReason {
+    Revoked,
+    Expired,
+    LeadGone,
+}
+
+impl GrantEndReason {
+    /// The name on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Revoked => "revoked",
+            Self::Expired => "expired",
+            Self::LeadGone => "lead_gone",
+        }
+    }
 }
 
 /// What the server says about a write.
@@ -128,6 +153,15 @@ pub enum GrantVerdict {
     NeedsConfirmation,
     /// A grant covers it but a limit stops it; do not ask.
     Refused { reason: String },
+    /// No grant covers it and the `grant` of the check ended for a known reason (#1454): the
+    /// per-call confirmation applies, and its answer names the reason.
+    Ended {
+        grant: String,
+        reason: GrantEndReason,
+    },
+    /// No grant covers it and the server knows nothing of the `grant` of the check (its state
+    /// was not restored, #1454): refuse with `grant_lost`, do not ask.
+    Lost { grant: String },
 }
 
 #[cfg(test)]
@@ -185,7 +219,22 @@ mod tests {
             json!({"caller_terminal_id": "t1", "action": "start_agent", "space_id": "s2"}),
         )
         .unwrap();
-        assert_eq!(c.action, AgentWriteAction::StartAgent);
+        assert_eq!((c.action, c.grant), (AgentWriteAction::StartAgent, None));
+        let held: AgentGrantCheck = serde_json::from_value(json!({"caller_terminal_id": "t1",
+            "action": "prompt_agent", "space_id": "s2", "grant": "g1"}))
+        .unwrap();
+        assert_eq!(held.grant.as_deref(), Some("g1"));
+        assert_eq!(serde_json::to_value(&held).unwrap()["grant"], "g1");
+        assert!(
+            serde_json::to_value(AgentGrantCheck {
+                grant: None,
+                ..held
+            })
+            .unwrap()
+            .get("grant")
+            .is_none(),
+            "an older server never sees the field"
+        );
     }
 
     #[test]
@@ -205,6 +254,31 @@ mod tests {
                     reason: "limit".into(),
                 },
             ),
+            (
+                json!({"verdict": "ended", "grant": "g1", "reason": "revoked"}),
+                GrantVerdict::Ended {
+                    grant: "g1".into(),
+                    reason: GrantEndReason::Revoked,
+                },
+            ),
+            (
+                json!({"verdict": "ended", "grant": "g1", "reason": "expired"}),
+                GrantVerdict::Ended {
+                    grant: "g1".into(),
+                    reason: GrantEndReason::Expired,
+                },
+            ),
+            (
+                json!({"verdict": "ended", "grant": "g1", "reason": "lead_gone"}),
+                GrantVerdict::Ended {
+                    grant: "g1".into(),
+                    reason: GrantEndReason::LeadGone,
+                },
+            ),
+            (
+                json!({"verdict": "lost", "grant": "g1"}),
+                GrantVerdict::Lost { grant: "g1".into() },
+            ),
         ] {
             assert_eq!(
                 serde_json::from_value::<GrantVerdict>(value.clone()).unwrap(),
@@ -212,6 +286,19 @@ mod tests {
             );
             assert_eq!(serde_json::to_value(&verdict).unwrap(), value);
         }
+        for reason in [
+            GrantEndReason::Revoked,
+            GrantEndReason::Expired,
+            GrantEndReason::LeadGone,
+        ] {
+            assert_eq!(serde_json::to_value(reason).unwrap(), reason.as_str());
+        }
+        assert!(
+            serde_json::from_value::<GrantVerdict>(
+                json!({"verdict": "ended", "grant": "g1", "reason": "forgotten"})
+            )
+            .is_err()
+        );
     }
 
     #[test]

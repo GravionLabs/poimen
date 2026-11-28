@@ -394,6 +394,12 @@ fn authorize(
     text: &str,
     always_ask: bool,
 ) -> Result<bool, Fail> {
+    // The grant the caller's lead run records (#1454): an unknown one refuses with `grant_lost`.
+    let held = if always_ask {
+        None
+    } else {
+        lead::held_grant(client, env)
+    };
     authorize_write(
         client,
         env.terminal_id,
@@ -403,11 +409,23 @@ fn authorize(
             terminal_id,
             text,
             always_ask,
+            grant: held.as_ref().map(|h| h.grant.as_str()),
         },
         env.confirm_wait,
     )
     .map_err(|e| match e {
         WriteError::Refused(m) => Fail::Tool(m),
+        WriteError::GrantLost { message, .. } => Fail::Tool(match held.as_ref() {
+            // The refusal stands whether or not the attention could be written.
+            Some(h) => match lead::raise_grant_lost(client, env, h) {
+                Ok(_) => format!(
+                    "{message}. The attention grant-lost-{} is on your lead run {}.",
+                    h.grant, h.run
+                ),
+                Err(e) => format!("{message}. The attention on your lead run was not written: {e}"),
+            },
+            None => message,
+        }),
         WriteError::Client(e) => server_error(e),
     })
 }

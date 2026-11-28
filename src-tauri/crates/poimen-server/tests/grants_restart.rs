@@ -16,7 +16,7 @@ use poimen_client::Client;
 use poimen_client::protocol::host::{HostMessage, HostStart, Size, to_line};
 use poimen_client::protocol::{
     AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentWriteAction, ClientInfo, ClientKind,
-    Event, EventsSubscribe, GrantVerdict, TerminalCreate,
+    Event, EventsSubscribe, GrantEndReason, GrantVerdict, TerminalCreate,
 };
 use poimen_client::transport::{Conn, Listener};
 use poimen_server::{Config, PtyHost, Server};
@@ -194,13 +194,33 @@ fn grant(client: &Client, l: &Lead) -> String {
 }
 
 fn check(client: &Client, lead: &str, space: &str) -> GrantVerdict {
+    check_held(client, lead, space, None)
+}
+
+/// [`check`] for a lead whose run records the grant `held` (#1454).
+fn check_held(client: &Client, lead: &str, space: &str, held: Option<&str>) -> GrantVerdict {
     client
         .check_agent_grant(&AgentGrantCheck {
             caller_terminal_id: lead.into(),
             action: AgentWriteAction::PromptAgent,
             space_id: space.into(),
+            grant: held.map(str::to_owned),
         })
         .unwrap()
+}
+
+/// The grants of the state file that are active, not kept as ended (#1454).
+fn active(state: &Value) -> Vec<Value> {
+    let all = state.get("grants").and_then(Value::as_array).cloned();
+    let active = all.unwrap_or_default().into_iter();
+    active.filter(|g| g.get("ended").is_none()).collect()
+}
+
+fn ended(reason: GrantEndReason, id: &str) -> GrantVerdict {
+    GrantVerdict::Ended {
+        grant: id.into(),
+        reason,
+    }
 }
 
 fn stop(client: &Client, down: &Receiver<()>) {
@@ -258,14 +278,20 @@ fn a_revoked_grant_stays_revoked_after_a_restart() {
         id: Some(id),
         caller_terminal_id: None,
     };
+    let id = revoke.id.clone().unwrap();
     assert!(a.revoke_agent_grant(&revoke).unwrap());
-    // Written before the revoke answered.
-    assert_eq!(env.state().get("grants"), None);
+    // Written before the revoke answered, kept as ended with its reason (#1454).
+    let state = env.state();
+    assert_eq!(active(&state), Vec::<Value>::new());
+    assert_eq!(state["grants"][0]["ended"], "revoked", "{state}");
     stop(&a, &a_down);
 
     let (b, _) = start(&env.config(2, no_new_host()));
     assert!(b.agent_grants().unwrap().grants.is_empty());
     assert_eq!(check(&b, &l.lead, &l.work), GrantVerdict::NeedsConfirmation);
+    let held = Some(id.as_str());
+    let verdict = check_held(&b, &l.lead, &l.work, held);
+    assert_eq!(verdict, ended(GrantEndReason::Revoked, &id));
 }
 
 #[test]
@@ -273,7 +299,7 @@ fn a_grant_that_ran_out_during_the_downtime_is_not_restored() {
     let env = Env::new("expired");
     let (a, a_down) = start(&env.config(1, fake(true)));
     let l = lead(&a, &env);
-    grant(&a, &l);
+    let id = grant(&a, &l);
     stop(&a, &a_down);
     // The downtime outlasts the grant: its end is now in the past by the wall clock.
     let mut state = env.state();
@@ -288,7 +314,13 @@ fn a_grant_that_ran_out_during_the_downtime_is_not_restored() {
     assert_eq!(b.list_terminals(None).unwrap().len(), 1, "the lead is back");
     assert!(b.agent_grants().unwrap().grants.is_empty());
     assert_eq!(check(&b, &l.lead, &l.work), GrantVerdict::NeedsConfirmation);
-    assert_eq!(env.state().get("grants"), None, "the file drops it too");
+    assert_eq!(
+        active(&env.state()),
+        Vec::<Value>::new(),
+        "the file drops it"
+    );
+    let verdict = check_held(&b, &l.lead, &l.work, Some(&id));
+    assert_eq!(verdict, ended(GrantEndReason::Expired, &id), "and says why");
 }
 
 #[test]
@@ -296,12 +328,72 @@ fn a_grant_whose_lead_was_not_adopted_is_not_restored() {
     let env = Env::new("lead-gone");
     let (a, a_down) = start(&env.config(1, fake(false)));
     let l = lead(&a, &env);
-    grant(&a, &l);
+    let id = grant(&a, &l);
     stop(&a, &a_down);
 
     let (b, _) = start(&env.config(2, no_new_host()));
     assert!(b.agent_grants().unwrap().grants.is_empty());
     assert_eq!(check(&b, &l.lead, &l.work), GrantVerdict::NeedsConfirmation);
+    let verdict = check_held(&b, &l.lead, &l.work, Some(&id));
+    assert_eq!(verdict, ended(GrantEndReason::LeadGone, &id));
+}
+
+/// An ended grant is kept for a day past its end, then forgotten (#1454).
+#[test]
+fn an_ended_grant_is_forgotten_a_day_after_its_end() {
+    let env = Env::new("ended-old");
+    let (a, a_down) = start(&env.config(1, fake(true)));
+    let l = lead(&a, &env);
+    let id = grant(&a, &l);
+    let revoke = AgentGrantRevoke {
+        id: Some(id.clone()),
+        caller_terminal_id: None,
+    };
+    assert!(a.revoke_agent_grant(&revoke).unwrap());
+    stop(&a, &a_down);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let mut state = env.state();
+    state["grants"][0]["expires_at"] = json!(now_ms - 25 * 3600 * 1000);
+    std::fs::write(env.state_file(), state.to_string()).unwrap();
+
+    let (b, _) = start(&env.config(2, no_new_host()));
+    let verdict = check_held(&b, &l.lead, &l.work, Some(&id));
+    assert_eq!(verdict, GrantVerdict::Lost { grant: id });
+    assert_eq!(env.state().get("grants"), None, "dropped from the file");
+}
+
+/// A grant the server knows nothing of is `lost` (#1454): a damaged state file, a grant this
+/// server would not give, an id nobody was given. An active grant of the id is never lost.
+#[test]
+fn a_grant_the_server_does_not_know_is_lost() {
+    let env = Env::new("lost");
+    let (a, a_down) = start(&env.config(1, fake(true)));
+    let l = lead(&a, &env);
+    let id = grant(&a, &l);
+    let lost = |id: &str| GrantVerdict::Lost { grant: id.into() };
+    assert_eq!(
+        check_held(&a, &l.lead, "s-outside", Some("grant-x")),
+        lost("grant-x")
+    );
+    // Covered wins over the record (the grant has both spaces); the id of a live grant of
+    // another lead only asks.
+    let covered = GrantVerdict::Covered { grant: id.clone() };
+    assert_eq!(check_held(&a, &l.lead, &l.api, Some("grant-x")), covered);
+    let other = check_held(&a, "t-other", &l.api, Some(&id));
+    assert_eq!(other, GrantVerdict::NeedsConfirmation);
+    stop(&a, &a_down);
+    // A newer server's field makes the grants unreadable: none come back, none is ended.
+    let mut state = env.state();
+    state["grants"][0]["narrowed_by"] = json!("a newer server");
+    std::fs::write(env.state_file(), state.to_string()).unwrap();
+
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert!(b.agent_grants().unwrap().grants.is_empty());
+    assert_eq!(check_held(&b, &l.lead, &l.api, Some(&id)), lost(&id));
+    assert_eq!(check(&b, &l.lead, &l.api), GrantVerdict::NeedsConfirmation);
 }
 
 #[test]
@@ -349,7 +441,7 @@ fn a_stored_grant_no_request_could_get_is_not_restored() {
         let env = Env::new(name);
         let (a, a_down) = start(&env.config(1, fake(true)));
         let l = lead(&a, &env);
-        grant(&a, &l);
+        let id = grant(&a, &l);
         stop(&a, &a_down);
         let mut state = env.state();
         edit(&mut state["grants"][0], now_ms);
@@ -362,6 +454,9 @@ fn a_stored_grant_no_request_could_get_is_not_restored() {
             GrantVerdict::NeedsConfirmation,
             "{name}"
         );
+        let verdict = check_held(&b, &l.lead, &l.work, Some(&id));
+        let lost = GrantVerdict::Lost { grant: id };
+        assert_eq!(verdict, lost, "{name}: not restored, not ended");
     }
 }
 

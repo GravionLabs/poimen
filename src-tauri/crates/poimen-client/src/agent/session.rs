@@ -39,6 +39,9 @@ const TITLE_WORDS: usize = 6;
 pub enum WriteError {
     /// Refused, with the reason to show.
     Refused(String),
+    /// Refused without a question: the `grant` the caller's lead run records is unknown to the
+    /// server (#1454). `message` starts with `grant_lost`.
+    GrantLost { grant: String, message: String },
     /// A request failed.
     Client(ClientError),
 }
@@ -60,6 +63,9 @@ pub struct WriteAsk<'a> {
     pub text: &'a str,
     /// Ask even in the caller's own space.
     pub always_ask: bool,
+    /// The grant id the caller's lead run records (#1454), if any; an unknown one refuses with
+    /// [`WriteError::GrantLost`] instead of asking.
+    pub grant: Option<&'a str>,
 }
 
 /// Allows a write into `space_id` for the agent in `caller`: freely in the caller's own space
@@ -78,6 +84,7 @@ pub fn authorize_write(
         terminal_id,
         text,
         always_ask,
+        grant,
     } = *ask;
     let Some(caller) = caller.filter(|i| !i.is_empty()) else {
         return Err(WriteError::Refused(
@@ -91,6 +98,8 @@ pub fn authorize_write(
         WriteError::Refused(format!("terminal {caller} is not known to the server"))
     })?;
     let own_space = own.space_id == space_id && !always_ask;
+    // The recorded grant ended for a known reason: ask as without a grant and name the reason.
+    let mut ended: Option<(String, &str)> = None;
     // A grant of this caller (ADR 0018) covers the write without a question; a limit it reached
     // refuses, also in the caller's own space; no grant, or a server that does not know grants,
     // falls back to the question (or, in the own space, to free).
@@ -99,10 +108,24 @@ pub fn authorize_write(
             caller_terminal_id: caller.to_owned(),
             action,
             space_id: space_id.to_owned(),
+            grant: grant.map(str::to_owned),
         };
         match client.check_agent_grant(&check) {
             Ok(GrantVerdict::Covered { .. }) => return Ok(false),
             Ok(GrantVerdict::Refused { reason }) => return Err(WriteError::Refused(reason)),
+            Ok(GrantVerdict::Lost { grant }) => {
+                return Err(WriteError::GrantLost {
+                    message: format!(
+                        "grant_lost: the grant {grant} your lead run records is not known to \
+                         poimen-server (its state was not kept, for example after a restart); \
+                         the write was not made and nobody was asked: call request_grant again"
+                    ),
+                    grant,
+                });
+            }
+            Ok(GrantVerdict::Ended { grant, reason }) => {
+                ended = Some((grant, reason.as_str()));
+            }
             Ok(GrantVerdict::NeedsConfirmation) | Err(_) => {}
         }
     }
@@ -129,7 +152,12 @@ pub fn authorize_write(
         }
         ConfirmReason::Approved => "refused: the server did not approve",
     };
-    Err(WriteError::Refused(refusal.into()))
+    Err(WriteError::Refused(match ended {
+        Some((grant, reason)) => format!(
+            "{refusal}; your grant {grant} ended ({reason}): call request_grant for a new one"
+        ),
+        None => refusal.into(),
+    }))
 }
 
 /// The harnesses of the user's `config.json` under `home`, the defaults without. A project config
@@ -454,11 +482,14 @@ pub fn run_session(
             terminal_id: None,
             text: &command_line,
             always_ask: false,
+            grant: None,
         },
         ctx.confirm_wait,
     )
     .map_err(|e| match e {
-        WriteError::Refused(m) => SessionError::PermissionRefused(m),
+        WriteError::Refused(m) | WriteError::GrantLost { message: m, .. } => {
+            SessionError::PermissionRefused(m)
+        }
         WriteError::Client(e) => failed(e),
     })?;
 
