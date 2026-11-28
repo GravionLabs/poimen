@@ -149,6 +149,8 @@ pub fn authorize_write_as(
             }
             Ok(GrantVerdict::Covered { .. }) => {}
             Ok(GrantVerdict::Refused { reason }) => return Err(WriteError::Refused(reason)),
+            // Only a write that would ask: one in the own space stays free (#1454).
+            Ok(GrantVerdict::Lost { .. }) if own_space => return Ok(Authorized::Free),
             Ok(GrantVerdict::Lost { grant }) => {
                 return Err(WriteError::GrantLost {
                     message: format!(

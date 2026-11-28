@@ -250,6 +250,10 @@ fn a_lost_grant_refuses_without_a_dialog_and_raises_one_attention() {
         "nothing started"
     );
 
+    // A write in the lead's own space never needed a grant or a dialog: it stays free.
+    let own = call(&f, "start_shell", json!({"command": ["sleep", "20"]}));
+    assert!(ok(&own)["terminal"].is_string());
+
     let attention = "grant-lost-grant9-0000000000000000";
     assert_eq!(attentions(&f, &run, attention), 1, "raised once per grant");
     let read = ok(&call(&f, "read_run", json!({})));
