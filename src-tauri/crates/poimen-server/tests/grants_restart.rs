@@ -327,13 +327,16 @@ fn a_restored_grant_loses_the_spaces_that_are_gone() {
     assert_eq!(check(&b, &l.lead, &l.api), GrantVerdict::NeedsConfirmation);
 }
 
+/// A change of a stored grant at a time (ms since the epoch).
+type Edit = fn(&mut Value, u64);
+
 #[test]
 fn a_stored_grant_no_request_could_get_is_not_restored() {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    let edits: [(&str, fn(&mut Value, u64)); 3] = [
+    let edits: [(&str, Edit); 3] = [
         ("longer", |g, now| {
             g["expires_at"] = json!(now + 25 * 3600 * 1000)
         }),
