@@ -5,6 +5,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.40.1] — 2026-11-28
+
+### Documentation
+- **mcp**: Neutral run wording in list_runs, wait_any, record_run and their docs (#1457)
+
+
 ## [0.40.0] — 2026-11-27
 
 ### Bug Fixes
@@ -15,6 +21,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Poimen as the host of delivery runs and their events (#1410) (#1421)
 - Poimen as the host of delivery runs and their events (#1410)
 - Link the skills ADR by commit (#1410)
+- Update CHANGELOG.md for v0.40.0 [skip ci]
 
 
 ### Features
