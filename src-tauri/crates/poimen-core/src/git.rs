@@ -420,7 +420,13 @@ mod tests {
     #[test]
     fn only_the_top_of_a_linked_worktree_of_the_same_repository_counts() {
         let tmp = crate::test_dir::TestDir::new("poimen-git-1452-");
-        let tmp = tmp.canonicalize().unwrap();
+        // On Windows `canonicalize` gives a `\\?\` path, which `git -C` does not take; the
+        // function compares canonical paths itself.
+        let tmp = if cfg!(windows) {
+            tmp.to_path_buf()
+        } else {
+            tmp.canonicalize().unwrap()
+        };
         let (main, wt, other) = (tmp.join("main"), tmp.join("wt"), tmp.join("other"));
         let git = |dir: &std::path::Path, args: &[&str]| {
             let ok = crate::gui_path::command("git")
