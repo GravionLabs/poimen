@@ -20,8 +20,9 @@ pub enum LeadRecord {
     /// shape is the lead's; the newest record replaces the older ones.
     #[serde(rename = "orchestrate.plan")]
     Plan { plan: Value },
-    /// A started loop: the repository, its space and terminal, the run id of its deliver loop (`deliver_run`: `run` is the envelope's) and
-    /// the machine (`None`: the machine of the lead).
+    /// A started member run: the repository, its space and terminal, the run id of the member's
+    /// run (`deliver_run`: `run` is the envelope's) and the machine (`None`: the machine of the
+    /// lead).
     #[serde(rename = "orchestrate.member")]
     Member {
         task: String,
