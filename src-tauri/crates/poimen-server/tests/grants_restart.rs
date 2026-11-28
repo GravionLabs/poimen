@@ -364,3 +364,39 @@ fn a_stored_grant_no_request_could_get_is_not_restored() {
         );
     }
 }
+
+/// Once `server.shutdown` wrote the file for the next server, a revoke or a new grant would not
+/// reach that file: it is refused instead of answered as done. A second link to the socket
+/// reaches the stopping server after the socket path is removed.
+#[cfg(unix)]
+#[test]
+fn a_revoke_after_the_shutdown_wrote_the_file_is_refused_not_lost() {
+    let env = Env::new("revoke-stopping");
+    let config = env.config(1, fake(true));
+    let (a, a_down) = start(&config);
+    let l = lead(&a, &env);
+    let id = grant(&a, &l);
+    let side = config.socket.with_file_name("side.sock");
+    std::fs::hard_link(&config.socket, &side).unwrap();
+    stop(&a, &a_down);
+
+    let late = Client::new(&side);
+    let revoke = AgentGrantRevoke {
+        id: Some(id.clone()),
+        caller_terminal_id: None,
+    };
+    let refused = format!("{:?}", late.revoke_agent_grant(&revoke).unwrap_err());
+    assert!(refused.contains("shutting down"), "{refused}");
+    let by_lead = AgentGrantRevoke {
+        id: None,
+        caller_terminal_id: Some(l.lead.clone()),
+    };
+    assert!(late.revoke_agent_grant(&by_lead).is_err());
+    assert_eq!(env.state()["grants"][0]["id"], id.as_str());
+
+    // The next server has what the refused revoke left: the grant.
+    let (b, _) = start(&env.config(2, no_new_host()));
+    let after = b.agent_grants().unwrap().grants;
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].id, id);
+}

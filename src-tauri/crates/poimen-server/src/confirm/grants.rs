@@ -6,6 +6,7 @@
 //! restarted server restores those whose lead it adopted (ADR 0018 amendment, #1453).
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
@@ -82,6 +83,32 @@ impl Shared {
     fn persist_grants(&self) {
         let inner = lock(&self.inner);
         self.persist(&inner);
+    }
+
+    /// Changes the grants a request asked to change and writes them, both under the state lock,
+    /// so the change is either in the file `server.shutdown` leaves for the next server or
+    /// refused: once that file is written (`stopped`), nothing is changed and the request fails
+    /// rather than answer a change the next server would undo. `f` says whether it changed any.
+    fn change_grants<R>(
+        &self,
+        f: impl FnOnce(&mut Vec<Grant>) -> (R, bool),
+    ) -> Result<R, (ErrorCode, String)> {
+        let inner = lock(&self.inner);
+        if self.stopped.load(Ordering::SeqCst) {
+            return Err((
+                ErrorCode::Internal,
+                "the server is shutting down: no grant was changed; ask the next server".into(),
+            ));
+        }
+        let (result, changed) = f(&mut lock(&self.confirms.grants.active));
+        if changed {
+            self.persist(&inner);
+        }
+        drop(inner);
+        if changed {
+            self.publish_grants();
+        }
+        Ok(result)
     }
 
     /// Restores the grants of `server.json` at the start (`Server::bind`, after the adoption): a
@@ -357,13 +384,11 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         expires_at: now_millis() + duration_s * 1000,
     };
     let info = shared.grant_info(&grant);
-    {
-        let mut active = lock(&shared.confirms.grants.active);
+    shared.change_grants(|active| {
         active.retain(|g| g.lead != grant.lead);
         active.push(grant);
-    }
-    shared.persist_grants();
-    shared.publish_grants();
+        ((), true)
+    })?;
     Ok(json!(GrantResult {
         granted: true,
         reason,
@@ -423,20 +448,18 @@ fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
 /// `agent.grant_revoke`: by id, or the grant of the caller's terminal. Ends no terminal and sends
 /// no input: running agents are left alone (ADR 0018).
 fn revoke(shared: &Shared, p: AgentGrantRevoke) -> ApiResult {
-    let removed = {
-        let mut active = lock(&shared.confirms.grants.active);
+    if p.id.is_none() && p.caller_terminal_id.is_none() {
+        return Err(invalid("`id` or `caller_terminal_id` is required"));
+    }
+    let removed = shared.change_grants(|active| {
         let before = active.len();
         match (&p.id, &p.caller_terminal_id) {
             (Some(id), _) => active.retain(|g| g.id != *id),
-            (None, Some(lead)) => active.retain(|g| g.lead != *lead),
-            (None, None) => return Err(invalid("`id` or `caller_terminal_id` is required")),
+            (_, lead) => active.retain(|g| Some(&g.lead) != lead.as_ref()),
         }
-        before - active.len()
-    };
-    if removed > 0 {
-        shared.persist_grants();
-        shared.publish_grants();
-    }
+        let removed = before - active.len();
+        (removed, removed > 0)
+    })?;
     Ok(json!({ "revoked": removed > 0 }))
 }
 
