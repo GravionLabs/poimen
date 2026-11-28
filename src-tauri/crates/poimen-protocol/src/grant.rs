@@ -9,6 +9,10 @@ use crate::{AgentWriteAction, ConfirmReason};
 pub const GRANT_DEFAULT_SECS: u64 = 8 * 3600;
 /// The longest duration of a grant: 24 hours. There is no grant without an end.
 pub const GRANT_MAX_SECS: u64 = 24 * 3600;
+/// The first protocol whose `agent.grant_check` knows `worktree` (#1452). An older server ignores
+/// the field and could answer `covered` for a worktree start, so a client trusts that answer only
+/// from a server of at least this protocol.
+pub const GRANT_WORKTREE_PROTOCOL: u32 = 10;
 /// How long `agent.grant_request` waits for the user at most.
 pub const GRANT_WAIT_MS: u64 = 120_000;
 
@@ -114,7 +118,24 @@ pub struct AgentGrants {
 pub struct AgentGrantCheck {
     pub caller_terminal_id: String,
     pub action: AgentWriteAction,
-    /// The server-resolved space id of the write.
+    /// The server-resolved space id of the write; for a worktree start the source space.
+    pub space_id: String,
+    /// A `start_agent` in a new worktree of `space_id` (#1452): covered only by a grant with
+    /// `worktrees`. Absent is `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub worktree: bool,
+}
+
+/// Params of `agent.grant_add_worktree_space` (#1452): after a covered worktree start, `poimen
+/// mcp` adds the space it made on the new worktree to the caller's grant. The server refuses
+/// unless the grant is the caller's and live, has `worktrees`, contains `source_space_id`, and
+/// the directory of `space_id` is a linked worktree of the source space's repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentGrantAddWorktreeSpace {
+    pub caller_terminal_id: String,
+    /// The grant id of the `covered` verdict.
+    pub grant: String,
+    pub source_space_id: String,
     pub space_id: String,
 }
 
@@ -186,6 +207,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.action, AgentWriteAction::StartAgent);
+        assert!(!c.worktree, "absent is no worktree start");
+        assert_eq!(
+            serde_json::to_value(&c).unwrap(),
+            json!({"caller_terminal_id": "t1", "action": "start_agent", "space_id": "s2"})
+        );
+        let wt = AgentGrantCheck {
+            worktree: true,
+            ..c
+        };
+        assert_eq!(serde_json::to_value(&wt).unwrap()["worktree"], true);
+        let add: AgentGrantAddWorktreeSpace = serde_json::from_value(json!({
+            "caller_terminal_id": "t1", "grant": "g1", "source_space_id": "s1", "space_id": "s9"
+        }))
+        .unwrap();
+        assert_eq!((add.grant.as_str(), add.space_id.as_str()), ("g1", "s9"));
+        assert!(
+            serde_json::from_value::<AgentGrantAddWorktreeSpace>(json!({
+                "caller_terminal_id": "t1", "grant": "g1", "space_id": "s9"
+            }))
+            .is_err(),
+            "the source space is required"
+        );
     }
 
     #[test]

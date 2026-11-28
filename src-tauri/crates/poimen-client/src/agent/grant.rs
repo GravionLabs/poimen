@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use poimen_protocol::{
-    AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentGrants,
-    GrantResult, GrantVerdict,
+    AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
+    AgentGrantRevoke, AgentGrants, GrantResult, GrantVerdict,
 };
 use serde_json::Value;
 
@@ -54,5 +54,15 @@ impl Client {
     pub fn check_agent_grant(&self, check: &AgentGrantCheck) -> Result<GrantVerdict, ClientError> {
         let value = self.request("agent.grant_check", to_value(check))?;
         parse("agent.grant_check", value)
+    }
+
+    /// `agent.grant_add_worktree_space`: adds the space made on a new worktree to the caller's
+    /// grant after a covered worktree start (#1452); the server's refusal is an error.
+    pub fn add_worktree_space_to_grant(
+        &self,
+        add: &AgentGrantAddWorktreeSpace,
+    ) -> Result<(), ClientError> {
+        self.request("agent.grant_add_worktree_space", to_value(add))
+            .map(drop)
     }
 }

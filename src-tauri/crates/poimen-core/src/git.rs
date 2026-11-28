@@ -222,6 +222,34 @@ pub fn roots(dir: &str) -> Option<(String, String)> {
     parse_roots(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// Whether `dir` is the top of a linked worktree (not the main checkout) of the repository that
+/// contains `source`: both have the same common git dir, compared canonically (#1452). Fails
+/// closed: a subdirectory of a worktree, a directory outside a repository and any git error are
+/// `false`.
+pub fn is_linked_worktree_of(dir: &str, source: &str) -> bool {
+    let canonical = |p: &str| std::fs::canonicalize(p).ok();
+    // `[toplevel, git dir, common dir]`, each canonical.
+    let rev = |d: &str| -> Option<Vec<std::path::PathBuf>> {
+        let out = crate::gui_path::command("git")
+            .args(["-C", d, "rev-parse", "--path-format=absolute"])
+            .args(["--show-toplevel", "--absolute-git-dir", "--git-common-dir"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let paths: Option<Vec<_>> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| canonical(l.trim()))
+            .collect();
+        paths.filter(|p| p.len() == 3)
+    };
+    let (Some(target), Some(src), Some(top)) = (rev(dir), rev(source), canonical(dir)) else {
+        return false;
+    };
+    top == target[0] && target[1] != target[2] && target[2] == src[2]
+}
+
 /// The distinct repositories among `dirs` (a linked worktree counts as its main repository), each
 /// by the toplevel of the first directory that belongs to it; directories outside one are skipped.
 pub fn repo_roots(dirs: &[String]) -> Vec<String> {
@@ -387,6 +415,66 @@ mod tests {
         assert!(!a.worktree && b.worktree);
         assert_eq!(a.common_dir, b.common_dir);
         assert!(a.common_dir.ends_with(".git"));
+    }
+
+    #[test]
+    fn only_the_top_of_a_linked_worktree_of_the_same_repository_counts() {
+        let tmp = crate::test_dir::TestDir::new("poimen-git-1452-");
+        // On Windows `canonicalize` gives a `\\?\` path, which `git -C` does not take; the
+        // function compares canonical paths itself.
+        let tmp = if cfg!(windows) {
+            tmp.to_path_buf()
+        } else {
+            tmp.canonicalize().unwrap()
+        };
+        let (main, wt, other) = (tmp.join("main"), tmp.join("wt"), tmp.join("other"));
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let ok = crate::gui_path::command("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        for repo in [&main, &other] {
+            std::fs::create_dir_all(repo).unwrap();
+            git(repo, &["init", "-q", "-b", "main"]);
+            git(repo, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        }
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+        );
+        std::fs::create_dir_all(wt.join("sub")).unwrap();
+        let s = |p: &std::path::Path| p.to_str().unwrap().to_owned();
+        assert!(is_linked_worktree_of(&s(&wt), &s(&main)));
+        // From the worktree itself as the source: the same repository.
+        assert!(is_linked_worktree_of(&s(&wt), &s(&wt)));
+        assert!(
+            !is_linked_worktree_of(&s(&main), &s(&main)),
+            "the main checkout"
+        );
+        assert!(
+            !is_linked_worktree_of(&s(&main), &s(&wt)),
+            "the main checkout"
+        );
+        assert!(
+            !is_linked_worktree_of(&s(&wt.join("sub")), &s(&main)),
+            "a subdirectory"
+        );
+        assert!(
+            !is_linked_worktree_of(&s(&wt), &s(&other)),
+            "another repository"
+        );
+        assert!(
+            !is_linked_worktree_of(&s(&tmp), &s(&main)),
+            "outside a repository"
+        );
+        assert!(!is_linked_worktree_of("/nonexistent-poimen-dir", &s(&main)));
     }
 
     #[test]
