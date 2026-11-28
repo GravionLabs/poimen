@@ -40,7 +40,7 @@ const KEYS: [&str; 16] = [
 pub(super) fn record_tool() -> Value {
     json!({
         "name": "record_run",
-        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<uuid>` of the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started member run: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run` = the run id of the member's run, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
+        "description": "Records the state of YOUR lead run outside your session, so a new lead session can resume it (read_run). It appends to an agent-events run `lead-<uuid>` of the repository of your space, which the Runs view shows. Write after every step: `start` (title = the user's request; optional `plan`) once, then `plan` (the approved plan: repositories with path, milestone, order, blockers; the newest replaces older ones), `member` (a started member run: `task` `<repo>#<n>`, `target` = its repository directory, `space`, `terminal`, `deliver_run` = the run id of the member's run, `machine`), `member_done` (`task`, `outcome`, `text`), `dependency` (`task`, `blocked_by`), `grant` (what request_grant gave: `grant` id, `spaces`, `tools`, `max_agents`; record every new grant: a write while the poimen server does not know the recorded id is refused with `grant_lost`), `decision` (what you answered to a blocked session: `text`, `task`), `attention` / `resolved` (a blocked session: `id`, `task`, `terminal`, `text`), `note` (progress, `text`; write one at least every 20 minutes while you wait so the run is not shown abandoned), `resume` (after the user confirmed taking over a run from another terminal; `run`) and `finish` (`outcome`, `text`). Never record a secret. A write to your own run file: no confirmation.",
         "inputSchema": {"type": "object", "properties": {
             "event": {"type": "string", "enum": ["start", "plan", "member", "member_done", "dependency", "grant", "decision", "attention", "resolved", "note", "resume", "finish"]},
             "repository": {"type": "string", "description": "A directory in the repository that holds the run; default: the directory of your terminal."},
@@ -438,6 +438,75 @@ pub(super) fn record_run(client: &Client, env: &Env, args: &Value) -> Result<Val
     Ok(json!({"run": run, "repository": at.repository, "seq": seq, "recorded": event}))
 }
 
+/// The grant the caller's open lead run records (#1454): the run and the id of its newest
+/// `grant` record. `None` outside a poimen terminal, without an open run or without a record.
+pub(super) struct HeldGrant {
+    pub(super) run: String,
+    pub(super) grant: String,
+}
+
+pub(super) fn held_grant(client: &Client, env: &Env) -> Option<HeldGrant> {
+    let me = env.terminal_id.filter(|i| !i.is_empty())?;
+    let repository = terminal_dir(client, me).ok()?;
+    let repo = run_files::repository(&repository).ok()?;
+    let at = Where {
+        shared: env.events_dir.clone(),
+        repo,
+        repository,
+    };
+    let lead = lead_runs(&at)
+        .into_iter()
+        .find(|l| !l.scan.finished && l.scan.terminal.as_deref() == Some(me))?;
+    let grant = lead.scan.records.iter().rev().find_map(|r| match r {
+        LeadRecord::Grant { grant, .. } => Some(grant.clone()),
+        _ => None,
+    })?;
+    Some(HeldGrant {
+        run: lead.run,
+        grant,
+    })
+}
+
+/// Raises the attention `grant-lost-<grant>` on the caller's lead run, once per grant and run
+/// (#1454): `Ok(false)` when the run already has it. The error says why it was not written.
+pub(super) fn raise_grant_lost(
+    client: &Client,
+    env: &Env,
+    held: &HeldGrant,
+) -> Result<bool, String> {
+    let id = format!("grant-lost-{}", held.grant);
+    let me = env.terminal_id.unwrap_or_default();
+    let repository = terminal_dir(client, me).map_err(fail_text)?;
+    let at = Where {
+        shared: env.events_dir.clone(),
+        repo: run_files::repository(&repository)?,
+        repository,
+    };
+    let raised = lead_runs(&at)
+        .iter()
+        .filter(|l| l.run == held.run)
+        .flat_map(|l| &l.events)
+        .any(|e| e["type"] == "attention" && e["id"] == id.as_str());
+    if raised {
+        return Ok(false);
+    }
+    let text = format!(
+        "The lead lost its grant {}: poimen-server no longer knows it (its state was not kept, \
+         for example after a restart). Its writes are refused until it calls request_grant again.",
+        held.grant
+    );
+    let args = json!({"event": "attention", "run": held.run, "id": id, "text": text});
+    record_run(client, env, &args).map_err(fail_text)?;
+    Ok(true)
+}
+
+fn fail_text(f: Fail) -> String {
+    match f {
+        Fail::Tool(m) => m,
+        Fail::Unknown => "unknown tool".into(),
+    }
+}
+
 fn tone(outcome: &str) -> &'static str {
     match outcome {
         "succeeded" => "success",
@@ -506,6 +575,6 @@ pub(super) fn read_run(client: &Client, env: &Env, args: &Value) -> Result<Value
         "yours": mine(&s),
         "last_seq": s.last_seq, "state": state, "plan": plan, "members": members,
         "dependencies": dependencies, "grant": grant, "decisions": decisions,
-        "note": "The server is authoritative for terminals: re-check them before you act. A grant is lost when the server restarts; request_grant again.",
+        "note": "The server is authoritative for terminals: re-check them before you act. A grant survives a server restart within its duration; if agent.grants no longer lists it, request_grant again.",
     }))
 }

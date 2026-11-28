@@ -2185,7 +2185,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(8), 8)
+            ("0.9.0", Some(11), 11)
         );
     }
 

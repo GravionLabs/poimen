@@ -26,15 +26,15 @@ pub use confirm::{
 };
 pub use files::windows_dir_from;
 pub use grant::{
-    AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentGrants,
-    GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace,
-    GrantVerdict,
+    AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
+    AgentGrantRevoke, AgentGrants, GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS,
+    GRANT_WORKTREE_PROTOCOL, GrantEndReason, GrantInfo, GrantResult, GrantSpace, GrantVerdict,
 };
 pub use schedule::*;
 pub use status::{AgentInfo, Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version of the server and this crate, raised on incompatible changes (`ping`).
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -1426,8 +1426,7 @@ pub enum Event {
     /// The confirmation `id` is settled (answered, timed out or abandoned).
     #[serde(rename = "agent.confirm_resolved")]
     AgentConfirmResolved { id: String },
-    /// A lead agent asks for a scoped write grant (ADR 0018, #1211); only to subscriptions of kind
-    /// `app`. Answered by `agent.grant_answer`; gone with [`Event::AgentGrantResolved`].
+    /// A lead asks for a write grant (ADR 0018); only to `app`, answered by `agent.grant_answer`.
     #[serde(rename = "agent.grant_requested")]
     AgentGrantRequested {
         id: String,
@@ -1437,6 +1436,8 @@ pub enum Event {
         spaces: Vec<GrantSpace>,
         tools: Vec<AgentWriteAction>,
         max_agents: u32,
+        #[serde(default)]
+        worktrees: bool,
         /// How long the grant lasts once confirmed.
         duration_s: u64,
         /// How long the request stays open.
@@ -1445,8 +1446,7 @@ pub enum Event {
     /// The grant request `id` is settled (answered, timed out or abandoned).
     #[serde(rename = "agent.grant_resolved")]
     AgentGrantResolved { id: String },
-    /// The active grants changed (given, narrowed, revoked, expired or ended with the lead);
-    /// carries all of them. Only to subscriptions of kind `app`.
+    /// The active grants changed (given, revoked, expired, lead gone); all of them, only to `app`.
     #[serde(rename = "agent.grants_changed")]
     AgentGrantsChanged { grants: Vec<GrantInfo> },
     /// An agent wrote through `poimen mcp` (#615); only to subscriptions of kind `app`.

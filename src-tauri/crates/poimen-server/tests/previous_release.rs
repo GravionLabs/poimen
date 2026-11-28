@@ -253,12 +253,17 @@ fn the_client_of_this_tree_talks_to_the_server_of_the_last_release() {
     let ping = client
         .ping()
         .unwrap_or_else(|e| panic!("{ctx}: ping failed with {e}"));
+    // Protocols 9 (#1451), 10 (#1452, worktree starts in a grant) and 11 (#1454, `grant_lost`)
+    // are a step the app handles through `Incompatible`: the last release (0.40.1) speaks 8. Set
+    // this to `PROTOCOL_VERSION` again once a release with protocol 11 is the last one.
     assert_eq!(
-        ping.protocol, PROTOCOL_VERSION,
-        "{ctx}: the server speaks protocol {} (version {}), this tree {PROTOCOL_VERSION}: the app \
-         would call it Incompatible. A protocol step needs the `Incompatible` path \
-         (docs/agents/backend-and-server.md, \"Compatibility with the last release\")",
-        ping.protocol, ping.version
+        ping.protocol,
+        PROTOCOL_VERSION - 3,
+        "{ctx}: the server speaks protocol {} (version {}), this tree {PROTOCOL_VERSION}: the \
+         expected step is three protocol versions (docs/agents/backend-and-server.md, \"Compatibility \
+         with the last release\")",
+        ping.protocol,
+        ping.version
     );
 
     let space = client.create_space("work", &old.dir.work()).unwrap().id;

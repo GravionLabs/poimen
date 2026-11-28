@@ -1,22 +1,27 @@
 //! The scoped write grant (ADR 0018, #1211). A lead agent asks once for a plan over several
 //! spaces (`agent.grant_request`), the user confirms in the app (`agent.grant_answer`), and
 //! `poimen mcp` asks `agent.grant_check` before each write: a covered write needs no dialog, any
-//! other write falls back to the per-call confirmation of ADR 0012. Grants live in memory and end
-//! with the server, the duration, the lead's terminal or a revocation.
+//! other write falls back to the per-call confirmation of ADR 0012. Grants end with the duration,
+//! the lead's terminal or a revocation; they are written to `server.json` on every change and a
+//! restarted server restores those whose lead it adopted (ADR 0018 amendment, #1453). Ended
+//! grants are kept as `{id, reason}` for a while, so a lead whose run records a grant the server
+//! knows nothing of gets `lost` instead of a dialog nobody answers (#1454).
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use poimen_protocol::{
-    AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest, AgentGrantRevoke, AgentGrants,
-    AgentStatus, AgentWriteAction, ConfirmReason, ErrorCode, Event, GRANT_DEFAULT_SECS,
-    GRANT_MAX_SECS, GRANT_WAIT_MS, GrantInfo, GrantResult, GrantSpace, GrantVerdict, Request,
-    TerminalStatus,
+    AgentGrantAddWorktreeSpace, AgentGrantAnswer, AgentGrantCheck, AgentGrantRequest,
+    AgentGrantRevoke, AgentGrants, AgentStatus, AgentWriteAction, ConfirmReason, ErrorCode, Event,
+    GRANT_DEFAULT_SECS, GRANT_MAX_SECS, GRANT_WAIT_MS, GrantEndReason, GrantInfo, GrantResult,
+    GrantSpace, GrantVerdict, Request, TerminalStatus,
 };
 use serde_json::{Value, json};
 
-use crate::{ApiResult, Shared, invalid, lock, not_found, now_millis, parsed};
+use crate::store::StoredGrant;
+use crate::{ApiResult, Inner, Shared, invalid, lock, not_found, now_millis, parsed};
 
 /// A confirmed grant.
 #[derive(Debug, Clone)]
@@ -26,6 +31,8 @@ struct Grant {
     spaces: Vec<String>,
     tools: Vec<AgentWriteAction>,
     max_agents: u32,
+    /// The user let it cover worktree starts (#1448); never without being asked for it.
+    worktrees: bool,
     /// Milliseconds since the epoch.
     expires_at: u64,
 }
@@ -35,22 +42,229 @@ struct Ask {
     answer: Sender<Option<Narrowed>>,
     spaces: Vec<String>,
     max_agents: u32,
+    worktrees: bool,
 }
 
-/// The user's yes: all the spaces and the limit asked for, or fewer.
+/// The user's yes: all the spaces, the limit and the worktree starts asked for, or less.
 struct Narrowed {
     spaces: Vec<String>,
     max_agents: u32,
+    worktrees: bool,
+}
+
+/// How long an ended grant is kept past its `expires_at`, so a lead that comes back after the end
+/// still learns why (#1454).
+const ENDED_KEEP_MS: u64 = GRANT_MAX_SECS * 1000;
+/// The most ended grants kept; the oldest go first.
+const ENDED_MAX: usize = 64;
+
+/// A grant that ended, and why (#1454).
+#[derive(Debug, Clone)]
+struct Ended {
+    grant: Grant,
+    reason: GrantEndReason,
+}
+
+impl Ended {
+    fn kept_at(&self, now_ms: u64) -> bool {
+        self.grant.expires_at.saturating_add(ENDED_KEEP_MS) > now_ms
+    }
+}
+
+impl From<&Grant> for StoredGrant {
+    fn from(g: &Grant) -> Self {
+        Self {
+            ended: None,
+            id: g.id.clone(),
+            lead: g.lead.clone(),
+            spaces: g.spaces.clone(),
+            tools: g.tools.clone(),
+            max_agents: g.max_agents,
+            worktrees: g.worktrees,
+            expires_at: g.expires_at,
+        }
+    }
+}
+
+impl From<&StoredGrant> for Grant {
+    fn from(g: &StoredGrant) -> Self {
+        Self {
+            id: g.id.clone(),
+            lead: g.lead.clone(),
+            spaces: g.spaces.clone(),
+            tools: g.tools.clone(),
+            max_agents: g.max_agents,
+            worktrees: g.worktrees,
+            expires_at: g.expires_at,
+        }
+    }
 }
 
 /// The state of the grants of one server.
 #[derive(Default)]
 pub(super) struct Grants {
     active: std::sync::Mutex<Vec<Grant>>,
+    /// Ended grants, oldest first; at most [`ENDED_MAX`].
+    ended: std::sync::Mutex<Vec<Ended>>,
     asks: std::sync::Mutex<HashMap<String, Ask>>,
 }
 
 impl Shared {
+    /// The active and the ended grants as `server.json` keeps them. Pending requests are never
+    /// written.
+    pub(crate) fn grants(&self) -> Vec<StoredGrant> {
+        let mut all: Vec<StoredGrant> = lock(&self.confirms.grants.active)
+            .iter()
+            .map(StoredGrant::from)
+            .collect();
+        all.extend(
+            lock(&self.confirms.grants.ended)
+                .iter()
+                .map(|e| StoredGrant {
+                    ended: Some(e.reason),
+                    ..StoredGrant::from(&e.grant)
+                }),
+        );
+        all
+    }
+
+    /// Keeps `gone` as ended for `reason`; drops ended grants past their keep time and the oldest
+    /// over [`ENDED_MAX`]. Whether the list changed.
+    fn end_grants(&self, gone: Vec<(Grant, GrantEndReason)>, now_ms: u64) -> bool {
+        let mut ended = lock(&self.confirms.grants.ended);
+        let before: Vec<String> = ended.iter().map(|e| e.grant.id.clone()).collect();
+        for (grant, reason) in gone {
+            ended.retain(|e| e.grant.id != grant.id);
+            ended.push(Ended { grant, reason });
+        }
+        ended.retain(|e| e.kept_at(now_ms));
+        let over = ended.len().saturating_sub(ENDED_MAX);
+        ended.drain(..over);
+        ended.len() != before.len() || ended.iter().zip(&before).any(|(e, b)| e.grant.id != *b)
+    }
+
+    /// Why the grant `id` ended, while it is kept.
+    fn ended_reason(&self, id: &str) -> Option<GrantEndReason> {
+        let now = now_millis();
+        lock(&self.confirms.grants.ended)
+            .iter()
+            .find(|e| e.grant.id == id && e.kept_at(now))
+            .map(|e| e.reason)
+    }
+
+    /// Writes `server.json` after a change of the grants, before the request answers. A failed
+    /// write is logged by `persist` and the grants stay as they are; the next change retries.
+    fn persist_grants(&self) {
+        let inner = lock(&self.inner);
+        self.persist(&inner);
+    }
+
+    /// Changes the grants a request asked to change and writes them, both under the state lock,
+    /// so the change is either in the file `server.shutdown` leaves for the next server or
+    /// refused: once that file is written (`stopped`), nothing is changed and the request fails
+    /// rather than answer a change the next server would undo. `f` says whether it changed any;
+    /// the grants it removed are kept as ended for `reason` (#1454).
+    fn change_grants<R>(
+        &self,
+        reason: GrantEndReason,
+        f: impl FnOnce(&mut Vec<Grant>) -> (R, bool),
+    ) -> Result<R, (ErrorCode, String)> {
+        let inner = lock(&self.inner);
+        if self.stopped.load(Ordering::SeqCst) {
+            return Err((
+                ErrorCode::Internal,
+                "the server is shutting down: no grant was changed; ask the next server".into(),
+            ));
+        }
+        let mut active = lock(&self.confirms.grants.active);
+        let before = active.clone();
+        let (result, changed) = f(&mut active);
+        let gone: Vec<(Grant, GrantEndReason)> = before
+            .into_iter()
+            .filter(|g| !active.iter().any(|a| a.id == g.id))
+            .map(|g| (g, reason))
+            .collect();
+        drop(active);
+        self.end_grants(gone, now_millis());
+        if changed {
+            self.persist(&inner);
+        }
+        drop(inner);
+        if changed {
+            self.publish_grants();
+        }
+        Ok(result)
+    }
+
+    /// Restores the grants of `server.json` at the start (`Server::bind`, after the adoption): a
+    /// grant comes back only when its lead terminal was adopted and runs, it has not expired by
+    /// the wall clock and is in the bounds a request could get; spaces that are gone are dropped
+    /// from it, and a grant left with none is dropped. Never creates or extends a grant. A grant
+    /// whose lead is gone or that expired, and the ended grants of the file, are kept as ended
+    /// (#1454); any other grant that is not restored is forgotten, so its lead gets `lost`.
+    pub(crate) fn restore_grants(&self, inner: &Inner, stored: Vec<StoredGrant>, now_ms: u64) {
+        let (ended, stored): (Vec<StoredGrant>, Vec<StoredGrant>) =
+            stored.into_iter().partition(|g| g.ended.is_some());
+        let mut gone: Vec<(Grant, GrantEndReason)> = ended
+            .iter()
+            .filter_map(|g| g.ended.map(|r| (Grant::from(g), r)))
+            .collect();
+        let leads: Vec<&str> = stored.iter().map(|g| g.lead.as_str()).collect();
+        let mut restored = Vec::new();
+        for g in &stored {
+            let alive = inner
+                .terminals
+                .iter()
+                .any(|t| t.info.id == g.lead && t.info.status != TerminalStatus::Exited);
+            let spaces: Vec<String> = g
+                .spaces
+                .iter()
+                .filter(|id| inner.layout.spaces.iter().any(|s| s.id == **id))
+                .cloned()
+                .collect();
+            let why_not = if !alive {
+                Some("its lead terminal was not adopted")
+            } else if g.expires_at <= now_ms {
+                Some("it expired")
+            } else if g.expires_at > now_ms.saturating_add(GRANT_MAX_SECS * 1000)
+                || g.max_agents == 0
+                || g.tools.is_empty()
+                || g.tools.contains(&AgentWriteAction::WriteTerminal)
+                || leads.iter().filter(|l| **l == g.lead).count() > 1
+            {
+                Some("it is not a grant this server gives")
+            } else if spaces.is_empty() {
+                Some("none of its spaces exists")
+            } else {
+                None
+            };
+            if let Some(why) = why_not {
+                self.log("grants", &format!("grant {} not restored: {why}", g.id));
+                if !alive {
+                    gone.push((Grant::from(g), GrantEndReason::LeadGone));
+                } else if g.expires_at <= now_ms {
+                    gone.push((Grant::from(g), GrantEndReason::Expired));
+                }
+                continue;
+            }
+            restored.push(Grant {
+                id: g.id.clone(),
+                lead: g.lead.clone(),
+                spaces,
+                tools: g.tools.clone(),
+                max_agents: g.max_agents,
+                worktrees: g.worktrees,
+                expires_at: g.expires_at,
+            });
+        }
+        if !restored.is_empty() {
+            self.log("grants", &format!("restored {} grant(s)", restored.len()));
+        }
+        *lock(&self.confirms.grants.active) = restored;
+        lock(&self.confirms.grants.ended).clear();
+        self.end_grants(gone, now_ms);
+    }
+
     /// Whether the terminal exists and still runs.
     fn terminal_alive(&self, id: &str) -> bool {
         lock(&self.inner)
@@ -114,6 +328,7 @@ impl Shared {
             tools: g.tools.clone(),
             max_agents: g.max_agents,
             running: self.running_agents(&g.lead),
+            worktrees: g.worktrees,
             expires_at: g.expires_at,
         }
     }
@@ -140,16 +355,28 @@ impl Shared {
             .collect();
         let alive: Vec<bool> = leads.iter().map(|l| self.terminal_alive(l)).collect();
         let mut active = lock(&self.confirms.grants.active);
-        let before = active.len();
+        let mut gone = Vec::new();
         active.retain(|g| {
-            g.expires_at > now
-                && leads
-                    .iter()
-                    .zip(&alive)
-                    .any(|(l, alive)| *l == g.lead && *alive)
+            let lead_alive = leads
+                .iter()
+                .zip(&alive)
+                .any(|(l, alive)| *l == g.lead && *alive);
+            let reason = if g.expires_at <= now {
+                GrantEndReason::Expired
+            } else if !lead_alive {
+                GrantEndReason::LeadGone
+            } else {
+                return true;
+            };
+            gone.push((g.clone(), reason));
+            false
         });
-        let dropped = active.len() != before;
+        let dropped = !gone.is_empty();
         drop(active);
+        let ended_changed = self.end_grants(gone, now);
+        if dropped || ended_changed {
+            self.persist_grants();
+        }
         if dropped {
             self.publish_grants();
         }
@@ -164,6 +391,9 @@ pub(super) fn dispatch(shared: &Shared, method: &str, req: &Request) -> ApiResul
         "agent.grant_answer" => parsed(req).and_then(|p| answer(shared, p)),
         "agent.grant_revoke" => parsed(req).and_then(|p| revoke(shared, p)),
         "agent.grant_check" => parsed(req).map(|p| check(shared, &p)),
+        "agent.grant_add_worktree_space" => {
+            parsed(req).and_then(|p| add_worktree_space(shared, &p))
+        }
         "agent.grants" => {
             shared.prune_grants();
             Ok(json!(shared.grants_snapshot()))
@@ -222,6 +452,7 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
             answer: tx,
             spaces: ids,
             max_agents: p.max_agents,
+            worktrees: p.worktrees,
         },
     );
     let sent = shared.publish_to_apps(&Event::AgentGrantRequested {
@@ -232,6 +463,7 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         spaces,
         tools: tools.clone(),
         max_agents: p.max_agents,
+        worktrees: p.worktrees,
         duration_s,
         wait_ms,
     });
@@ -261,15 +493,17 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
         spaces: n.spaces,
         tools,
         max_agents: n.max_agents,
+        // Both the lead and the user said yes to it: an answer cannot add it (see `answer`).
+        worktrees: p.worktrees && n.worktrees,
         expires_at: now_millis() + duration_s * 1000,
     };
     let info = shared.grant_info(&grant);
-    {
-        let mut active = lock(&shared.confirms.grants.active);
+    // A grant this one replaces counts as revoked (ADR 0018 amendment, #1448).
+    shared.change_grants(GrantEndReason::Revoked, |active| {
         active.retain(|g| g.lead != grant.lead);
         active.push(grant);
-    }
-    shared.publish_grants();
+        ((), true)
+    })?;
     Ok(json!(GrantResult {
         granted: true,
         reason,
@@ -277,8 +511,9 @@ fn request(shared: &Shared, p: AgentGrantRequest) -> ApiResult {
     }))
 }
 
-/// `agent.grant_answer`: the user's answer. A yes can only narrow what was asked; an answer that
-/// widens it is `invalid_params` and leaves the request open. A settled id is `not_found`.
+/// `agent.grant_answer`: the user's answer. A yes can only narrow what was asked (fewer spaces, a
+/// lower limit, no worktree starts); an answer that widens it is `invalid_params` and leaves the
+/// request open. A settled id is `not_found`.
 fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
     let mut asks = lock(&shared.confirms.grants.asks);
     let Some(ask) = asks.get(&p.id) else {
@@ -301,7 +536,21 @@ fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
         if max_agents == 0 || max_agents > ask.max_agents {
             return Err(invalid("`max_agents` can only be lowered, and not to 0"));
         }
-        Some(Narrowed { spaces, max_agents })
+        let worktrees = match p.worktrees {
+            None => ask.worktrees,
+            Some(false) => false,
+            Some(true) if ask.worktrees => true,
+            Some(true) => {
+                return Err(invalid(
+                    "`worktrees` was not asked for: an answer can only turn it off",
+                ));
+            }
+        };
+        Some(Narrowed {
+            spaces,
+            max_agents,
+            worktrees,
+        })
     } else {
         None
     };
@@ -314,24 +563,86 @@ fn answer(shared: &Shared, p: AgentGrantAnswer) -> ApiResult {
 /// `agent.grant_revoke`: by id, or the grant of the caller's terminal. Ends no terminal and sends
 /// no input: running agents are left alone (ADR 0018).
 fn revoke(shared: &Shared, p: AgentGrantRevoke) -> ApiResult {
-    let removed = {
-        let mut active = lock(&shared.confirms.grants.active);
+    if p.id.is_none() && p.caller_terminal_id.is_none() {
+        return Err(invalid("`id` or `caller_terminal_id` is required"));
+    }
+    let removed = shared.change_grants(GrantEndReason::Revoked, |active| {
         let before = active.len();
         match (&p.id, &p.caller_terminal_id) {
             (Some(id), _) => active.retain(|g| g.id != *id),
-            (None, Some(lead)) => active.retain(|g| g.lead != *lead),
-            (None, None) => return Err(invalid("`id` or `caller_terminal_id` is required")),
+            (_, lead) => active.retain(|g| Some(&g.lead) != lead.as_ref()),
         }
-        before - active.len()
-    };
-    if removed > 0 {
-        shared.publish_grants();
-    }
+        let removed = before - active.len();
+        (removed, removed > 0)
+    })?;
     Ok(json!({ "revoked": removed > 0 }))
 }
 
+/// `agent.grant_add_worktree_space` (#1452): adds the space made on a new worktree to the caller's
+/// grant, by its id. Refused (`invalid_params`, nothing changed) unless the directory of `space_id`
+/// is the top of a linked worktree of the source space's repository and the grant is live, the
+/// caller's, has `worktrees` and `start_agent`, and contains the source space. The checks of the
+/// grant, the add and its write to `server.json` happen in one `change_grants` (then
+/// `agent.grants_changed`), so a grant revoked or pruned in between, or a server that is shutting
+/// down, refuses the add and the grant is never re-created.
+fn add_worktree_space(shared: &Shared, p: &AgentGrantAddWorktreeSpace) -> ApiResult {
+    let refuse = |why: String| Err(invalid(format!("refused: {why}")));
+    let dir_of = |id: &str| shared.space_of(id).map(|s| s.path.unwrap_or_default());
+    let Some(source) = dir_of(&p.source_space_id) else {
+        return Err(not_found("space", &p.source_space_id));
+    };
+    let Some(target) = dir_of(&p.space_id) else {
+        return Err(not_found("space", &p.space_id));
+    };
+    // git runs outside the grant lock; the directories of spaces do not change.
+    if source.is_empty()
+        || target.is_empty()
+        || !poimen_core::git::is_linked_worktree_of(&target, &source)
+    {
+        return refuse(format!(
+            "space {} is not a linked worktree of the repository of space {}",
+            p.space_id, p.source_space_id
+        ));
+    }
+    // `change_grants` holds the state lock, so whether the lead runs is read first; a lead that is
+    // gone refuses inside, after the shutdown check.
+    let alive = shared.terminal_alive(&p.caller_terminal_id);
+    let now = now_millis();
+    // An add removes no grant, so the end reason is never used.
+    let added = shared.change_grants(GrantEndReason::Revoked, |active| {
+        let Some(g) = active.iter_mut().find(|g| {
+            alive && g.id == p.grant && g.lead == p.caller_terminal_id && g.expires_at > now
+        }) else {
+            return (
+                Err(format!("no live grant {} of this terminal", p.grant)),
+                false,
+            );
+        };
+        if !g.worktrees || !g.tools.contains(&AgentWriteAction::StartAgent) {
+            let why = format!("grant {} does not cover worktree starts", p.grant);
+            return (Err(why), false);
+        }
+        if !g.spaces.contains(&p.source_space_id) {
+            let why = format!("space {} is not in grant {}", p.source_space_id, p.grant);
+            return (Err(why), false);
+        }
+        if g.spaces.contains(&p.space_id) {
+            return (Ok(()), false);
+        }
+        g.spaces.push(p.space_id.clone());
+        (Ok(()), true)
+    })?;
+    match added {
+        Ok(()) => Ok(json!({ "added": true })),
+        Err(why) => refuse(why),
+    }
+}
+
 /// `agent.grant_check`: `covered` when a live grant of the caller covers the write, `refused`
-/// when one does but the limit of parallel agents is reached, else `needs_confirmation`.
+/// when one does but the limit of parallel agents is reached. Else, for the `grant` the caller's
+/// lead run records (#1454): `ended` when it ended for a known reason, `lost` when the server
+/// knows nothing of it (neither active, of any lead, nor ended); without one
+/// `needs_confirmation`. The recorded id only ever turns a question into a refusal.
 fn check(shared: &Shared, p: &AgentGrantCheck) -> Value {
     shared.prune_grants();
     let found = lock(&shared.confirms.grants.active)
@@ -340,10 +651,31 @@ fn check(shared: &Shared, p: &AgentGrantCheck) -> Value {
             g.lead == p.caller_terminal_id
                 && g.tools.contains(&p.action)
                 && g.spaces.contains(&p.space_id)
+                // A worktree start reaches a new directory: only a grant the user let cover
+                // worktree starts covers it, and only as a `start_agent` (#1452).
+                && (!p.worktree || (g.worktrees && p.action == AgentWriteAction::StartAgent))
         })
         .cloned();
     let verdict = match found {
-        None => GrantVerdict::NeedsConfirmation,
+        None => match p.grant.as_deref().filter(|g| !g.is_empty()) {
+            None => GrantVerdict::NeedsConfirmation,
+            Some(id)
+                if lock(&shared.confirms.grants.active)
+                    .iter()
+                    .any(|g| g.id == id) =>
+            {
+                GrantVerdict::NeedsConfirmation
+            }
+            Some(id) => match shared.ended_reason(id) {
+                Some(reason) => GrantVerdict::Ended {
+                    grant: id.to_owned(),
+                    reason,
+                },
+                None => GrantVerdict::Lost {
+                    grant: id.to_owned(),
+                },
+            },
+        },
         Some(g) => {
             let running = shared.running_agents(&g.lead);
             if p.action == AgentWriteAction::StartAgent && running >= g.max_agents {

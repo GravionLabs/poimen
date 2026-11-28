@@ -18,8 +18,11 @@
       <li class="grant">
         <span class="text">
           <span class="message"
-            >{{ grant.leadName }} may write in {{ spaceNames(grant.spaces) }}</span
-          >
+            >{{ grant.leadName }} may write in {{ spaceNames(grant.spaces) }}
+            @if (grant.worktrees) {
+              and start agents in new worktrees of them
+            }
+          </span>
           <span class="meta">
             {{ grant.running }} of {{ grant.maxAgents }} agents running, until
             {{ timeOf(grant.expiresAt) }}

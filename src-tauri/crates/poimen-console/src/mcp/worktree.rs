@@ -72,11 +72,14 @@ pub(super) struct WorktreeSpace {
 
 /// Creates or reuses the worktree of `spec` for the repository of `repo_dir` (the rules of
 /// `task_worktree`; an existing worktree of the branch is returned as is) and a space on it.
+/// `before_space` sees the worktree path and whether this call created it before the space is
+/// made; its error makes no space.
 pub(super) fn make_worktree_space(
     client: &Client,
     env: &Env,
     repo_dir: &str,
     spec: &WorktreeSpec,
+    before_space: impl FnOnce(&str, bool) -> Result<(), Fail>,
 ) -> Result<WorktreeSpace, Fail> {
     let (path, branch, created) = match spec {
         WorktreeSpec::Issue { nr, title, mode } => {
@@ -106,6 +109,7 @@ pub(super) fn make_worktree_space(
             (wt.path, wt.branch, wt.created)
         }
     };
+    before_space(&path, created)?;
     let name = Path::new(&path)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -117,4 +121,23 @@ pub(super) fn make_worktree_space(
         branch,
         created,
     })
+}
+
+/// Whether a covered start may reuse the existing worktree at `path` without a question (#1452):
+/// only when spaces are open on it and every one of them is already in the caller's grant `grant`
+/// (a lead starting again in its own worker's worktree). A worktree with no space, or with a
+/// space the user opened, is not a new worktree of the grant: the start asks per call.
+pub(super) fn reuse_is_covered(client: &Client, grant: &str, path: &str) -> bool {
+    let same = |a: &str| match (std::fs::canonicalize(a), std::fs::canonicalize(path)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == path,
+    };
+    let (Ok(spaces), Ok(grants)) = (client.list_spaces(), client.agent_grants()) else {
+        return false;
+    };
+    let Some(granted) = grants.grants.into_iter().find(|g| g.id == grant) else {
+        return false;
+    };
+    let mut on_dir = spaces.iter().filter(|s| same(&s.cwd)).peekable();
+    on_dir.peek().is_some() && on_dir.all(|s| granted.spaces.iter().any(|g| g.id == s.id))
 }

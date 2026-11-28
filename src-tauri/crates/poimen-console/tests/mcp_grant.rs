@@ -157,6 +157,7 @@ fn yes() -> AgentGrantAnswer {
         approve: true,
         spaces: None,
         max_agents: None,
+        worktrees: None,
     }
 }
 
@@ -385,6 +386,7 @@ fn an_expired_grant_is_gone_and_asks_again() {
                 spaces: vec![f.api.clone()],
                 tools: vec![AgentWriteAction::StartShell],
                 max_agents: 1,
+                worktrees: false,
                 duration_s: Some(1),
                 wait_ms: None,
             },
@@ -430,6 +432,7 @@ fn the_user_can_narrow_but_not_widen() {
                     approve: true,
                     spaces: Some(vec![api.clone(), "s-unasked".into()]),
                     max_agents: None,
+                    worktrees: None,
                 });
                 assert!(wider.is_err(), "a space that was not asked for");
                 let higher = client.answer_agent_grant(&AgentGrantAnswer {
@@ -437,6 +440,7 @@ fn the_user_can_narrow_but_not_widen() {
                     approve: true,
                     spaces: None,
                     max_agents: Some(9),
+                    worktrees: None,
                 });
                 assert!(higher.is_err(), "a higher limit");
                 client
@@ -445,6 +449,7 @@ fn the_user_can_narrow_but_not_widen() {
                         approve: true,
                         spaces: Some(vec![api]),
                         max_agents: Some(1),
+                        worktrees: None,
                     })
                     .unwrap();
                 return web;
@@ -519,6 +524,7 @@ fn without_an_app_there_is_no_grant() {
                 spaces: vec![f.api.clone()],
                 tools: vec![AgentWriteAction::StartShell],
                 max_agents: 1,
+                worktrees: false,
                 duration_s: None,
                 wait_ms: None,
             },
@@ -537,4 +543,99 @@ fn without_an_app_there_is_no_grant() {
         WAIT,
     );
     assert_eq!(r["isError"], true, "an unknown space id is an error: {r}");
+}
+
+/// `request_grant` with `worktrees`, answered by the app with `answer`; the event the app saw and
+/// the tool result.
+fn ask_worktrees(f: &Fixture, worktrees: Option<bool>, answer: AgentGrantAnswer) -> (Event, Value) {
+    let asked = answer_grant(f, app(&f.client), answer);
+    let mut args =
+        json!({"plan": "p", "spaces": [f.api], "tools": ["start_agent"], "max_agents": 2});
+    if let Some(w) = worktrees {
+        args["worktrees"] = json!(w);
+    }
+    let r = call(f, &f.lead, "request_grant", args, WAIT);
+    (asked.join().unwrap(), r)
+}
+
+fn requested_worktrees(e: &Event) -> bool {
+    let Event::AgentGrantRequested { worktrees, .. } = e else {
+        panic!("not a grant request: {e:?}");
+    };
+    *worktrees
+}
+
+#[test]
+fn a_request_shows_worktrees_and_the_user_can_turn_them_off() {
+    let f = fixture("worktrees-off");
+    let (e, r) = ask_worktrees(&f, Some(true), yes());
+    assert!(requested_worktrees(&e));
+    assert_eq!(r["structuredContent"]["grant"]["worktrees"], true, "{r}");
+
+    let off = AgentGrantAnswer {
+        worktrees: Some(false),
+        ..yes()
+    };
+    let (e, r) = ask_worktrees(&f, Some(true), off);
+    assert!(requested_worktrees(&e));
+    assert_eq!(r["structuredContent"]["granted"], true, "{r}");
+    assert_eq!(r["structuredContent"]["grant"]["worktrees"], false, "{r}");
+    assert!(!f.client.agent_grants().unwrap().grants[0].worktrees);
+
+    // Not asked: the request says so, and a bad value is refused before anything is asked.
+    let (e, r) = ask_worktrees(&f, None, yes());
+    assert!(!requested_worktrees(&e));
+    assert_eq!(r["structuredContent"]["grant"]["worktrees"], false, "{r}");
+    let r = call(
+        &f,
+        &f.lead,
+        "request_grant",
+        json!({"plan": "p", "spaces": [f.api], "tools": ["start_agent"], "max_agents": 1,
+               "worktrees": "yes"}),
+        WAIT,
+    );
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(text(&r).contains("worktrees"), "{r}");
+}
+
+#[test]
+fn an_answer_cannot_add_worktrees_that_were_not_asked() {
+    let f = fixture("worktrees-unasked");
+    let rx = app(&f.client);
+    let client = f.client.clone();
+    let answered = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let e = rx
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("the request");
+            if let Event::AgentGrantRequested { ref id, .. } = e {
+                let wider = client.answer_agent_grant(&AgentGrantAnswer {
+                    id: id.clone(),
+                    worktrees: Some(true),
+                    ..yes()
+                });
+                assert!(wider.is_err(), "worktrees that were not asked for");
+                client
+                    .answer_agent_grant(&AgentGrantAnswer {
+                        id: id.clone(),
+                        ..yes()
+                    })
+                    .unwrap();
+                return e;
+            }
+        }
+    });
+    let r = call(
+        &f,
+        &f.lead,
+        "request_grant",
+        json!({"plan": "p", "spaces": [f.api], "tools": ["start_agent"], "max_agents": 1,
+               "worktrees": false}),
+        WAIT,
+    );
+    assert!(!requested_worktrees(&answered.join().unwrap()));
+    assert_eq!(r["structuredContent"]["granted"], true, "{r}");
+    assert_eq!(r["structuredContent"]["grant"]["worktrees"], false, "{r}");
+    assert!(!f.client.agent_grants().unwrap().grants[0].worktrees);
 }

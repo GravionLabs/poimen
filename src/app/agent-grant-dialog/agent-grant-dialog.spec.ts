@@ -39,6 +39,7 @@ const request: GrantRequest = {
   ],
   tools: ["start_agent", "prompt_agent"],
   maxAgents: 3,
+  worktrees: false,
   durationS: 28800,
 };
 
@@ -68,7 +69,27 @@ describe("AgentGrantDialog", () => {
   it("allows the whole plan as asked", () => {
     const { root, grants } = setup(request);
     root.querySelector<HTMLButtonElement>(".allow")!.click();
-    expect(grants.answer).toHaveBeenCalledWith(true, undefined, undefined);
+    expect(grants.answer).toHaveBeenCalledWith(true, undefined, undefined, undefined);
+  });
+
+  it("shows the worktree line only when the lead asked for it", () => {
+    expect(setup(request).root.querySelector(".worktrees")).toBeNull();
+    const { root } = setup({ ...request, worktrees: true });
+    const line = root.querySelector(".worktrees");
+    expect(line?.textContent).toContain("May start agents in new worktrees of these repositories");
+    expect(line?.querySelector<HTMLInputElement>("input")?.checked).toBe(true);
+    expect(root.querySelector(".worktrees-hint")?.textContent).toContain("not how many worktrees");
+  });
+
+  it("allows worktrees as asked, and unchecking them sends worktrees: false", () => {
+    const { root, grants, fixture } = setup({ ...request, worktrees: true });
+    root.querySelector<HTMLButtonElement>(".allow")!.click();
+    expect(grants.answer).toHaveBeenLastCalledWith(true, undefined, undefined, undefined);
+    root.querySelector<HTMLInputElement>(".worktrees input")!.click();
+    fixture.detectChanges();
+    expect(root.querySelector<HTMLInputElement>(".worktrees input")!.checked).toBe(false);
+    root.querySelector<HTMLButtonElement>(".allow")!.click();
+    expect(grants.answer).toHaveBeenLastCalledWith(true, undefined, undefined, false);
   });
 
   it("narrows: a space left out and a lower limit, never a higher one", () => {
@@ -79,12 +100,12 @@ describe("AgentGrantDialog", () => {
     limit.dispatchEvent(new Event("input"));
     fixture.detectChanges();
     root.querySelector<HTMLButtonElement>(".allow")!.click();
-    expect(grants.answer).toHaveBeenLastCalledWith(true, ["s1"], 2);
+    expect(grants.answer).toHaveBeenLastCalledWith(true, ["s1"], 2, undefined);
     limit.value = "9";
     limit.dispatchEvent(new Event("input"));
     fixture.detectChanges();
     root.querySelector<HTMLButtonElement>(".allow")!.click();
-    expect(grants.answer).toHaveBeenLastCalledWith(true, ["s1"], undefined);
+    expect(grants.answer).toHaveBeenLastCalledWith(true, ["s1"], undefined, undefined);
   });
 
   it("cannot allow with no space left", () => {
